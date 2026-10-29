@@ -1,0 +1,374 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------------------
+// USER & RBAC
+// -----------------------------------------------------------------------------
+enum Role {
+  ADMIN
+  BDM
+  ACCOUNTS
+  LEGAL
+  OPERATIONS
+  RM
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  fullName     String
+  role         Role
+  phone        String?
+  salesTarget  Decimal  @default(500000.00) @db.Decimal(12, 2)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  dealsCreated      Deal[]        @relation("BdmDeals")
+  coBdmDeals        Deal[]        @relation("DealCoBdms")
+  dealsAccounts     Deal[]        @relation("AccountsVerifiedDeals")
+  dealsLegal        Deal[]        @relation("LegalVerifiedDeals")
+  assignedAccountsDeals Deal[]    @relation("AssignedAccountsDeals")
+  assignedLegalDeals    Deal[]    @relation("AssignedLegalDeals")
+  assignedOpsDeals      Deal[]    @relation("AssignedOpsDeals")
+  assignedServices  DealService[] @relation("AssignedOpsServices")
+  paymentsVerified  Payment[]     @relation("AccountsVerifiedPayments")
+  documentsUploaded Document[]    @relation("UserDocuments")
+  auditLogs         AuditLog[]
+  renewalsAssigned  RenewalReminder[] @relation("RmRenewals")
+
+  @@map("users")
+}
+
+// -----------------------------------------------------------------------------
+// CLIENT & DIRECTORS (Entity Info)
+// -----------------------------------------------------------------------------
+model Client {
+  id             String    @id @default(uuid())
+  companyName    String
+  clientName     String    // Primary Contact Person
+  email          String
+  phone          String
+  gstStatus      Boolean   @default(false) // GST / Non-GST applicable
+  gstin          String?
+  panNumber      String?
+  billingAddress String?
+  state          String?
+  city           String?
+  pincode        String?
+  consultantName String?   // CA / Consultant Name
+  industry       String?   // Industry
+  sector         String?   // Sector
+  companyPanUrl  String?   // Company PAN Image URL / Path
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  directors      Director[]
+  deals          Deal[]
+  renewals       RenewalReminder[]
+
+  @@map("clients")
+}
+
+model Director {
+  id        String   @id @default(uuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name      String
+  din       String?  // Director Identification Number
+  pan       String?
+  email     String?
+  phone     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("directors")
+}
+
+// -----------------------------------------------------------------------------
+// 9-STAGE DEAL WORKFLOW
+// -----------------------------------------------------------------------------
+enum DealStage {
+  STAGE_01_PAYMENT_RECEIVED
+  STAGE_02_DOCUMENTS_COLLECTED
+  STAGE_03_BDM_HANDOVER_PENDING
+  STAGE_04_ACCOUNTS_VERIFICATION
+  STAGE_04_ACCOUNTS_REJECTED
+  STAGE_05_LEGAL_VERIFICATION
+  STAGE_05_LEGAL_REJECTED
+  STAGE_06_OPERATIONS_PROCESSING
+  STAGE_07_SERVICE_COMPLETED
+  STAGE_08_FINAL_DOCS_DELIVERED
+  STAGE_09_RM_HANDOVER
+  CLOSED
+}
+
+enum PaymentType {
+  FULL_PAYMENT
+  PART_PAYMENT
+}
+
+model Deal {
+  id          String    @id @default(uuid())
+  dealCode    String    @unique // e.g. CM-2026-0001
+  clientId    String
+  client      Client    @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  bdmId       String
+  bdm         User      @relation("BdmDeals", fields: [bdmId], references: [id], onDelete: Restrict)
+  coBdms      User[]    @relation("DealCoBdms")
+
+  // Current State Machine Position
+  stage       DealStage @default(STAGE_01_PAYMENT_RECEIVED)
+
+  // Financial Summary
+  standardAmount Decimal  @default(0.00) @db.Decimal(12, 2)
+  totalAmount   Decimal   @db.Decimal(12, 2)
+  amountReceived Decimal  @default(0.00) @db.Decimal(12, 2)
+  pendingAmount  Decimal  @default(0.00) @db.Decimal(12, 2)
+  paymentType   PaymentType @default(FULL_PAYMENT)
+  receivingAccount String?  // Corporatemart private limited | Corporatemart Services | Tendermart private limited
+
+  // Stage 03 Gate Control
+  isBdmEntryComplete Boolean @default(false)
+  bdmHandoverAt      DateTime?
+
+  // Executive Assignments (Option 1: Claim or Manager Assignment)
+  assignedAccountsUserId String?
+  assignedAccountsUser   User?     @relation("AssignedAccountsDeals", fields: [assignedAccountsUserId], references: [id])
+
+  assignedLegalUserId    String?
+  assignedLegalUser      User?     @relation("AssignedLegalDeals", fields: [assignedLegalUserId], references: [id])
+
+  assignedOpsUserId      String?
+  assignedOpsUser        User?     @relation("AssignedOpsDeals", fields: [assignedOpsUserId], references: [id])
+
+  // Stage 04: Accounts Verification Gate
+  isAccountsVerified  Boolean   @default(false)
+  accountsVerifiedAt  DateTime?
+  accountsVerifiedById String?
+  accountsVerifiedBy  User?     @relation("AccountsVerifiedDeals", fields: [accountsVerifiedById], references: [id])
+  accountsNotes       String?   // Remarks or discrepancy reason
+
+  // Stage 05: Legal Verification Gate
+  isLegalVerified     Boolean   @default(false)
+  legalVerifiedAt     DateTime?
+  legalVerifiedById   String?
+  legalVerifiedBy     User?     @relation("LegalVerifiedDeals", fields: [legalVerifiedById], references: [id])
+  legalNotes          String?   // Remarks or deficiency reason
+  legalAgreementUrl   String?   // Legal Agreement made by Legal dept to be emailed upon handover
+
+  // Stage 06: Operations
+  operationsStartedAt DateTime?
+
+  // Stage 07: Service Completion
+  serviceCompletedAt  DateTime?
+  serviceOutcomeNotes String?
+
+  // Stage 08: Final Deliverable Delivery
+  finalDocsDeliveredAt DateTime?
+  finalDeliveryProof   String?  // Courier AWB, email dispatch ID, or client acknowledgment link
+
+  // Stage 09: RM Handover & Closure
+  rmHandoverAt        DateTime?
+  rmHandoverNotes     String?
+  closedAt            DateTime?
+
+  // Rejection / Query tracker
+  currentDiscrepancy  String?
+  remarks             String?   // Remarks / instructions from BDM
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Child Relations
+  services  DealService[]
+  payments  Payment[]
+  documents Document[]
+  renewals  RenewalReminder[]
+  auditLogs AuditLog[]
+
+  @@map("deals")
+}
+
+// -----------------------------------------------------------------------------
+// SERVICES SCOPE (Multi-service per Deal)
+// -----------------------------------------------------------------------------
+enum ServiceStatus {
+  PENDING
+  ASSIGNED
+  IN_PROGRESS
+  GOVT_SUBMITTED
+  QUERY_RAISED
+  APPROVED
+  COMPLETED
+}
+
+model DealService {
+  id                   String        @id @default(uuid())
+  dealId               String
+  deal                 Deal          @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  serviceName          String        // e.g., "Pvt Ltd Incorporation", "GST Registration", "Trademark Filing"
+  standardAmount       Decimal?      @db.Decimal(12, 2)
+  serviceFee           Decimal       @db.Decimal(12, 2) // Deal Amount
+  govtFee              Decimal?      @db.Decimal(12, 2)
+  status               ServiceStatus @default(PENDING)
+  
+  assignedOpsUserId    String?
+  assignedOpsUser      User?         @relation("AssignedOpsServices", fields: [assignedOpsUserId], references: [id])
+
+  govApplicationNumber String?       // SRN, Challan No, Application ID
+  targetCompletionDate DateTime?
+  completedAt          DateTime?
+  notes                String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("deal_services")
+}
+
+// -----------------------------------------------------------------------------
+// PAYMENTS & TRANCHES
+// -----------------------------------------------------------------------------
+enum PaymentMode {
+  UPI
+  NEFT_RTGS
+  NET_BANKING
+  CREDIT_DEBIT_CARD
+  CHEQUE
+  CASH
+  PAYMENT_GATEWAY
+}
+
+enum PaymentStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  REJECTED
+}
+
+model Payment {
+  id                   String        @id @default(uuid())
+  dealId               String
+  deal                 Deal          @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  trancheNumber        Int           @default(1) // 1 = initial payment, 2+ = part-payment balance
+  amount               Decimal       @db.Decimal(12, 2)
+  paymentDate          DateTime
+  paymentMode          PaymentMode
+  transactionReference String        // UTR or Txn Ref
+  paymentProofUrl      String?       // Uploaded screenshot / receipt URL (optional for CASH)
+  accountName          String?       // Corporatemart private limited | Corporatemart Services | Tendermart private limited
+  cashCollectorName    String?       // Full name of person who received cash (for CASH mode)
+  status               PaymentStatus @default(PENDING_VERIFICATION)
+  remarks              String?       // Payment remarks / notes from BDM or payer
+  
+  verifiedById         String?
+  verifiedBy           User?         @relation("AccountsVerifiedPayments", fields: [verifiedById], references: [id])
+  verifiedAt           DateTime?
+  verificationNotes    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("payments")
+}
+
+// -----------------------------------------------------------------------------
+// DOCUMENTS VAULT
+// -----------------------------------------------------------------------------
+enum DocumentType {
+  PAYMENT_PROOF
+  KYC_PAN
+  COMPANY_PAN
+  KYC_AADHAAR
+  ADDRESS_PROOF
+  INCORPORATION_FORM
+  BOARD_RESOLUTION
+  DSC_TOKEN
+  LEGAL_AGREEMENT
+  FINAL_DELIVERABLE_CERTIFICATE
+  OTHER
+}
+
+model Document {
+  id               String       @id @default(uuid())
+  dealId           String
+  deal             Deal         @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  title            String
+  documentType     DocumentType
+  fileUrl          String
+  fileName         String
+  fileSize         Int?
+  mimeType         String?
+  
+  uploadedByUserId String
+  uploadedByUser   User         @relation("UserDocuments", fields: [uploadedByUserId], references: [id])
+
+  isVerified       Boolean      @default(false)
+  verifiedByRole   Role?
+  deficiencyNotes  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("documents")
+}
+
+// -----------------------------------------------------------------------------
+// STAGE 09: RENEWALS & FOLLOW-UP (RM Success)
+// -----------------------------------------------------------------------------
+enum RenewalStatus {
+  UPCOMING
+  NOTIFIED
+  CONVERTED
+  LAPSED
+}
+
+model RenewalReminder {
+  id          String        @id @default(uuid())
+  dealId      String
+  deal        Deal          @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  clientId    String
+  client      Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  serviceName String        // e.g., "Annual ROC Filing", "GST Monthly Filing", "Trademark Renewal"
+  dueDate     DateTime
+  remindAt    DateTime
+  status      RenewalStatus @default(UPCOMING)
+  
+  assignedRmId String?
+  assignedRm   User?        @relation("RmRenewals", fields: [assignedRmId], references: [id])
+
+  notes       String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@map("renewal_reminders")
+}
+
+// -----------------------------------------------------------------------------
+// AUDIT LOG (Immutable History of every stage transition & action)
+// -----------------------------------------------------------------------------
+model AuditLog {
+  id        String     @id @default(uuid())
+  dealId    String?
+  deal      Deal?      @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  userId    String?
+  user      User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String     // e.g. "STAGE_CHANGED", "PAYMENT_APPROVED", "LEGAL_REJECTED", "DELIVERY_RECORDED"
+  fromStage DealStage?
+  toStage   DealStage?
+  remarks   String?
+  createdAt DateTime   @default(now())
+
+  @@map("audit_logs")
+}
