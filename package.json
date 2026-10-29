@@ -7,6 +7,7 @@
     "server": "node src/server.js",
     "client": "npm --prefix client run dev",
     "build": "npm --prefix client run build",
+    "postinstall": "npm --prefix client install",
     "desktop": "electron electron/main.js",
     "dev": "concurrently -k \"node src/server.js\" \"npm --prefix client run dev\"",
     "db:push": "prisma db push",
