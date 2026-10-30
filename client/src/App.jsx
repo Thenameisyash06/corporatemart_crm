@@ -9,6 +9,7 @@ import AccountsWorkbench from './components/AccountsWorkbench';
 import LegalWorkbench from './components/LegalWorkbench';
 import OperationsWorkbench from './components/OperationsWorkbench';
 import RmWorkbench from './components/RmWorkbench';
+import AdminDashboard from './components/AdminDashboard';
 import api from './lib/api';
 import {
   Plus,
@@ -20,6 +21,7 @@ import {
   Send,
   Lock,
   Building2,
+  ShieldCheck,
 } from 'lucide-react';
 
 export default function App() {
@@ -67,7 +69,8 @@ export default function App() {
   }, []);
 
   const setDefaultTabForRole = (role) => {
-    if (role === 'ACCOUNTS') setActiveTab('accounts');
+    if (role === 'ADMIN') setActiveTab('admin');
+    else if (role === 'ACCOUNTS') setActiveTab('accounts');
     else if (role === 'LEGAL') setActiveTab('legal');
     else if (role === 'OPERATIONS') setActiveTab('operations');
     else if (role === 'RM') setActiveTab('rm');
@@ -154,6 +157,7 @@ export default function App() {
 
     if (role === 'ADMIN') {
       return [
+        { id: 'admin', label: 'Admin Command Center', icon: ShieldCheck },
         { id: 'pipeline', label: 'Master Pipeline', icon: Layers, badge: stats?.counts?.totalDeals },
         { id: 'accounts', label: 'Accounts Desk', icon: CreditCard, badge: stats?.counts?.pendingAccounts },
         { id: 'legal', label: 'Legal Scrutiny', icon: Scale, badge: stats?.counts?.pendingLegal },
@@ -339,6 +343,16 @@ export default function App() {
             </button>
           )}
         </div>
+
+        {/* 0. ADMIN COMMAND CENTER */}
+        {activeTab === 'admin' && currentUser?.role === 'ADMIN' && (
+          <AdminDashboard
+            onOpenDossier={(id) => setSelectedDealId(id)}
+            onRefreshParent={fetchData}
+            initialDeals={deals}
+            initialStats={stats}
+          />
+        )}
 
         {/* 1. MASTER / MY DEALS PIPELINE VIEW */}
         {activeTab === 'pipeline' && (
