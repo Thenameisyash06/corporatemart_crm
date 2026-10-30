@@ -421,7 +421,7 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
 
                 <div className="flex items-center space-x-2">
                   {/* Claim button if unassigned or assigned to someone else */}
-                  {selectedDeal.assignedAccountsUserId !== currentUser?.id && (
+                  {currentUser?.role === 'ACCOUNTS' && selectedDeal.assignedAccountsUserId !== currentUser?.id && (
                     <button
                       onClick={() => handleAssignDeal(currentUser?.id)}
                       disabled={actionLoading}

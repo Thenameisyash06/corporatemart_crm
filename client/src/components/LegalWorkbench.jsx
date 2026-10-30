@@ -421,7 +421,7 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
                 </div>
 
                 <div className="flex items-center space-x-2">
-                  {selectedDeal.assignedLegalUserId !== currentUser?.id && (
+                  {currentUser?.role === 'LEGAL' && selectedDeal.assignedLegalUserId !== currentUser?.id && (
                     <button
                       onClick={() => handleAssignDeal(currentUser?.id)}
                       disabled={actionLoading}

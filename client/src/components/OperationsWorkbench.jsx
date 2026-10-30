@@ -296,7 +296,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
                 <div className="flex items-center space-x-2">
                   {/* Claim button if unassigned or assigned to someone else */}
-                  {selectedDeal.assignedOpsUserId !== currentUser?.id && (
+                  {currentUser?.role === 'OPERATIONS' && selectedDeal.assignedOpsUserId !== currentUser?.id && (
                     <button
                       onClick={() => handleAssignDeal(currentUser?.id)}
                       disabled={actionLoading}
