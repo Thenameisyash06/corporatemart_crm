@@ -140,13 +140,52 @@ function buildOverviewFromDeals(deals = [], users = [], stats = null) {
       totalVerifiedAmount: 0,
     });
   });
+
   deals.forEach((d) => {
+    const accId = d.assignedAccountsUserId || d.accountsVerifiedById;
+    if (accId && !accountsMap.has(accId)) {
+      accountsMap.set(accId, {
+        id: accId,
+        fullName: d.assignedAccountsUser?.fullName || d.accountsVerifiedBy?.fullName || 'Accounts Executive',
+        email: d.assignedAccountsUser?.email || '',
+        phone: '',
+        assignedDealsCount: 0,
+        dealsVerifiedCount: 0,
+        paymentsVerifiedCount: 0,
+        totalVerifiedAmount: 0,
+      });
+    }
+
     if (d.assignedAccountsUserId && accountsMap.has(d.assignedAccountsUserId)) {
       accountsMap.get(d.assignedAccountsUserId).assignedDealsCount += 1;
     }
     if (d.isAccountsVerified && d.accountsVerifiedById && accountsMap.has(d.accountsVerifiedById)) {
       accountsMap.get(d.accountsVerifiedById).dealsVerifiedCount += 1;
     }
+
+    // Tally all verified payments
+    (d.payments || []).forEach((p) => {
+      if (p.status === 'VERIFIED') {
+        const verifierId = p.verifiedById || d.accountsVerifiedById || d.assignedAccountsUserId;
+        if (verifierId) {
+          if (!accountsMap.has(verifierId)) {
+            accountsMap.set(verifierId, {
+              id: verifierId,
+              fullName: p.verifiedBy?.fullName || d.accountsVerifiedBy?.fullName || d.assignedAccountsUser?.fullName || 'Accounts Executive',
+              email: p.verifiedBy?.email || '',
+              phone: '',
+              assignedDealsCount: 0,
+              dealsVerifiedCount: 0,
+              paymentsVerifiedCount: 0,
+              totalVerifiedAmount: 0,
+            });
+          }
+          const acc = accountsMap.get(verifierId);
+          acc.paymentsVerifiedCount += 1;
+          acc.totalVerifiedAmount += Number(p.amount || 0);
+        }
+      }
+    });
   });
   const accountsPerformance = Array.from(accountsMap.values());
 
