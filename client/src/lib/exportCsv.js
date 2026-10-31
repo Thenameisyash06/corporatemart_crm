@@ -251,3 +251,67 @@ function formatStageName(stage) {
   };
   return stageMap[stage] || stage.replace(/_/g, ' ');
 }
+
+/**
+ * Format Operations services allocation for CSV export
+ */
+export function exportOpsServicesToCsv(services, filename = 'Operations_Services_Allocation_Report.csv') {
+  const headers = [
+    { key: 'dealCode', label: 'Deal Code' },
+    { key: 'companyName', label: 'Client / Company' },
+    { key: 'serviceName', label: 'Service Task' },
+    { key: 'sector', label: 'Expertise Sector' },
+    { key: 'assignedMember', label: 'Assigned Specialist' },
+    { key: 'status', label: 'Milestone Status' },
+    { key: 'govApplicationNumber', label: 'SRN / Govt Application No.' },
+    { key: 'targetCompletionDate', label: 'Target Deadline' },
+    { key: 'deadlineStatus', label: 'Deadline Status' },
+    { key: 'serviceFee', label: 'Service Fee (₹)' },
+  ];
+
+  const rows = services.map((s) => ({
+    dealCode: s.dealCode || 'N/A',
+    companyName: s.companyName || 'N/A',
+    serviceName: s.serviceName || 'N/A',
+    sector: s.sectorName || 'General Operations',
+    assignedMember: s.assignedOpsUser?.fullName || 'Unassigned (In Pool)',
+    status: s.status || 'PENDING',
+    govApplicationNumber: s.govApplicationNumber || 'Not Filed',
+    targetCompletionDate: s.targetCompletionDate ? new Date(s.targetCompletionDate).toLocaleDateString('en-IN') : 'Not Set',
+    deadlineStatus: s.deadlineStatus || 'On Track',
+    serviceFee: Number(s.serviceFee || 0).toLocaleString('en-IN'),
+  }));
+
+  downloadCsv(filename, headers, rows);
+}
+
+/**
+ * Format Operations team workload and capacity for CSV export
+ */
+export function exportOpsTeamWorkloadToCsv(teamList, filename = 'Operations_Team_Capacity_Report.csv') {
+  const headers = [
+    { key: 'fullName', label: 'Team Member' },
+    { key: 'role', label: 'Role / Designation' },
+    { key: 'sector', label: 'Expertise Sector' },
+    { key: 'email', label: 'Email' },
+    { key: 'totalAssigned', label: 'Total Assigned' },
+    { key: 'inProgress', label: 'In Progress' },
+    { key: 'completed', label: 'Completed' },
+    { key: 'overdue', label: 'Overdue Tasks' },
+    { key: 'completionRate', label: 'Completion Rate (%)' },
+  ];
+
+  const rows = teamList.map((m) => ({
+    fullName: m.fullName,
+    role: m.designation || 'Operations Executive',
+    sector: m.sectorName || 'General Operations',
+    email: m.email,
+    totalAssigned: m.totalAssigned || 0,
+    inProgress: m.inProgress || 0,
+    completed: m.completed || 0,
+    overdue: m.overdue || 0,
+    completionRate: `${m.completionRate || 0}%`,
+  }));
+
+  downloadCsv(filename, headers, rows);
+}

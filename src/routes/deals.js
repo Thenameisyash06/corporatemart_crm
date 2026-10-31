@@ -99,7 +99,11 @@ router.get('/', authenticateToken, async (req, res) => {
         assignedOpsUser: {
           select: { id: true, fullName: true, email: true },
         },
-        services: true,
+        services: {
+          include: {
+            assignedOpsUser: { select: { id: true, fullName: true, email: true } },
+          },
+        },
         payments: true,
         documents: true,
       },
@@ -1143,7 +1147,7 @@ router.post(
 // -----------------------------------------------------------------------------
 router.patch('/:id/services/:serviceId', authenticateToken, requireRoles('OPERATIONS', 'ADMIN'), async (req, res) => {
   try {
-    const { assignedOpsUserId, status, govApplicationNumber, notes, completedAt } = req.body;
+    const { assignedOpsUserId, status, govApplicationNumber, notes, completedAt, targetCompletionDate } = req.body;
 
     const updatedService = await prisma.dealService.update({
       where: { id: req.params.serviceId },
@@ -1152,7 +1156,13 @@ router.patch('/:id/services/:serviceId', authenticateToken, requireRoles('OPERAT
         status: status !== undefined ? status : undefined,
         govApplicationNumber: govApplicationNumber !== undefined ? govApplicationNumber : undefined,
         notes: notes !== undefined ? notes : undefined,
+        targetCompletionDate: targetCompletionDate !== undefined ? (targetCompletionDate ? new Date(targetCompletionDate) : null) : undefined,
         completedAt: completedAt ? new Date(completedAt) : undefined,
+      },
+      include: {
+        assignedOpsUser: {
+          select: { id: true, fullName: true, email: true },
+        },
       },
     });
 
