@@ -4,6 +4,7 @@ import {
   LogOut,
   RefreshCw,
   Layers,
+  Users,
 } from 'lucide-react';
 import api from '../lib/api';
 
@@ -87,6 +88,39 @@ export default function Navbar({ currentUser, onUserChange, onRefresh }) {
                 </button>
               );
             })}
+          </div>
+        )}
+
+        
+        {/* Operations Specialist Quick Switcher */}
+        {currentUser?.role === 'OPERATIONS' && (
+          <div className="hidden md:flex items-center bg-indigo-50/80 px-2.5 py-1 rounded-lg border border-indigo-200 gap-2 text-xs">
+            <span className="text-[11px] text-indigo-900 font-bold flex items-center gap-1.5">
+              <Users className="w-3.5 h-3.5 text-indigo-600" /> Specialist:
+            </span>
+            <select
+              value={currentUser?.email}
+              onChange={(e) => {
+                const list = [
+                  { label: 'Vikram Singh (Manager)', email: 'ops@corporatemart.com', pass: 'ops123', role: 'OPERATIONS' },
+                  { label: 'Priya Sharma (ROC & Inc)', email: 'priya.sharma@corporatemart.com', pass: 'ops123', role: 'OPERATIONS' },
+                  { label: 'Amit Patel (Pitch & Valuation)', email: 'amit.patel@corporatemart.com', pass: 'ops123', role: 'OPERATIONS' },
+                  { label: 'Rahul Nair (Tech & Web)', email: 'rahul.nair@corporatemart.com', pass: 'ops123', role: 'OPERATIONS' },
+                  { label: 'Siddharth Rawat (GeM & Tenders)', email: 'siddharth.rawat@corporatemart.com', pass: 'ops123', role: 'OPERATIONS' },
+                  { label: 'Neha Joshi (Certifications)', email: 'ops2@corporatemart.com', pass: 'ops123', role: 'OPERATIONS' },
+                ];
+                const selected = list.find((u) => u.email === e.target.value);
+                if (selected) handleQuickSwitch(selected);
+              }}
+              className="bg-white border border-indigo-200 rounded-md px-2 py-0.5 text-xs font-semibold text-slate-800 focus:outline-none focus:border-indigo-500 shadow-xs"
+            >
+              <option value="ops@corporatemart.com">Vikram Singh (Operations Manager)</option>
+              <option value="priya.sharma@corporatemart.com">Priya Sharma (ROC & Incorporation)</option>
+              <option value="amit.patel@corporatemart.com">Amit Patel (Financial & Pitch)</option>
+              <option value="rahul.nair@corporatemart.com">Rahul Nair (Tech Lead & Full Stack)</option>
+              <option value="siddharth.rawat@corporatemart.com">Siddharth Rawat (GeM & Tenders)</option>
+              <option value="ops2@corporatemart.com">Neha Joshi (Operations Executive)</option>
+            </select>
           </div>
         )}
 

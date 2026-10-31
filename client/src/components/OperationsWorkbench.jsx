@@ -28,6 +28,7 @@ import {
   ChevronRight,
   ExternalLink,
   Briefcase,
+  Plus,
   FileSpreadsheet,
 } from 'lucide-react';
 import api from '../lib/api';
@@ -140,8 +141,25 @@ const MOCK_TEAM_SPECIALISTS = [
 ];
 
 export default function OperationsWorkbench({ currentUser, onRefreshParent, onOpenDossier }) {
-  // Navigation Tabs: 'allocation' (Manager View) | 'team' (Capacity) | 'dossier' (Deal File Desk)
-  const [activeTab, setActiveTab] = useState('allocation');
+  // Role Detection: Manager (Vikram Singh / Admin) vs Execution Specialist (Priya, Amit, Rahul, etc.)
+  const isManager = Boolean(
+    currentUser?.role === 'ADMIN' ||
+    currentUser?.email === 'ops@corporatemart.com' ||
+    (currentUser?.fullName || '').toLowerCase().includes('manager')
+  );
+
+  // Navigation Tabs:
+  // Manager: 'allocation' | 'team' | 'dossier'
+  // Specialist: 'my_tasks' | 'pool' | 'dossier'
+  const [activeTab, setActiveTab] = useState(isManager ? 'allocation' : 'my_tasks');
+
+  useEffect(() => {
+    if (isManager) {
+      if (activeTab === 'my_tasks' || activeTab === 'pool') setActiveTab('allocation');
+    } else {
+      if (activeTab === 'allocation' || activeTab === 'team') setActiveTab('my_tasks');
+    }
+  }, [isManager, currentUser?.id, currentUser?.email]);
 
   const [deals, setDeals] = useState([]);
   const [opsTeam, setOpsTeam] = useState([]);
@@ -172,8 +190,17 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
       setDeals(fetchedDeals);
 
-      // Merge real users with mock specialist pool
-      const combinedTeam = [...fetchedTeam];
+      // Merge real users with mock specialist metadata
+      const combinedTeam = fetchedTeam.map((u) => {
+        const specMeta = MOCK_TEAM_SPECIALISTS.find((s) => s.email === u.email);
+        return {
+          ...u,
+          sectorId: specMeta?.sectorId,
+          designation: specMeta?.designation || (u.role === 'OPERATIONS' ? 'Operations Specialist' : u.role),
+        };
+      });
+
+      // If any specialist is not yet returned in fetchedTeam, add as fallback
       MOCK_TEAM_SPECIALISTS.forEach((spec) => {
         if (!combinedTeam.some((u) => u.email === spec.email || u.id === spec.id)) {
           combinedTeam.push(spec);
@@ -241,6 +268,60 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
     });
     return list;
   }, [deals]);
+
+
+  // Detect specialist's core sector
+  const specialistSector = useMemo(() => {
+    if (isManager) return null;
+    const name = currentUser?.fullName || '';
+    const email = currentUser?.email || '';
+    for (const sector of EXPERTISE_SECTORS) {
+      if (sector.specialists.some((s) => name.toLowerCase().includes(s.toLowerCase().split(' ')[0]) || email.toLowerCase().includes(s.toLowerCase().split(' ')[0]))) {
+        return sector;
+      }
+    }
+    return EXPERTISE_SECTORS[3]; // Default to Incorporation
+  }, [currentUser, isManager]);
+
+  // Specialist's personal assigned services
+  const myServices = useMemo(() => {
+    return allServices.filter(
+      (s) => s.assignedOpsUserId === currentUser?.id || (currentUser?.email && s.assignedOpsUser?.email === currentUser?.email)
+    );
+  }, [allServices, currentUser]);
+
+  // Unassigned General Pool
+  const poolServices = useMemo(() => {
+    return allServices.filter((s) => !s.assignedOpsUserId);
+  }, [allServices]);
+
+  // Filtered Services for Specialist Personal View
+  const filteredMyServices = useMemo(() => {
+    return myServices.filter((s) => {
+      if (selectedStatusFilter !== 'ALL' && s.status !== selectedStatusFilter) return false;
+
+      if (selectedUrgencyFilter === 'OVERDUE' && !s.isOverdue) return false;
+      if (selectedUrgencyFilter === 'DUE_48H') {
+        if (s.daysLeft === null || s.daysLeft < 0 || s.daysLeft > 2) return false;
+      }
+      if (selectedUrgencyFilter === 'THIS_WEEK') {
+        if (s.daysLeft === null || s.daysLeft < 0 || s.daysLeft > 7) return false;
+      }
+
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchCode = (s.dealCode || '').toLowerCase().includes(q);
+        const matchCompany = (s.companyName || '').toLowerCase().includes(q);
+        const matchService = (s.serviceName || '').toLowerCase().includes(q);
+        const matchSRN = (s.govApplicationNumber || '').toLowerCase().includes(q);
+        if (!matchCode && !matchCompany && !matchService && !matchSRN) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [myServices, selectedStatusFilter, selectedUrgencyFilter, searchQuery]);
 
   // Filtered Services for Manager View
   const filteredServices = useMemo(() => {
@@ -424,18 +505,28 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
       <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2.5">
-            <span className="p-2 rounded-xl bg-slate-900 text-white shadow-xs">
-              <Cog className="w-5 h-5" />
+            <span className={`p-2 rounded-xl text-white shadow-xs ${isManager ? 'bg-slate-900' : 'bg-emerald-600'}`}>
+              {isManager ? <Cog className="w-5 h-5" /> : <UserCheck className="w-5 h-5" />}
             </span>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-slate-900 tracking-tight">Operations Command & Allocation Suite</h2>
-                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
-                  Manager Portal
+                <h2 className="text-base font-bold text-slate-900 tracking-tight">
+                  {isManager ? 'Operations Command & Allocation Suite' : `Specialist Execution Desk — ${currentUser?.fullName || 'Filing Portal'}`}
+                </h2>
+                <span
+                  className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border ${
+                    isManager
+                      ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                      : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  }`}
+                >
+                  {isManager ? 'Manager Portal' : specialistSector?.name || 'Specialist Desk'}
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Allocate multi-deal services by team expertise, manage deadlines, self-execute filings, and export reports
+                {isManager
+                  ? 'Allocate multi-deal services by team expertise, manage deadlines, self-execute filings, and export reports'
+                  : `Focused compliance workspace for ${currentUser?.fullName}. Manage your assigned filings, update milestone SRN numbers, and claim pool tasks.`}
               </p>
             </div>
           </div>
@@ -443,50 +534,101 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
         {/* View Switcher Pills */}
         <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 self-stretch md:self-auto justify-center">
-          <button
-            onClick={() => setActiveTab('allocation')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
-              activeTab === 'allocation'
-                ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Briefcase className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Service Allocation Hub</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-indigo-50 text-indigo-700">
-              {allServices.length}
-            </span>
-          </button>
+          {isManager ? (
+            <>
+              <button
+                onClick={() => setActiveTab('allocation')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+                  activeTab === 'allocation'
+                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Briefcase className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Service Allocation Hub</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-indigo-50 text-indigo-700">
+                  {allServices.length}
+                </span>
+              </button>
 
-          <button
-            onClick={() => setActiveTab('team')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
-              activeTab === 'team'
-                ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Users className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Team & Expertise Capacity</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-emerald-50 text-emerald-700">
-              {teamWorkload.length}
-            </span>
-          </button>
+              <button
+                onClick={() => setActiveTab('team')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+                  activeTab === 'team'
+                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Team & Expertise Capacity</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-emerald-50 text-emerald-700">
+                  {teamWorkload.length}
+                </span>
+              </button>
 
-          <button
-            onClick={() => setActiveTab('dossier')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
-              activeTab === 'dossier'
-                ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <FileCheck className="w-3.5 h-3.5 text-cyan-600" />
-            <span>Deal Dossier & Dispatch</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-cyan-50 text-cyan-700">
-              {deals.length}
-            </span>
-          </button>
+              <button
+                onClick={() => setActiveTab('dossier')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+                  activeTab === 'dossier'
+                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <FileCheck className="w-3.5 h-3.5 text-cyan-600" />
+                <span>Deal Dossier & Dispatch</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-cyan-50 text-cyan-700">
+                  {deals.length}
+                </span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => setActiveTab('my_tasks')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+                  activeTab === 'my_tasks'
+                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Briefcase className="w-3.5 h-3.5 text-emerald-600" />
+                <span>My Assigned Tasks</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-emerald-50 text-emerald-700">
+                  {myServices.length}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('pool')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+                  activeTab === 'pool'
+                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5 text-amber-600" />
+                <span>General Task Pool</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-amber-50 text-amber-700">
+                  {poolServices.length}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('dossier')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+                  activeTab === 'dossier'
+                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <FileCheck className="w-3.5 h-3.5 text-cyan-600" />
+                <span>Deal Dossier & Files</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-cyan-50 text-cyan-700">
+                  {deals.length}
+                </span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -504,6 +646,345 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
       )}
 
       {/* ----------------------------------------------------------------------- */}
+      
+      {/* ----------------------------------------------------------------------- */}
+      {/* TAB: SPECIALIST MY ASSIGNED TASKS */}
+      {/* ----------------------------------------------------------------------- */}
+      {activeTab === 'my_tasks' && (
+        <div className="space-y-4">
+          {/* Top Specialist Personal Metrics */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                My Assigned Filings
+              </span>
+              <div className="text-xl font-extrabold text-slate-900 mt-0.5">
+                {myServices.length} <span className="text-xs font-normal text-slate-500">active tasks</span>
+              </div>
+              <div className="text-[11px] text-slate-500 mt-1">
+                Value: ₹{myServices.reduce((sum, s) => sum + Number(s.serviceFee || 0), 0).toLocaleString('en-IN')}
+              </div>
+            </div>
+
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+              <span className="text-[10px] font-bold text-blue-700 uppercase tracking-wider block">
+                In Progress / Submitted
+              </span>
+              <div className="text-xl font-extrabold text-blue-600 mt-0.5">
+                {myServices.filter((s) => ['IN_PROGRESS', 'GOVT_SUBMITTED', 'QUERY_RAISED'].includes(s.status)).length}
+              </div>
+              <div className="text-[11px] text-blue-700/80 mt-1">
+                Under active compliance
+              </div>
+            </div>
+
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+              <span className="text-[10px] font-bold text-rose-700 uppercase tracking-wider block">
+                Overdue / Urgent
+              </span>
+              <div className="text-xl font-extrabold text-rose-600 mt-0.5">
+                {myServices.filter((s) => s.isOverdue).length}
+              </div>
+              <div className="text-[11px] text-rose-700/80 mt-1">
+                Immediate Action Required
+              </div>
+            </div>
+
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+              <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">
+                Completed & Approved
+              </span>
+              <div className="text-xl font-extrabold text-emerald-600 mt-0.5">
+                {myServices.filter((s) => s.status === 'COMPLETED' || s.status === 'APPROVED').length}
+              </div>
+              <div className="text-[11px] text-emerald-700/80 mt-1">
+                Filing cleared & certified
+              </div>
+            </div>
+          </div>
+
+          {/* Specialist Table Controls */}
+          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="relative flex-1 w-full">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search my tasks by deal, company, or service..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-800"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 self-stretch sm:self-auto">
+              <select
+                value={selectedStatusFilter}
+                onChange={(e) => setSelectedStatusFilter(e.target.value)}
+                className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 font-medium focus:outline-none focus:border-slate-800"
+              >
+                <option value="ALL">All Statuses</option>
+                <option value="NOT_STARTED">Not Started</option>
+                <option value="IN_PROGRESS">In Progress</option>
+                <option value="GOVT_SUBMITTED">Govt / MCA Submitted</option>
+                <option value="QUERY_RAISED">Query Raised</option>
+                <option value="COMPLETED">Completed</option>
+              </select>
+
+              <select
+                value={selectedUrgencyFilter}
+                onChange={(e) => setSelectedUrgencyFilter(e.target.value)}
+                className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 font-medium focus:outline-none focus:border-slate-800"
+              >
+                <option value="ALL">All Deadlines</option>
+                <option value="OVERDUE">Overdue Only</option>
+                <option value="DUE_48H">Due Next 48 Hours</option>
+                <option value="THIS_WEEK">Due This Week</option>
+              </select>
+            </div>
+          </div>
+
+          {/* My Tasks Table */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
+                    <th className="py-3 px-4">Deal / Company</th>
+                    <th className="py-3 px-4">Service Task & Sector</th>
+                    <th className="py-3 px-4">My Milestone Status</th>
+                    <th className="py-3 px-4">SRN / MCA Reference</th>
+                    <th className="py-3 px-4">Target Deadline</th>
+                    <th className="py-3 px-4 text-center">Filing Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                  {filteredMyServices.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-12 text-center text-slate-400 text-xs">
+                        No service filings currently assigned to you. Click "General Task Pool" above to pick up unassigned tasks!
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredMyServices.map((svc) => (
+                      <tr key={svc.id} className="hover:bg-slate-50/70 transition">
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 text-[11px]">
+                              {svc.dealCode}
+                            </span>
+                            <button
+                              onClick={() => onOpenDossier(svc.dealId)}
+                              title="Open Deal Dossier"
+                              className="text-slate-400 hover:text-slate-800"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <div className="font-bold text-slate-900 mt-1 truncate max-w-[200px]">
+                            {svc.companyName}
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            {svc.clientName} ({svc.clientPhone})
+                          </div>
+                        </td>
+
+                        <td className="py-3 px-4">
+                          <div className="font-bold text-slate-900 text-sm">{svc.serviceName}</div>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold border ${svc.sectorBadge}`}>
+                              {svc.sectorName}
+                            </span>
+                            <span className="text-[11px] text-slate-500">Fee: ₹{Number(svc.serviceFee || 0).toLocaleString('en-IN')}</span>
+                          </div>
+                        </td>
+
+                        <td className="py-3 px-4 min-w-[180px]">
+                          <select
+                            value={svc.status || 'NOT_STARTED'}
+                            onChange={(e) =>
+                              handleUpdateService(svc.dealId, svc.id, {
+                                status: e.target.value,
+                                completedAt: e.target.value === 'COMPLETED' ? new Date().toISOString() : undefined,
+                              })
+                            }
+                            className={`w-full text-xs font-bold rounded-lg px-2.5 py-1.5 border focus:outline-none ${
+                              svc.status === 'COMPLETED' || svc.status === 'APPROVED'
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                : svc.status === 'GOVT_SUBMITTED'
+                                ? 'bg-blue-50 text-blue-800 border-blue-300'
+                                : svc.status === 'QUERY_RAISED'
+                                ? 'bg-rose-50 text-rose-800 border-rose-300'
+                                : svc.status === 'IN_PROGRESS'
+                                ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                : 'bg-slate-50 text-slate-700 border-slate-300'
+                            }`}
+                          >
+                            <option value="NOT_STARTED">Not Started</option>
+                            <option value="IN_PROGRESS">In Progress (Drafting)</option>
+                            <option value="GOVT_SUBMITTED">Govt / MCA Submitted</option>
+                            <option value="QUERY_RAISED">Query / Resubmission</option>
+                            <option value="COMPLETED">Completed / Approved</option>
+                          </select>
+                        </td>
+
+                        <td className="py-3 px-4 min-w-[160px]">
+                          <input
+                            type="text"
+                            defaultValue={svc.govApplicationNumber || ''}
+                            placeholder="Enter SRN / Ref..."
+                            onBlur={(e) => {
+                              if (e.target.value !== (svc.govApplicationNumber || '')) {
+                                handleUpdateService(svc.dealId, svc.id, {
+                                  govApplicationNumber: e.target.value.trim(),
+                                });
+                              }
+                            }}
+                            className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1 text-xs font-mono text-slate-800 focus:outline-none focus:border-slate-800"
+                          />
+                        </td>
+
+                        <td className="py-3 px-4">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold border ${
+                              svc.isOverdue
+                                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                : svc.daysLeft !== null && svc.daysLeft <= 2
+                                ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                : 'bg-slate-50 text-slate-600 border-slate-200'
+                            }`}
+                          >
+                            <Clock className="w-3 h-3" />
+                            {svc.deadlineStatus}
+                          </span>
+                        </td>
+
+                        <td className="py-3 px-4 text-center">
+                          {svc.status === 'COMPLETED' ? (
+                            <span className="inline-flex items-center gap-1 text-xs text-emerald-700 font-bold bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Cleared
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() =>
+                                handleUpdateService(svc.dealId, svc.id, {
+                                  status: 'COMPLETED',
+                                  completedAt: new Date().toISOString(),
+                                })
+                              }
+                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition shadow-xs flex items-center gap-1 mx-auto"
+                            >
+                              <Check className="w-3.5 h-3.5" /> Mark Done
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------------------------------------------------------------- */}
+      {/* TAB: GENERAL TASK POOL (UNASSIGNED SERVICES) */}
+      {/* ----------------------------------------------------------------------- */}
+      {activeTab === 'pool' && (
+        <div className="space-y-4">
+          <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-amber-900">General Unassigned Filing Pool</h3>
+              <p className="text-xs text-amber-700 mt-0.5">
+                Client services waiting for allocation. Pick up services matching your expertise ({specialistSector?.name || 'All Sectors'}) to add to your queue.
+              </p>
+            </div>
+            <span className="px-3 py-1 rounded-full bg-amber-100 text-amber-800 font-bold text-xs border border-amber-300 whitespace-nowrap">
+              {poolServices.length} Available Tasks
+            </span>
+          </div>
+
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
+                    <th className="py-3 px-4">Deal / Company</th>
+                    <th className="py-3 px-4">Service Task & Sector</th>
+                    <th className="py-3 px-4">Service Fee</th>
+                    <th className="py-3 px-4">Target Deadline</th>
+                    <th className="py-3 px-4 text-center">Claim Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                  {poolServices.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-12 text-center text-slate-400 text-xs">
+                        All client services are currently assigned! Check back later.
+                      </td>
+                    </tr>
+                  ) : (
+                    poolServices.map((svc) => {
+                      const isRecommendedForMe = specialistSector && svc.sectorId === specialistSector.id;
+                      return (
+                        <tr key={svc.id} className={`hover:bg-slate-50/70 transition ${isRecommendedForMe ? 'bg-indigo-50/30' : ''}`}>
+                          <td className="py-3 px-4">
+                            <span className="font-mono font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 text-[11px]">
+                              {svc.dealCode}
+                            </span>
+                            <div className="font-bold text-slate-900 mt-1 truncate max-w-[200px]">
+                              {svc.companyName}
+                            </div>
+                            <div className="text-[11px] text-slate-500">
+                              {svc.clientName}
+                            </div>
+                          </td>
+
+                          <td className="py-3 px-4">
+                            <div className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                              {svc.serviceName}
+                              {isRecommendedForMe && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700 border border-indigo-200">
+                                  ⭐ Your Sector Match
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-1">
+                              <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold border ${svc.sectorBadge}`}>
+                                {svc.sectorName}
+                              </span>
+                            </div>
+                          </td>
+
+                          <td className="py-3 px-4 font-bold text-slate-900">
+                            ₹{Number(svc.serviceFee || 0).toLocaleString('en-IN')}
+                          </td>
+
+                          <td className="py-3 px-4">
+                            <span className="inline-flex items-center gap-1 text-slate-600 text-xs">
+                              <Clock className="w-3.5 h-3.5 text-slate-400" /> {svc.deadlineStatus}
+                            </span>
+                          </td>
+
+                          <td className="py-3 px-4 text-center">
+                            <button
+                              onClick={() => handleSelfAssignService(svc.dealId, svc.id)}
+                              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold transition shadow-xs flex items-center gap-1.5 mx-auto"
+                            >
+                              <Plus className="w-3.5 h-3.5" /> Claim Task
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* TAB 1: MANAGER SERVICE ALLOCATION HUB */}
       {/* ----------------------------------------------------------------------- */}
       {activeTab === 'allocation' && (
@@ -1140,7 +1621,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                               Assigned Specialist
                             </label>
                             <select
-                              defaultValue={svc.assignedOpsUserId || ''}
+                              value={svc.assignedOpsUserId || ''}
                               onChange={(e) =>
                                 handleUpdateService(selectedDeal.id, svc.id, {
                                   assignedOpsUserId: e.target.value || null,

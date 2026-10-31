@@ -17,6 +17,24 @@ router.get('/', authenticateToken, async (req, res) => {
       where.role = role;
     }
 
+    // Auto-seed operations specialists if querying OPERATIONS
+    if (role === 'OPERATIONS') {
+      const defaultSpecialists = [
+        { fullName: 'Priya Sharma (ROC & Incorporation Specialist)', email: 'priya.sharma@corporatemart.com', role: 'OPERATIONS', passwordHash: 'ops123', phone: '+919876543220' },
+        { fullName: 'Amit Patel (Financial & Pitch Specialist)', email: 'amit.patel@corporatemart.com', role: 'OPERATIONS', passwordHash: 'ops123', phone: '+919876543221' },
+        { fullName: 'Rahul Nair (Tech Lead & Full Stack)', email: 'rahul.nair@corporatemart.com', role: 'OPERATIONS', passwordHash: 'ops123', phone: '+919876543222' },
+        { fullName: 'Siddharth Rawat (GeM & Tender Specialist)', email: 'siddharth.rawat@corporatemart.com', role: 'OPERATIONS', passwordHash: 'ops123', phone: '+919876543223' },
+      ];
+      for (const spec of defaultSpecialists) {
+        try {
+          const exists = await prisma.user.findUnique({ where: { email: spec.email } });
+          if (!exists) {
+            await prisma.user.create({ data: spec });
+          }
+        } catch (e) { /* ignore collision */ }
+      }
+    }
+
     const users = await prisma.user.findMany({
       where,
       select: {

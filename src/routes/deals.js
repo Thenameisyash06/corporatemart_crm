@@ -23,6 +23,70 @@ async function generateDealCode() {
 /**
  * Helper to record audit log entry
  */
+
+/**
+ * Helper to resolve operations user ID (supports UUID, email, or mock ID with auto-provisioning)
+ */
+async function resolveOpsUserId(input) {
+  if (!input || input === '' || input === 'null' || input === 'UNASSIGNED') {
+    return null;
+  }
+
+  const mockMap = {
+    'mock-priya-sharma': { email: 'priya.sharma@corporatemart.com', name: 'Priya Sharma (ROC & Incorporation Specialist)' },
+    'mock-amit-patel': { email: 'amit.patel@corporatemart.com', name: 'Amit Patel (Financial & Pitch Specialist)' },
+    'mock-rahul-nair': { email: 'rahul.nair@corporatemart.com', name: 'Rahul Nair (Tech Lead & Full Stack)' },
+    'mock-siddharth-rawat': { email: 'siddharth.rawat@corporatemart.com', name: 'Siddharth Rawat (GeM & Tender Specialist)' },
+  };
+
+  if (mockMap[input]) {
+    const spec = mockMap[input];
+    let user = await prisma.user.findUnique({ where: { email: spec.email } });
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          email: spec.email,
+          fullName: spec.name,
+          role: 'OPERATIONS',
+          passwordHash: 'ops123',
+          phone: '+919876543220',
+        },
+      });
+    }
+    return user.id;
+  }
+
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input);
+  if (isUuid) {
+    const user = await prisma.user.findUnique({
+      where: { id: input },
+      select: { id: true },
+    });
+    return user ? user.id : null;
+  }
+
+  if (typeof input === 'string' && input.includes('@')) {
+    const user = await prisma.user.findUnique({
+      where: { email: input },
+      select: { id: true },
+    });
+    return user ? user.id : null;
+  }
+
+  if (typeof input === 'string' && input.length >= 3) {
+    const userByName = await prisma.user.findFirst({
+      where: {
+        fullName: { contains: input, mode: 'insensitive' },
+        role: 'OPERATIONS',
+      },
+      select: { id: true },
+    });
+    if (userByName) return userByName.id;
+  }
+
+  return null;
+}
+
 async function recordAuditLog({ dealId, userId, action, fromStage, toStage, remarks }) {
   try {
     await prisma.auditLog.create({
@@ -1149,16 +1213,29 @@ router.patch('/:id/services/:serviceId', authenticateToken, requireRoles('OPERAT
   try {
     const { assignedOpsUserId, status, govApplicationNumber, notes, completedAt, targetCompletionDate } = req.body;
 
+    const updateData = {};
+    if (assignedOpsUserId !== undefined) {
+      updateData.assignedOpsUserId = await resolveOpsUserId(assignedOpsUserId);
+    }
+    if (status !== undefined) {
+      updateData.status = status;
+    }
+    if (govApplicationNumber !== undefined) {
+      updateData.govApplicationNumber = govApplicationNumber;
+    }
+    if (notes !== undefined) {
+      updateData.notes = notes;
+    }
+    if (targetCompletionDate !== undefined) {
+      updateData.targetCompletionDate = targetCompletionDate ? new Date(targetCompletionDate) : null;
+    }
+    if (completedAt !== undefined) {
+      updateData.completedAt = completedAt ? new Date(completedAt) : null;
+    }
+
     const updatedService = await prisma.dealService.update({
       where: { id: req.params.serviceId },
-      data: {
-        assignedOpsUserId: assignedOpsUserId !== undefined ? assignedOpsUserId : undefined,
-        status: status !== undefined ? status : undefined,
-        govApplicationNumber: govApplicationNumber !== undefined ? govApplicationNumber : undefined,
-        notes: notes !== undefined ? notes : undefined,
-        targetCompletionDate: targetCompletionDate !== undefined ? (targetCompletionDate ? new Date(targetCompletionDate) : null) : undefined,
-        completedAt: completedAt ? new Date(completedAt) : undefined,
-      },
+      data: updateData,
       include: {
         assignedOpsUser: {
           select: { id: true, fullName: true, email: true },
@@ -1170,19 +1247,16 @@ router.patch('/:id/services/:serviceId', authenticateToken, requireRoles('OPERAT
       dealId: req.params.id,
       userId: req.user.id,
       action: 'SERVICE_MILESTONE_UPDATED',
-      remarks: `Service "${updatedService.serviceName}" status updated to ${updatedService.status}. Gov Ref: ${updatedService.govApplicationNumber || 'N/A'}`,
+      remarks: `Service "${updatedService.serviceName}" status updated to ${updatedService.status}. Assignee: ${updatedService.assignedOpsUser?.fullName || 'Unassigned'}. Gov Ref: ${updatedService.govApplicationNumber || 'N/A'}`,
     });
 
     return res.json({ message: 'Service milestone updated.', service: updatedService });
   } catch (error) {
     console.error('Service update error:', error);
-    return res.status(500).json({ error: 'Failed to update service milestone.' });
+    return res.status(500).json({ error: error.message || 'Failed to update service milestone.' });
   }
 });
 
-// -----------------------------------------------------------------------------
-// POST /api/deals/:id/service-complete - Stage 07: Mark All Services Complete
-// -----------------------------------------------------------------------------
 router.post('/:id/service-complete', authenticateToken, requireRoles('OPERATIONS', 'ADMIN'), async (req, res) => {
   try {
     const { outcomeNotes } = req.body;
