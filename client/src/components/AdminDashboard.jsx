@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import LeadManagementWorkbench from './LeadManagementWorkbench';
 import {
   TrendingUp,
+  UserPlus,
   Users,
   Briefcase,
   CreditCard,
@@ -33,6 +35,7 @@ import {
   exportClientsToCsv,
   exportBdmPerformanceToCsv,
   exportDepartmentMembersToCsv,
+  exportLeadsToCsv,
 } from '../lib/exportCsv';
 
 const STAGE_LABELS = {
@@ -291,7 +294,7 @@ function buildOverviewFromDeals(deals = [], users = [], stats = null) {
   };
 }
 
-export default function AdminDashboard({ onOpenDossier, onRefreshParent, initialDeals = [], initialStats = null }) {
+export default function AdminDashboard({ onOpenDossier, onRefreshParent, onConvertToDeal, initialDeals = [], initialStats = null }) {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(() => {
     if (initialDeals && initialDeals.length > 0) {
@@ -301,6 +304,7 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, initial
   });
   const [clients, setClients] = useState([]);
   const [activeSubTab, setActiveSubTab] = useState('deals');
+  const [lmsCount, setLmsCount] = useState(0);
   
   // Deals tab filter & search
   const [dealSearch, setDealSearch] = useState('');
@@ -374,6 +378,10 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, initial
         extractClientsFromDeals(initialDeals);
       }
     } finally {
+      try {
+        const leadsRes = await api.get('/leads');
+        setLmsCount((leadsRes.data.leads || []).length);
+      } catch (err) {}
       setLoading(false);
     }
   };
@@ -545,6 +553,16 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, initial
                     <span>Export All Deals ({allDeals.length})</span>
                   </button>
                   <button
+                    onClick={async () => {
+                      const res = await api.get('/leads');
+                      exportLeadsToCsv(res.data.leads || []);
+                    }}
+                    className="w-full text-left px-3.5 py-2 text-xs font-medium hover:bg-slate-50 flex items-center gap-2.5"
+                  >
+                    <UserPlus className="w-4 h-4 text-amber-600" />
+                    <span>Export All LMS Leads ({lmsCount})</span>
+                  </button>
+                  <button
                     onClick={() => exportClientsToCsv(clients)}
                     className="w-full text-left px-3.5 py-2 text-xs font-medium hover:bg-slate-50 flex items-center gap-2.5"
                   >
@@ -627,6 +645,7 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, initial
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-3">
         {[
           { id: 'deals', label: 'Deals Monitor', icon: Briefcase, count: allDeals.length },
+          { id: 'lms', label: 'Lead Management (LMS)', icon: UserPlus, count: lmsCount },
           { id: 'bdm', label: 'BDM Team', icon: TrendingUp, count: bdmPerformance.length },
           { id: 'accounts', label: 'Accounts Desk', icon: CreditCard, count: accountsPerformance.length },
           { id: 'legal', label: 'Legal Scrutiny', icon: Scale, count: legalPerformance.length },
@@ -661,6 +680,15 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, initial
       </div>
 
       {/* 4. VIEW CONTENT */}
+
+      
+      {/* -------------------- TAB: LEAD MANAGEMENT SYSTEM (LMS) -------------------- */}
+      {activeSubTab === 'lms' && (
+        <LeadManagementWorkbench
+          currentUser={{ role: 'ADMIN', fullName: 'Master Admin' }}
+          onConvertToDeal={onConvertToDeal}
+        />
+      )}
 
       {/* -------------------- TAB 1: DEALS MONITOR -------------------- */}
       {activeSubTab === 'deals' && (

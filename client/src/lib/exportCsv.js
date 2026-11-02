@@ -315,3 +315,51 @@ export function exportOpsTeamWorkloadToCsv(teamList, filename = 'Operations_Team
 
   downloadCsv(filename, headers, rows);
 }
+
+
+/**
+ * Format LMS leads for CSV export
+ */
+export function exportLeadsToCsv(leads, filename = 'CorporateMart_LMS_Leads.csv') {
+  const headers = [
+    { key: 'companyName', label: 'Company Name' },
+    { key: 'directorName', label: 'Director Name' },
+    { key: 'mobileNo', label: 'Mobile No' },
+    { key: 'emailId', label: 'Email ID' },
+    { key: 'leaderName', label: "Leader's Name" },
+    { key: 'bdmName1', label: "BDM's Name - I" },
+    { key: 'bdmName2', label: "BDM's Name - II" },
+    { key: 'closerStatus', label: 'Closer Status' },
+    { key: 'clientStatus', label: 'Client Status (Hot/Warm/Lost)' },
+    { key: 'sourcingStatus', label: 'Sourcing Status' },
+    { key: 'meetingStatus', label: 'Meeting Status' },
+    { key: 'expectedDateOfCloser', label: 'Expected Date of Closer (EDC)' },
+    { key: 'leadStatus', label: 'Lead Stage / Status' },
+    { key: 'dealValue', label: 'Estimated Deal Value (₹)' },
+    { key: 'quotationFileName', label: 'Quotation Document' },
+    { key: 'remarks', label: 'Remarks / Notes' },
+    { key: 'createdAt', label: 'Date Logged' },
+  ];
+
+  const rows = leads.map((l) => ({
+    companyName: l.companyName || 'N/A',
+    directorName: l.directorName || 'N/A',
+    mobileNo: l.mobileNo || 'N/A',
+    emailId: l.emailId || 'N/A',
+    leaderName: l.leaderName || 'N/A',
+    bdmName1: l.bdmName1 || 'N/A',
+    bdmName2: l.bdmName2 || 'None',
+    closerStatus: l.closerStatus || 'N/A',
+    clientStatus: l.clientStatus || 'Warm',
+    sourcingStatus: l.sourcingStatus || 'N/A',
+    meetingStatus: l.meetingStatus || 'N/A',
+    expectedDateOfCloser: l.expectedDateOfCloser ? new Date(l.expectedDateOfCloser).toLocaleDateString('en-IN') : 'Not Set',
+    leadStatus: l.leadStatus || 'OPEN',
+    dealValue: l.dealValue ? Number(l.dealValue).toLocaleString('en-IN') : 'N/A',
+    quotationFileName: l.quotationFileName || 'None',
+    remarks: l.remarks || 'N/A',
+    createdAt: l.createdAt ? new Date(l.createdAt).toLocaleDateString('en-IN') : 'N/A',
+  }));
+
+  downloadCsv(filename, headers, rows);
+}

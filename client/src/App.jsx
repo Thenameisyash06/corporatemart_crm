@@ -10,9 +10,11 @@ import LegalWorkbench from './components/LegalWorkbench';
 import OperationsWorkbench from './components/OperationsWorkbench';
 import RmWorkbench from './components/RmWorkbench';
 import AdminDashboard from './components/AdminDashboard';
+import LeadManagementWorkbench from './components/LeadManagementWorkbench';
 import api from './lib/api';
 import {
   Plus,
+  UserPlus,
   Search,
   Layers,
   CreditCard,
@@ -21,6 +23,7 @@ import {
   Send,
   Lock,
   Building2,
+  Briefcase,
   ShieldCheck,
 } from 'lucide-react';
 
@@ -33,11 +36,27 @@ export default function App() {
   const [selectedDealId, setSelectedDealId] = useState(null);
   const [isNewDealOpen, setIsNewDealOpen] = useState(false);
   const [balanceModalDeal, setBalanceModalDeal] = useState(null);
+  const [newDealInitialData, setNewDealInitialData] = useState(null);
 
   // Filters for Pipeline tab
   const [activeFilterId, setActiveFilterId] = useState('ALL');
   const [activeStageKey, setActiveStageKey] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [previousCrmTab, setPreviousCrmTab] = useState('pipeline');
+  const currentMode = activeTab === 'lms' ? 'LMS' : 'CRM';
+
+  const handleSwitchMode = (targetMode) => {
+    if (targetMode === 'LMS') {
+      if (activeTab !== 'lms') {
+        setPreviousCrmTab(activeTab);
+      }
+      setActiveTab('lms');
+    } else {
+      const fallback = currentUser?.role === 'ADMIN' ? 'admin' : 'pipeline';
+      setActiveTab(previousCrmTab && previousCrmTab !== 'lms' ? previousCrmTab : fallback);
+    }
+  };
+
 
   // Login form state (if logged out)
   const [loginForm, setLoginForm] = useState({ email: 'bdm@corporatemart.com', password: 'bdm123' });
@@ -155,10 +174,11 @@ export default function App() {
 
     const role = currentUser.role;
 
-    if (role === 'ADMIN') {
+        if (role === 'ADMIN') {
       return [
         { id: 'admin', label: 'Admin Command Center', icon: ShieldCheck },
         { id: 'pipeline', label: 'Master Pipeline', icon: Layers, badge: stats?.counts?.totalDeals },
+        { id: 'lms', label: 'LMS', icon: UserPlus },
         { id: 'accounts', label: 'Accounts Desk', icon: CreditCard, badge: stats?.counts?.pendingAccounts },
         { id: 'legal', label: 'Legal Scrutiny', icon: Scale, badge: stats?.counts?.pendingLegal },
         { id: 'operations', label: 'Operations Desk', icon: Cog, badge: stats?.counts?.inOperations },
@@ -166,9 +186,10 @@ export default function App() {
       ];
     }
 
-    if (role === 'BDM') {
+        if (role === 'BDM') {
       return [
-        { id: 'pipeline', label: 'My Deals Pipeline', icon: Layers, badge: deals.length },
+        { id: 'pipeline', label: 'CRM', icon: Layers, badge: deals.length },
+        { id: 'lms', label: 'LMS', icon: UserPlus },
       ];
     }
 
@@ -351,6 +372,22 @@ export default function App() {
             onRefreshParent={fetchData}
             initialDeals={deals}
             initialStats={stats}
+            onConvertToDeal={(leadData) => {
+              setNewDealInitialData(leadData);
+              setIsNewDealOpen(true);
+            }}
+          />
+        )}
+
+
+        {/* LMS: LEAD MANAGEMENT SYSTEM (For BDM and ADMIN) */}
+        {activeTab === 'lms' && (currentUser?.role === 'BDM' || currentUser?.role === 'ADMIN') && (
+          <LeadManagementWorkbench
+            currentUser={currentUser}
+            onConvertToDeal={(leadData) => {
+              setNewDealInitialData(leadData);
+              setIsNewDealOpen(true);
+            }}
           />
         )}
 

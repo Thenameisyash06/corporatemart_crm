@@ -29,12 +29,36 @@ export const DEFAULT_SERVICES = [
   { name: 'FSSAI Food License', standardAmount: '7500', govtFee: '2000' },
 ];
 
-export default function NewDealWizardModal({ isOpen, onClose, onSuccess }) {
+export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initialData }) {
   if (!isOpen) return null;
 
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+
+
+  useEffect(() => {
+    if (initialData && isOpen) {
+      setForm((prev) => ({
+        ...prev,
+        companyName: initialData.companyName || prev.companyName,
+        clientName: initialData.clientName || prev.clientName,
+        clientEmail: initialData.clientEmail || prev.clientEmail,
+        clientPhone: initialData.clientPhone || prev.clientPhone,
+        remarks: initialData.remarks || prev.remarks,
+        directors: [
+          {
+            name: initialData.clientName || '',
+            email: initialData.clientEmail || '',
+            phone: initialData.clientPhone || '',
+            din: '',
+            pan: '',
+          },
+          { name: '', din: '', pan: '', email: '', phone: '' },
+        ],
+      }));
+    }
+  }, [initialData, isOpen]);
 
   // Form State
   const [form, setForm] = useState({

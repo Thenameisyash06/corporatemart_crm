@@ -5,6 +5,8 @@ import {
   RefreshCw,
   Layers,
   Users,
+  Briefcase,
+  UserPlus,
 } from 'lucide-react';
 import api from '../lib/api';
 

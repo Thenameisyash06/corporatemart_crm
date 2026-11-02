@@ -372,3 +372,34 @@ model AuditLog {
 
   @@map("audit_logs")
 }
+
+
+// -----------------------------------------------------------------------------
+// LEAD MANAGEMENT SYSTEM (LMS)
+// -----------------------------------------------------------------------------
+model Lead {
+  id                   String    @id @default(uuid())
+  companyName          String
+  directorName         String?
+  mobileNo             String
+  emailId              String?
+  leaderName           String
+  bdmName1             String
+  bdmName2             String?
+  closerStatus         String
+  sourcingStatus       String
+  meetingStatus        String
+  clientStatus         String    @default("Warm") // Hot, Warm, Lost
+  expectedDateOfCloser DateTime?
+  leadStatus           String    @default("OPEN")
+  dealValue            Decimal?  @db.Decimal(12, 2)
+  remarks              String?
+  quotationFileUrl     String?
+  quotationFileName    String?
+  quotationFileSize    Int?
+  createdById          String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@map("leads")
+}

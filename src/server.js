@@ -1,12 +1,14 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 
 const authRoutes = require('./routes/auth');
 const dealRoutes = require('./routes/deals');
 const documentRoutes = require('./routes/documents');
 const dashboardRoutes = require('./routes/dashboard');
 const userRoutes = require('./routes/users');
+const leadRoutes = require('./routes/leads');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -22,6 +24,7 @@ app.use(
 
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Health Check
 app.get('/api/health', (req, res) => {
@@ -38,6 +41,7 @@ app.use('/api/deals', dealRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/leads', leadRoutes);
 
 // Error Handling Middleware
 app.use((err, req, res, next) => {
