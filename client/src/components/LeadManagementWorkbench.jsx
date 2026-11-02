@@ -31,6 +31,8 @@ import {
   Eye,
   X,
   Flame,
+  Award,
+  Lock,
 } from 'lucide-react';
 import api from '../lib/api';
 import { exportLeadsToCsv } from '../lib/exportCsv';
@@ -69,6 +71,7 @@ export const LMS_BDMS = [
   'Panchal Kunal',
   'Yash Rathod',
   'Pankaj Solanki',
+  'Rahul Sharma',
 ];
 
 export const LMS_CLOSER_STATUSES = [
@@ -136,14 +139,27 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState(null);
 
-  // Toggle Form Visibility
-  const [isFormOpen, setIsFormOpen] = useState(true);
+  // Toggle Form Visibility (BDM only)
+  const [isFormOpen, setIsFormOpen] = useState(!isAdmin);
+
+  // Admin BDM Funnel Leaderboard toggle
+  const [showBdmLeaderboard, setShowBdmLeaderboard] = useState(false);
 
   // Quotation File Upload State
   const [quotationFile, setQuotationFile] = useState(null);
   const [fileError, setFileError] = useState(null);
   const [downloadingId, setDownloadingId] = useState(null);
   const quotationInputRef = useRef(null);
+
+  // Determine current logged-in BDM's name accurately
+  const loggedInBdmName = useMemo(() => {
+    if (!currentUser?.fullName) return LMS_BDMS[0];
+    const clean = currentUser.fullName.replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+    const match = LMS_BDMS.find((b) =>
+      clean.includes(b.toLowerCase()) || b.toLowerCase().includes(clean)
+    );
+    return match || currentUser.fullName.replace(/\s*\([^)]*\)/g, '').trim();
+  }, [currentUser]);
 
   // Form State (includes clientStatus default 'Warm')
   const initialFormState = {
@@ -152,7 +168,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
     mobileNo: '',
     emailId: '',
     leaderName: LMS_LEADERS[0],
-    bdmName1: LMS_BDMS[0],
+    bdmName1: loggedInBdmName,
     bdmName2: '',
     closerStatus: LMS_CLOSER_STATUSES[0],
     clientStatus: 'Warm',
@@ -166,18 +182,12 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
 
   const [form, setForm] = useState(initialFormState);
 
-  // Auto-fill BDM-I if current logged in user name matches one of the BDMs
+  // Lock BDM-I to logged-in BDM
   useEffect(() => {
-    if (currentUser?.fullName) {
-      const match = LMS_BDMS.find((b) =>
-        currentUser.fullName.toLowerCase().includes(b.toLowerCase()) ||
-        b.toLowerCase().includes(currentUser.fullName.toLowerCase())
-      );
-      if (match) {
-        setForm((prev) => ({ ...prev, bdmName1: match }));
-      }
+    if (!isAdmin && loggedInBdmName) {
+      setForm((prev) => ({ ...prev, bdmName1: loggedInBdmName }));
     }
-  }, [currentUser]);
+  }, [isAdmin, loggedInBdmName]);
 
   // Filters State
   const [searchQuery, setSearchQuery] = useState('');
@@ -196,9 +206,11 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
       const params = {};
       if (!isAdmin) {
         params.scope = 'my';
+        params.myBdmName = loggedInBdmName;
+      } else {
+        if (selectedBdmFilter !== 'ALL') params.bdmName = selectedBdmFilter;
       }
       if (selectedLeaderFilter !== 'ALL') params.leaderName = selectedLeaderFilter;
-      if (selectedBdmFilter !== 'ALL') params.bdmName = selectedBdmFilter;
       if (selectedCloserFilter !== 'ALL') params.closerStatus = selectedCloserFilter;
       if (selectedClientStatusFilter !== 'ALL') params.clientStatus = selectedClientStatusFilter;
       if (selectedSourcingFilter !== 'ALL') params.sourcingStatus = selectedSourcingFilter;
@@ -235,6 +247,67 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
     fetchLeads();
   };
 
+  // Strictly filter leads in BDM portal so BDM sees ONLY their own leads
+  const visibleLeads = useMemo(() => {
+    if (isAdmin) return leads;
+    const myName = (loggedInBdmName || '').toLowerCase().trim();
+    if (!myName) return leads;
+    return leads.filter((lead) => {
+      const bdm1 = (lead.bdmName1 || '').toLowerCase().trim();
+      const bdm2 = (lead.bdmName2 || '').toLowerCase().trim();
+      return (
+        bdm1.includes(myName) ||
+        myName.includes(bdm1) ||
+        bdm2.includes(myName) ||
+        (lead.createdById === currentUser?.id && (!lead.bdmName1 || bdm1.includes(myName) || myName.includes(bdm1)))
+      );
+    });
+  }, [leads, isAdmin, loggedInBdmName, currentUser]);
+
+  // BDM's Personal Deal Funnel Value (calculated strictly on visible leads)
+  const bdmPersonalFunnel = useMemo(() => {
+    return visibleLeads.reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
+  }, [visibleLeads]);
+
+  const bdmHotFunnel = useMemo(() => {
+    return visibleLeads
+      .filter((l) => (l.clientStatus || '').toLowerCase() === 'hot')
+      .reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
+  }, [visibleLeads]);
+
+  const bdmWarmFunnel = useMemo(() => {
+    return visibleLeads
+      .filter((l) => (l.clientStatus || 'warm').toLowerCase() === 'warm')
+      .reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
+  }, [visibleLeads]);
+
+  // Memoized BDM Funnel Ranking (for Admin Leaderboard)
+  const bdmFunnelList = useMemo(() => {
+    if (!analytics?.bdmFunnel) return [];
+    return Object.entries(analytics.bdmFunnel)
+      .map(([name, data]) => ({
+        bdmName: name,
+        ...data,
+      }))
+      .filter((b) => b.totalValue > 0 || b.count > 0)
+      .sort((a, b) => b.totalValue - a.totalValue);
+  }, [analytics]);
+
+  // Real-Time BDM Funnel Accumulator for Form Input
+  const currentBdmFunnel = useMemo(() => {
+    if (!isAdmin) {
+      return bdmPersonalFunnel;
+    }
+    const bdmName = form.bdmName1;
+    if (analytics?.bdmFunnel?.[bdmName]) {
+      return analytics.bdmFunnel[bdmName].totalValue;
+    }
+    return 0;
+  }, [form.bdmName1, analytics, isAdmin, bdmPersonalFunnel]);
+
+  const enteredDealValue = parseFloat(form.dealValue) || 0;
+  const projectedBdmFunnel = currentBdmFunnel + enteredDealValue;
+
   // Handle File Input Change (PDF & Word only)
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -267,7 +340,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
     if (quotationInputRef.current) quotationInputRef.current.value = '';
   };
 
-  // Submit New Lead with Mandatory Quotation File & Client Status
+  // Submit New Lead with Mandatory Quotation File & Client Status (BDM ONLY)
   const handleCreateLead = async (e) => {
     e.preventDefault();
     if (!form.companyName.trim()) {
@@ -288,13 +361,15 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
       setSubmitting(true);
       setFeedback(null);
 
+      const targetBdm = loggedInBdmName || form.bdmName1;
+
       const formData = new FormData();
       formData.append('companyName', form.companyName.trim());
       formData.append('directorName', form.directorName.trim());
       formData.append('mobileNo', form.mobileNo.trim());
       formData.append('emailId', form.emailId.trim());
       formData.append('leaderName', form.leaderName);
-      formData.append('bdmName1', form.bdmName1);
+      formData.append('bdmName1', targetBdm);
       formData.append('bdmName2', form.bdmName2);
       formData.append('closerStatus', form.closerStatus);
       formData.append('clientStatus', form.clientStatus || 'Warm');
@@ -310,12 +385,17 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
-      setFeedback({ type: 'success', message: `Lead for "${form.companyName}" successfully logged with Quotation!` });
+      const addedValueMsg = form.dealValue ? ` with deal value of ₹${Number(form.dealValue).toLocaleString('en-IN')}` : '';
+      setFeedback({
+        type: 'success',
+        message: `Lead for "${form.companyName}" successfully logged into your LMS${addedValueMsg}! Your pipeline deal funnel has been updated.`,
+      });
+
       // Reset form (keep BDM & Leader selection)
       setForm({
         ...initialFormState,
         leaderName: form.leaderName,
-        bdmName1: form.bdmName1,
+        bdmName1: targetBdm,
       });
       setQuotationFile(null);
       setFileError(null);
@@ -424,37 +504,55 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
               <div className="flex items-center gap-2">
                 <h1 className="text-lg font-bold text-slate-900 tracking-tight">Lead Management System (LMS)</h1>
                 <span className="text-[10px] uppercase font-bold tracking-wider px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
-                  {isAdmin ? 'Master LMS Control' : 'BDM Workspace'}
+                  {isAdmin ? 'Master LMS Control' : `${loggedInBdmName}'s Workspace`}
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
                 {isAdmin
-                  ? 'Track all BDM sales leads, client status temperatures (Hot/Warm/Lost), quotations, and closing deadlines'
-                  : 'Capture prospective clients, tag client status (Hot/Warm/Lost), attach mandatory quotations, and convert to deals'}
+                  ? 'Monitor company-wide BDM sales funnels, review lead temperatures (Hot/Warm/Lost), inspect quotations, and export reports'
+                  : 'Capture and manage your prospective clients, build your personal deal funnel, attach quotations, and convert to active deals'}
               </p>
             </div>
           </div>
         </div>
 
         {/* Header Action Buttons */}
-        <div className="flex items-center gap-2 self-stretch md:self-auto justify-end">
+        <div className="flex items-center gap-2 self-stretch md:self-auto justify-end flex-wrap">
+          {/* Admin BDM Funnel Toggle */}
+          {isAdmin && (
+            <button
+              onClick={() => setShowBdmLeaderboard(!showBdmLeaderboard)}
+              className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition border ${
+                showBdmLeaderboard
+                  ? 'bg-indigo-900 text-white border-indigo-900 shadow-xs'
+                  : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'
+              }`}
+            >
+              <Award className="w-3.5 h-3.5" />
+              <span>{showBdmLeaderboard ? 'Hide BDM Funnels' : 'BDM Funnel Breakdown'}</span>
+            </button>
+          )}
+
           <button
-            onClick={() => exportLeadsToCsv(leads, isAdmin ? 'All_Company_LMS_Leads.csv' : 'My_BDM_LMS_Leads.csv')}
-            disabled={leads.length === 0}
+            onClick={() => exportLeadsToCsv(visibleLeads, isAdmin ? 'All_Company_LMS_Leads.csv' : `${loggedInBdmName}_LMS_Leads.csv`)}
+            disabled={visibleLeads.length === 0}
             className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-50"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>Export CSV ({leads.length})</span>
+            <span>Export CSV ({visibleLeads.length})</span>
           </button>
 
-          <button
-            onClick={() => setIsFormOpen(!isFormOpen)}
-            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-xs"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>{isFormOpen ? 'Hide Lead Form' : 'Log New Lead'}</span>
-            {isFormOpen ? <ChevronUp className="w-3.5 h-3.5 ml-1" /> : <ChevronDown className="w-3.5 h-3.5 ml-1" />}
-          </button>
+          {/* LOG NEW LEAD BUTTON (BDM ONLY - REMOVED FOR ADMIN) */}
+          {!isAdmin && (
+            <button
+              onClick={() => setIsFormOpen(!isFormOpen)}
+              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-xs"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>{isFormOpen ? 'Hide Lead Form' : 'Log New Lead'}</span>
+              {isFormOpen ? <ChevronUp className="w-3.5 h-3.5 ml-1" /> : <ChevronDown className="w-3.5 h-3.5 ml-1" />}
+            </button>
+          )}
         </div>
       </div>
 
@@ -471,18 +569,49 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
         </div>
       )}
 
-      {/* 2. ANALYTICS KPI TILES (With Client Status: Hot, Warm, Lost Breakdown) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
+      {/* 2. ANALYTICS KPI TILES (HERO FUNNEL VALUE CARD + STATUS COUNTERS) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-3">
+        {/* HERO TILE: TOTAL DEAL FUNNEL VALUE */}
+        <div className="col-span-2 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 p-4 rounded-xl border border-indigo-700/40 text-white shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
+              <TrendingUp className="w-3.5 h-3.5 text-indigo-400" />
+              {isAdmin ? 'Total Pipeline Deal Funnel' : 'My Total Deal Funnel'}
+            </span>
+            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-200 border border-indigo-400/30">
+              {isAdmin ? (analytics?.totalLeads ?? leads.length) : visibleLeads.length} Leads
+            </span>
+          </div>
+          <div className="text-2xl font-black text-white mt-1.5 tracking-tight">
+            ₹{Number(isAdmin ? (analytics?.totalEstimatedValue || 0) : bdmPersonalFunnel).toLocaleString('en-IN')}
+          </div>
+          <div className="flex items-center gap-2.5 text-[11px] text-slate-300 mt-2 pt-2 border-t border-white/10 flex-wrap">
+            <span className="flex items-center gap-1">
+              <span className="text-rose-400 font-bold">🔥 Hot:</span>
+              <span className="text-white font-semibold">
+                ₹{Number(isAdmin ? (analytics?.hotFunnelValue || 0) : bdmHotFunnel).toLocaleString('en-IN')}
+              </span>
+            </span>
+            <span className="text-white/20">•</span>
+            <span className="flex items-center gap-1">
+              <span className="text-amber-400 font-bold">☀️ Warm:</span>
+              <span className="text-white font-semibold">
+                ₹{Number(isAdmin ? (analytics?.warmFunnelValue || 0) : bdmWarmFunnel).toLocaleString('en-IN')}
+              </span>
+            </span>
+          </div>
+        </div>
+
         {/* Total Leads */}
         <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
           <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-            {isAdmin ? 'Total Pipeline Leads' : 'My Logged Leads'}
+            {isAdmin ? 'Total Leads' : 'My Leads'}
           </span>
           <div className="text-xl font-extrabold text-slate-900 mt-0.5">
-            {analytics?.totalLeads ?? leads.length}
+            {isAdmin ? (analytics?.totalLeads ?? leads.length) : visibleLeads.length}
           </div>
-          <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
-            <TrendingUp className="w-3 h-3 text-emerald-600" /> Active Database
+          <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1 truncate">
+            <TrendingUp className="w-3 h-3 text-emerald-600" /> Active Leads
           </div>
         </div>
 
@@ -492,10 +621,12 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
             <span>🔥</span> Hot Clients
           </span>
           <div className="text-xl font-extrabold text-rose-700 mt-0.5">
-            {analytics?.byClientStatus?.Hot ?? 0}
+            {isAdmin
+              ? (analytics?.byClientStatus?.Hot ?? 0)
+              : visibleLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'hot').length}
           </div>
-          <div className="text-[11px] text-rose-600 mt-1 font-semibold">
-            High Intent to Close
+          <div className="text-[11px] text-rose-600 mt-1 font-semibold truncate">
+            Val: ₹{Number(isAdmin ? (analytics?.hotFunnelValue || 0) : bdmHotFunnel).toLocaleString('en-IN')}
           </div>
         </div>
 
@@ -505,10 +636,12 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
             <span>☀️</span> Warm Clients
           </span>
           <div className="text-xl font-extrabold text-amber-700 mt-0.5">
-            {analytics?.byClientStatus?.Warm ?? 0}
+            {isAdmin
+              ? (analytics?.byClientStatus?.Warm ?? 0)
+              : visibleLeads.filter((l) => (l.clientStatus || 'warm').toLowerCase() === 'warm').length}
           </div>
-          <div className="text-[11px] text-amber-600 mt-1 font-semibold">
-            Active Follow-ups
+          <div className="text-[11px] text-amber-600 mt-1 font-semibold truncate">
+            Val: ₹{Number(isAdmin ? (analytics?.warmFunnelValue || 0) : bdmWarmFunnel).toLocaleString('en-IN')}
           </div>
         </div>
 
@@ -518,10 +651,12 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
             <span>❄️</span> Lost Clients
           </span>
           <div className="text-xl font-extrabold text-slate-700 mt-0.5">
-            {analytics?.byClientStatus?.Lost ?? 0}
+            {isAdmin
+              ? (analytics?.byClientStatus?.Lost ?? 0)
+              : visibleLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'lost').length}
           </div>
           <div className="text-[11px] text-slate-500 mt-1">
-            Dropped / Inactive
+            Dropped
           </div>
         </div>
 
@@ -531,25 +666,16 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
             Meetings Scheduled
           </span>
           <div className="text-xl font-extrabold text-blue-600 mt-0.5">
-            {(analytics?.byMeetingStatus?.['Google/Team Meet'] || 0) +
-              (analytics?.byMeetingStatus?.['Conference Call'] || 0) +
-              (analytics?.byMeetingStatus?.['Physical Meeting'] || 0)}
+            {isAdmin
+              ? ((analytics?.byMeetingStatus?.['Google/Team Meet'] || 0) +
+                 (analytics?.byMeetingStatus?.['Conference Call'] || 0) +
+                 (analytics?.byMeetingStatus?.['Physical Meeting'] || 0))
+              : visibleLeads.filter((l) =>
+                  ['Google/Team Meet', 'Conference Call', 'Physical Meeting'].includes(l.meetingStatus)
+                ).length}
           </div>
           <div className="text-[11px] text-slate-500 mt-1 truncate">
-            Physical: {analytics?.byMeetingStatus?.['Physical Meeting'] ?? 0}
-          </div>
-        </div>
-
-        {/* Documents Received */}
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
-          <span className="text-[10px] font-bold text-cyan-700 uppercase tracking-wider block">
-            Documents Received
-          </span>
-          <div className="text-xl font-extrabold text-cyan-600 mt-0.5">
-            {analytics?.byMeetingStatus?.['Document Received'] ?? 0}
-          </div>
-          <div className="text-[11px] text-slate-500 mt-1">
-            Ready for Proposal
+            Physical / Meets
           </div>
         </div>
 
@@ -562,13 +688,91 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
             {analytics?.overdueEdcCount ?? 0}
           </div>
           <div className="text-[11px] text-purple-600/80 mt-1">
-            Urgent Follow-Up
+            Urgent Action
           </div>
         </div>
       </div>
 
-      {/* 3. LEAD CAPTURE FORM (Collapsible) */}
-      {isFormOpen && (
+      {/* 2B. ADMIN BDM FUNNEL LEADERBOARD (Collapsible breakdown) */}
+      {isAdmin && showBdmLeaderboard && (
+        <div className="bg-white border border-indigo-200 rounded-2xl p-5 shadow-xs space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Award className="w-4 h-4 text-indigo-600" />
+                BDM Deal Funnel Leaderboard & Pipeline Value Distribution
+              </h3>
+              <p className="text-xs text-slate-500">
+                Track each BDM's total prospective pipeline value, hot deal volume, and lead conversion capacity
+              </p>
+            </div>
+            <span className="text-xs font-extrabold text-indigo-900 bg-indigo-50 border border-indigo-200 px-3 py-1 rounded-lg">
+              Total Funnel: ₹{Number(analytics?.totalEstimatedValue || 0).toLocaleString('en-IN')}
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase text-[10px]">
+                  <th className="py-2.5 px-3">Rank & BDM Name</th>
+                  <th className="py-2.5 px-3 text-center">Total Leads</th>
+                  <th className="py-2.5 px-3 text-right">Total Deal Funnel (₹)</th>
+                  <th className="py-2.5 px-3 text-right">🔥 Hot Funnel (₹)</th>
+                  <th className="py-2.5 px-3 text-right">☀️ Warm Funnel (₹)</th>
+                  <th className="py-2.5 px-3 text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-medium">
+                {bdmFunnelList.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-6 text-center text-slate-400 italic">
+                      No BDM lead funnel values recorded yet. Values accumulate automatically as BDMs log leads with deal value.
+                    </td>
+                  </tr>
+                ) : (
+                  bdmFunnelList.map((item, idx) => (
+                    <tr key={item.bdmName} className="hover:bg-slate-50 transition">
+                      <td className="py-2.5 px-3 font-bold text-slate-900 flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center text-[10px] font-extrabold">
+                          #{idx + 1}
+                        </span>
+                        <span>{item.bdmName}</span>
+                      </td>
+                      <td className="py-2.5 px-3 text-center font-bold text-slate-700">
+                        {item.count}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-black text-indigo-900 text-sm">
+                        ₹{Number(item.totalValue).toLocaleString('en-IN')}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-bold text-rose-700">
+                        ₹{Number(item.hotValue).toLocaleString('en-IN')}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-semibold text-amber-700">
+                        ₹{Number(item.warmValue).toLocaleString('en-IN')}
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        <button
+                          onClick={() => {
+                            setSelectedBdmFilter(item.bdmName);
+                            setShowBdmLeaderboard(false);
+                          }}
+                          className="px-2.5 py-1 bg-slate-100 hover:bg-slate-900 hover:text-white rounded text-[11px] font-semibold transition"
+                        >
+                          View Leads
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* 3. LEAD CAPTURE FORM (BDM ONLY - COMPLETELY REMOVED FOR ADMIN) */}
+      {!isAdmin && isFormOpen && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
           <div className="bg-slate-50/80 border-b border-slate-200 px-5 py-3.5 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -577,7 +781,14 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                 Log New Prospective Client (LMS Entry)
               </h2>
             </div>
-            <span className="text-[11px] text-slate-500">All fields with * are mandatory</span>
+            <div className="flex items-center gap-3 text-xs">
+              <span className="text-[11px] text-slate-600 flex items-center gap-1 font-semibold">
+                <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
+                BDM: <strong className="text-indigo-900">{loggedInBdmName}</strong>
+              </span>
+              <span className="text-[11px] text-slate-400">|</span>
+              <span className="text-[11px] text-slate-500">All fields with * are mandatory</span>
+            </div>
           </div>
 
           <form onSubmit={handleCreateLead} className="p-5 space-y-4">
@@ -650,7 +861,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
               </div>
             </div>
 
-            {/* Row 2: Leader's Name, BDM-I, BDM-II, Closer Status */}
+            {/* Row 2: Leader's Name, BDM-I (Locked to current BDM), BDM-II, Closer Status */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
               <div>
                 <label className="text-xs font-semibold text-slate-700 block mb-1">
@@ -668,20 +879,20 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                 </select>
               </div>
 
+              {/* BDM-I: LOCKED TO CURRENT LOGGED-IN BDM */}
               <div>
                 <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  BDM's Name - I (Primary) <span className="text-rose-500">*</span>
+                  BDM's Name - I (Primary BDM) <span className="text-rose-500">*</span>
                 </label>
-                <select
-                  required
-                  value={form.bdmName1}
-                  onChange={(e) => setForm({ ...form, bdmName1: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 font-medium focus:bg-white focus:border-slate-800 focus:outline-none"
-                >
-                  {LMS_BDMS.map((bdm) => (
-                    <option key={bdm} value={bdm}>{bdm}</option>
-                  ))}
-                </select>
+                <div className="w-full bg-slate-100 border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 font-bold flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
+                    {loggedInBdmName}
+                  </span>
+                  <span className="text-[10px] text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full font-bold">
+                    You
+                  </span>
+                </div>
               </div>
 
               <div>
@@ -694,7 +905,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                   className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 font-medium focus:bg-white focus:border-slate-800 focus:outline-none"
                 >
                   <option value="">-- None (Single BDM) --</option>
-                  {LMS_BDMS.filter((b) => b !== form.bdmName1).map((bdm) => (
+                  {LMS_BDMS.filter((b) => b !== loggedInBdmName).map((bdm) => (
                     <option key={bdm} value={bdm}>{bdm}</option>
                   ))}
                 </select>
@@ -717,7 +928,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
               </div>
             </div>
 
-            {/* Row 3: Client Status (Hot, Warm, Lost), Sourcing Status, Meeting Status, EDC Date, Estimated Value */}
+            {/* Row 3: Client Status (Hot, Warm, Lost), Sourcing Status, Meeting Status, EDC Date, Estimated Value + Funnel Accumulator */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
               {/* Client Status Selector (Hot / Warm / Lost) */}
               <div>
@@ -798,19 +1009,50 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                 </div>
               </div>
 
+              {/* ESTIMATED DEAL VALUE (₹) WITH REAL-TIME FUNNEL IMPACT ACCUMULATOR */}
               <div>
                 <label className="text-xs font-semibold text-slate-700 block mb-1">
                   Estimated Deal Value (₹)
                 </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="500"
-                  value={form.dealValue}
-                  onChange={(e) => setForm({ ...form, dealValue: e.target.value })}
-                  placeholder="e.g. 50000"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 focus:bg-white focus:border-slate-800 focus:outline-none font-mono"
-                />
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">₹</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="500"
+                    value={form.dealValue}
+                    onChange={(e) => setForm({ ...form, dealValue: e.target.value })}
+                    placeholder="e.g. 50000"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-7 pr-3 py-2 text-xs text-slate-900 focus:bg-white focus:border-slate-800 focus:outline-none font-mono"
+                  />
+                </div>
+
+                {/* Real-Time BDM Funnel Accumulator Indicator */}
+                <div className="mt-1.5 p-2 bg-indigo-50/80 border border-indigo-200 rounded-lg text-[11px] space-y-1">
+                  <div className="flex items-center justify-between text-indigo-950 font-medium">
+                    <span className="truncate max-w-[120px] text-[10px] uppercase font-bold text-indigo-700">
+                      Your Funnel:
+                    </span>
+                    <strong className="font-extrabold text-slate-900">
+                      ₹{Number(currentBdmFunnel).toLocaleString('en-IN')}
+                    </strong>
+                  </div>
+
+                  {enteredDealValue > 0 ? (
+                    <div className="pt-1 border-t border-indigo-200 flex items-center justify-between gap-1">
+                      <span className="text-emerald-700 font-semibold text-[10px]">
+                        +₹{Number(enteredDealValue).toLocaleString('en-IN')}
+                      </span>
+                      <span className="font-extrabold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded text-[10px]">
+                        ➔ Funnel: ₹{Number(projectedBdmFunnel).toLocaleString('en-IN')}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="text-[10px] text-slate-400 italic">
+                      Type deal amount to preview updated funnel
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -977,7 +1219,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
             ))}
           </select>
 
-          {/* BDM Filter */}
+          {/* BDM Filter (ADMIN ONLY) */}
           {isAdmin && (
             <select
               value={selectedBdmFilter}
@@ -1050,6 +1292,20 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
 
       {/* 5. LEADS DATA TABLE */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+        {/* Table Scope Indicator Header */}
+        <div className="bg-slate-50/60 border-b border-slate-200 px-5 py-2.5 flex items-center justify-between text-xs text-slate-500">
+          <span>
+            {isAdmin
+              ? `Showing all company leads across all BDMs (${visibleLeads.length})`
+              : `Showing your personal leads only (${visibleLeads.length})`}
+          </span>
+          {!isAdmin && (
+            <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded">
+              BDM Account: {loggedInBdmName}
+            </span>
+          )}
+        </div>
+
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
@@ -1060,7 +1316,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                 <th className="py-3 px-4">Sourcing & Closer</th>
                 <th className="py-3 px-4">Client Status</th>
                 <th className="py-3 px-4">Meeting Status</th>
-                <th className="py-3 px-4">Expected Closer (EDC)</th>
+                <th className="py-3 px-4">Expected Closer & Deal Value</th>
                 <th className="py-3 px-4">Quotation Document</th>
                 <th className="py-3 px-4">Pipeline Stage</th>
                 <th className="py-3 px-4 text-center">Action</th>
@@ -1073,14 +1329,16 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                     Loading LMS lead records...
                   </td>
                 </tr>
-              ) : leads.length === 0 ? (
+              ) : visibleLeads.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="py-12 text-center text-slate-400 text-xs">
-                    No leads found matching current criteria. Click "Log New Lead" above to record your prospective client!
+                    {isAdmin
+                      ? 'No leads found matching current criteria.'
+                      : 'You have not logged any prospective leads yet. Click "Log New Lead" above to record your first prospective client!'}
                   </td>
                 </tr>
               ) : (
-                leads.map((lead) => {
+                visibleLeads.map((lead) => {
                   const edcBadge = getEdcBadge(lead.expectedDateOfCloser, lead.leadStatus);
                   const currentStageMeta = LMS_LEAD_STAGES.find((s) => s.id === (lead.leadStatus || 'OPEN')) || LMS_LEAD_STAGES[0];
                   const isPdf = lead.quotationFileName?.toLowerCase().endsWith('.pdf');
@@ -1194,18 +1452,21 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                         </select>
                       </td>
 
-                      {/* Expected Closer (EDC) */}
+                      {/* Expected Closer & Deal Value */}
                       <td className="py-3 px-4">
                         <div className="flex flex-col gap-1">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border ${edcBadge.color}`}>
+                          {lead.dealValue ? (
+                            <span className="text-xs font-black text-slate-900 flex items-center gap-1 font-mono">
+                              <span className="text-[10px] text-slate-400 font-normal">Funnel:</span>
+                              ₹{Number(lead.dealValue).toLocaleString('en-IN')}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-slate-400 italic">No value</span>
+                          )}
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border ${edcBadge.color}`}>
                             <Clock className="w-3 h-3" />
                             {edcBadge.label}
                           </span>
-                          {lead.dealValue && (
-                            <span className="text-[11px] font-bold text-slate-700">
-                              Val: ₹{Number(lead.dealValue).toLocaleString('en-IN')}
-                            </span>
-                          )}
                         </div>
                       </td>
 
@@ -1283,7 +1544,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                                   clientName: lead.directorName || lead.companyName,
                                   clientPhone: lead.mobileNo,
                                   clientEmail: lead.emailId || '',
-                                  remarks: `Converted from LMS (Client Status: ${lead.clientStatus || 'Warm'}, Leader: ${lead.leaderName}, Source: ${lead.sourcingStatus}). Quotation: ${lead.quotationFileName || 'None'}. ${lead.remarks || ''}`,
+                                  remarks: `Converted from LMS (Client Status: ${lead.clientStatus || 'Warm'}, Funnel Value: ₹${lead.dealValue || 0}, Leader: ${lead.leaderName}, Source: ${lead.sourcingStatus}). Quotation: ${lead.quotationFileName || 'None'}. ${lead.remarks || ''}`,
                                 });
                               }
                             }}

@@ -59,6 +59,7 @@ const BDMS_LIST = [
   'Panchal Kunal',
   'Yash Rathod',
   'Pankaj Solanki',
+  'Rahul Sharma',
 ];
 
 const CLOSER_STATUS_LIST = [
@@ -197,23 +198,29 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
     const params = [];
     let paramIndex = 1;
 
-    // RBAC: If BDM and scope is 'my' (or default for BDM), restrict to their own leads
+    // RBAC: If BDM and scope is 'my' (or default for BDM), strictly restrict to ONLY their own leads
     if (isBdmOnly || scope === 'my') {
-      const userFullName = req.user.fullName || '';
-      conditions.push(`("createdById" = $${paramIndex} OR "bdmName1" ILIKE $${paramIndex + 1} OR "bdmName2" ILIKE $${paramIndex + 1})`);
-      params.push(req.user.id, `%${userFullName}%`);
-      paramIndex += 2;
-    }
+      const userFullName = (req.user.fullName || '').replace(/\s*\([^)]*\)/g, '').trim();
+      const targetBdm = (req.query.myBdmName && req.query.myBdmName.trim()) 
+        ? req.query.myBdmName.trim() 
+        : userFullName;
 
-    if (leaderName && leaderName !== 'ALL') {
-      conditions.push(`"leaderName" = $${paramIndex}`);
-      params.push(leaderName);
+      conditions.push(`(
+        "bdmName1" ILIKE ${paramIndex} 
+        OR "bdmName2" ILIKE ${paramIndex}
+        OR ("createdById" = ${paramIndex + 1} AND ("bdmName1" ILIKE ${paramIndex} OR "bdmName1" = '' OR "bdmName1" IS NULL))
+      )`);
+      params.push(`%${targetBdm}%`, req.user.id);
+      paramIndex += 2;
+    } else if (bdmName && bdmName !== 'ALL') {
+      conditions.push(`("bdmName1" = ${paramIndex} OR "bdmName2" = ${paramIndex})`);
+      params.push(bdmName);
       paramIndex++;
     }
 
-    if (bdmName && bdmName !== 'ALL') {
-      conditions.push(`("bdmName1" = $${paramIndex} OR "bdmName2" = $${paramIndex})`);
-      params.push(bdmName);
+    if (leaderName && leaderName !== 'ALL') {
+      conditions.push(`"leaderName" = ${paramIndex}`);
+      params.push(leaderName);
       paramIndex++;
     }
 

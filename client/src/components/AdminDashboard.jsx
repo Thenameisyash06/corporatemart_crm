@@ -305,6 +305,7 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, onConve
   const [clients, setClients] = useState([]);
   const [activeSubTab, setActiveSubTab] = useState('deals');
   const [lmsCount, setLmsCount] = useState(0);
+  const [lmsAnalytics, setLmsAnalytics] = useState(null);
   
   // Deals tab filter & search
   const [dealSearch, setDealSearch] = useState('');
@@ -381,6 +382,7 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, onConve
       try {
         const leadsRes = await api.get('/leads');
         setLmsCount((leadsRes.data.leads || []).length);
+        setLmsAnalytics(leadsRes.data.analytics || null);
       } catch (err) {}
       setLoading(false);
     }
@@ -597,14 +599,25 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, onConve
         </div>
 
         {/* 2. TOP KPI CARDS */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 mt-6 pt-5 border-t border-white/10">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5 mt-6 pt-5 border-t border-white/10">
           <div className="bg-white/5 rounded-xl p-3.5 border border-white/10">
-            <span className="text-[11px] font-medium text-slate-300 uppercase tracking-wider block">Total Pipeline Value</span>
+            <span className="text-[11px] font-medium text-slate-300 uppercase tracking-wider block">Closed Pipeline Value</span>
             <div className="text-xl font-extrabold text-white mt-1">
               ₹{Number(summary.totalRevenue || 0).toLocaleString('en-IN')}
             </div>
             <div className="text-[11px] text-slate-300 mt-1 flex items-center gap-1">
               <span>Avg Deal: ₹{Number(summary.avgDealSize || 0).toLocaleString('en-IN')}</span>
+            </div>
+          </div>
+          <div className="bg-indigo-950/40 rounded-xl p-3.5 border border-indigo-500/30">
+            <span className="text-[11px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1">
+              <TrendingUp className="w-3.5 h-3.5 text-indigo-400" /> LMS Lead Funnel
+            </span>
+            <div className="text-xl font-extrabold text-amber-300 mt-1">
+              ₹{Number(lmsAnalytics?.totalEstimatedValue || 0).toLocaleString('en-IN')}
+            </div>
+            <div className="text-[11px] text-indigo-200 mt-1">
+              {lmsCount} prospective leads in funnel
             </div>
           </div>
 
@@ -985,6 +998,28 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, onConve
                       <span className="font-extrabold text-indigo-800">
                         {bdm.dealsCount} Total ({bdm.closedDealsCount} Closed)
                       </span>
+                    </div>
+
+                    {/* BDM LMS Lead Funnel Value */}
+                    <div className="p-2.5 rounded-lg bg-indigo-50/70 border border-indigo-100 col-span-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-indigo-700 uppercase font-bold flex items-center gap-1">
+                          <TrendingUp className="w-3 h-3 text-indigo-600" /> LMS Deal Funnel
+                        </span>
+                        <span className="text-[10px] font-semibold text-indigo-600">
+                          {lmsAnalytics?.bdmFunnel?.[bdm.fullName]?.count || 0} active leads
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="font-extrabold text-indigo-950 text-sm">
+                          ₹{Number(lmsAnalytics?.bdmFunnel?.[bdm.fullName]?.totalValue || 0).toLocaleString('en-IN')}
+                        </span>
+                        {(lmsAnalytics?.bdmFunnel?.[bdm.fullName]?.hotValue || 0) > 0 && (
+                          <span className="text-[10px] bg-rose-100 text-rose-800 font-bold px-1.5 py-0.5 rounded">
+                            🔥 Hot: ₹{Number(lmsAnalytics?.bdmFunnel?.[bdm.fullName]?.hotValue || 0).toLocaleString('en-IN')}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 
