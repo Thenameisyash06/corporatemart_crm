@@ -284,6 +284,12 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       upcomingEdcCount: 0,
       overdueEdcCount: 0,
       totalEstimatedValue: 0,
+      activeFunnelValue: 0,
+      hotFunnelValue: 0,
+      warmFunnelValue: 0,
+      lostFunnelValue: 0,
+      convertedFunnelValue: 0,
+      bdmFunnel: {},
     };
 
     // Initialize counts with 0 for all standard options
@@ -291,9 +297,13 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
     SOURCING_STATUS_LIST.forEach((s) => (analytics.bySourcingStatus[s] = 0));
     CLOSER_STATUS_LIST.forEach((s) => (analytics.byCloserStatus[s] = 0));
     LEADERS_LIST.forEach((l) => (analytics.byLeader[l] = 0));
+    BDMS_LIST.forEach((b) => {
+      analytics.bdmFunnel[b] = { count: 0, totalValue: 0, hotValue: 0, warmValue: 0, lostValue: 0 };
+    });
 
     leads.forEach((l) => {
       // Client status
+      const rawCs = (l.clientStatus || 'Warm').toLowerCase();
       if (l.clientStatus) {
         const cs = l.clientStatus.charAt(0).toUpperCase() + l.clientStatus.slice(1).toLowerCase();
         analytics.byClientStatus[cs] = (analytics.byClientStatus[cs] || 0) + 1;
@@ -322,9 +332,32 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       const stage = l.leadStatus || 'OPEN';
       analytics.byStage[stage] = (analytics.byStage[stage] || 0) + 1;
 
-      // Deal value
-      if (l.dealValue) {
-        analytics.totalEstimatedValue += parseFloat(l.dealValue) || 0;
+      // Deal value and Funnel aggregation
+      const val = l.dealValue ? parseFloat(l.dealValue) || 0 : 0;
+      if (val > 0) {
+        analytics.totalEstimatedValue += val;
+        if (rawCs === 'hot') analytics.hotFunnelValue += val;
+        else if (rawCs === 'warm') analytics.warmFunnelValue += val;
+        else if (rawCs === 'lost') analytics.lostFunnelValue += val;
+
+        if (stage === 'CLOSED_WON') {
+          analytics.convertedFunnelValue += val;
+        } else if (stage !== 'CLOSED_LOST') {
+          analytics.activeFunnelValue += val;
+        }
+      }
+
+      // Aggregate into bdmFunnel
+      const bdm1 = (l.bdmName1 || '').trim();
+      if (bdm1) {
+        if (!analytics.bdmFunnel[bdm1]) {
+          analytics.bdmFunnel[bdm1] = { count: 0, totalValue: 0, hotValue: 0, warmValue: 0, lostValue: 0 };
+        }
+        analytics.bdmFunnel[bdm1].count++;
+        analytics.bdmFunnel[bdm1].totalValue += val;
+        if (rawCs === 'hot') analytics.bdmFunnel[bdm1].hotValue += val;
+        else if (rawCs === 'warm') analytics.bdmFunnel[bdm1].warmValue += val;
+        else if (rawCs === 'lost') analytics.bdmFunnel[bdm1].lostValue += val;
       }
 
       // EDC Urgency
