@@ -174,6 +174,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
     clientStatus: 'Warm',
     sourcingStatus: LMS_SOURCING_STATUSES[0],
     meetingStatus: LMS_MEETING_STATUSES[0],
+    meetingDate: '',
     expectedDateOfCloser: '',
     leadStatus: 'OPEN',
     dealValue: '',
@@ -375,6 +376,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
       formData.append('clientStatus', form.clientStatus || 'Warm');
       formData.append('sourcingStatus', form.sourcingStatus);
       formData.append('meetingStatus', form.meetingStatus);
+      formData.append('meetingDate', form.meetingDate || '');
       formData.append('expectedDateOfCloser', form.expectedDateOfCloser);
       formData.append('leadStatus', form.leadStatus);
       formData.append('dealValue', form.dealValue);
@@ -928,8 +930,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
               </div>
             </div>
 
-            {/* Row 3: Client Status (Hot, Warm, Lost), Sourcing Status, Meeting Status, EDC Date, Estimated Value + Funnel Accumulator */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+            {/* Row 3: Client Status (Hot, Warm, Lost), Sourcing Status, Meeting Status, Meeting Date, EDC Date, Estimated Value + Funnel Accumulator */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3.5">
               {/* Client Status Selector (Hot / Warm / Lost) */}
               <div>
                 <label className="text-xs font-semibold text-slate-700 block mb-1">
@@ -992,6 +994,22 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                     <option key={ms} value={ms}>{ms}</option>
                   ))}
                 </select>
+              </div>
+
+              {/* MEETING DATE (NEW FIELD) */}
+              <div>
+                <label className="text-xs font-semibold text-slate-700 block mb-1">
+                  Meeting Date
+                </label>
+                <div className="relative">
+                  <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="date"
+                    value={form.meetingDate}
+                    onChange={(e) => setForm({ ...form, meetingDate: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-900 focus:bg-white focus:border-slate-800 focus:outline-none"
+                  />
+                </div>
               </div>
 
               <div>
@@ -1309,17 +1327,17 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
-              <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
-                <th className="py-3 px-4">Company & Director</th>
-                <th className="py-3 px-4">Contact Info</th>
-                <th className="py-3 px-4">Leader & BDM Team</th>
-                <th className="py-3 px-4">Sourcing & Closer</th>
-                <th className="py-3 px-4">Client Status</th>
-                <th className="py-3 px-4">Meeting Status</th>
-                <th className="py-3 px-4">Expected Closer & Deal Value</th>
-                <th className="py-3 px-4">Quotation Document</th>
-                <th className="py-3 px-4">Pipeline Stage</th>
-                <th className="py-3 px-4 text-center">Action</th>
+              <tr className="bg-slate-50/90 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider text-[10px]">
+                <th className="py-2.5 px-3">Company & Director</th>
+                <th className="py-2.5 px-3">Contact</th>
+                <th className="py-2.5 px-3">Leader & BDM</th>
+                <th className="py-2.5 px-3">Source & Closer</th>
+                <th className="py-2.5 px-3">Client Status</th>
+                <th className="py-2.5 px-3">Meeting Status & Date</th>
+                <th className="py-2.5 px-3">EDC & Deal Value</th>
+                <th className="py-2.5 px-3">Quotation</th>
+                <th className="py-2.5 px-3">Stage</th>
+                <th className="py-2.5 px-3 text-center">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
@@ -1346,32 +1364,42 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
 
                   return (
                     <tr key={lead.id} className="hover:bg-slate-50/70 transition">
-                      {/* Company & Director */}
-                      <td className="py-3 px-4">
-                        <div className="font-bold text-slate-900 text-sm">{lead.companyName}</div>
-                        <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1">
-                          <UserCheck className="w-3 h-3 text-slate-400" />
-                          <span>{lead.directorName || 'Director: Not Specified'}</span>
+                      {/* Company & Director with clean Created Date */}
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <div className="font-bold text-slate-900 text-sm leading-snug">{lead.companyName}</div>
+                        <div className="text-[11px] text-slate-500 flex items-center gap-1.5 mt-0.5">
+                          {lead.directorName && (
+                            <>
+                              <span className="font-medium text-slate-700 flex items-center gap-1">
+                                <UserCheck className="w-3 h-3 text-slate-400" />
+                                {lead.directorName}
+                              </span>
+                              <span className="text-slate-300">•</span>
+                            </>
+                          )}
+                          <span className="text-slate-400">
+                            Logged {lead.createdAt ? new Date(lead.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'N/A'}
+                          </span>
                         </div>
                         {lead.remarks && (
-                          <div className="text-[10px] text-slate-500 italic mt-1 line-clamp-1 max-w-[200px]" title={lead.remarks}>
+                          <div className="text-[10px] text-slate-400 italic mt-0.5 line-clamp-1 max-w-[200px]" title={lead.remarks}>
                             "{lead.remarks}"
                           </div>
                         )}
                       </td>
 
                       {/* Contact Info */}
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-1.5 font-mono text-slate-900 font-bold">
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5 font-mono text-slate-900 font-semibold text-xs">
                           <Phone className="w-3 h-3 text-indigo-500" />
                           <a href={`tel:${lead.mobileNo}`} className="hover:underline">
                             {lead.mobileNo}
                           </a>
                         </div>
                         {lead.emailId && (
-                          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-1">
-                            <Mail className="w-3 h-3 text-slate-400" />
-                            <a href={`mailto:${lead.emailId}`} className="hover:underline truncate max-w-[150px]">
+                          <div className="flex items-center gap-1 text-[11px] text-slate-400 mt-0.5">
+                            <Mail className="w-3 h-3 text-slate-300" />
+                            <a href={`mailto:${lead.emailId}`} className="hover:underline truncate max-w-[140px]">
                               {lead.emailId}
                             </a>
                           </div>
@@ -1379,152 +1407,124 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                       </td>
 
                       {/* Leader & BDM Team */}
-                      <td className="py-3 px-4">
-                        <div className="font-semibold text-slate-900 text-xs flex items-center gap-1">
-                          <span className="text-[10px] uppercase font-bold text-slate-400">Leader:</span>
-                          <span className="bg-slate-100 px-2 py-0.5 rounded text-[11px] font-bold text-slate-800">
-                            {lead.leaderName}
-                          </span>
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <div className="text-xs font-medium text-slate-800">
+                          {lead.bdmName1}
+                          {lead.bdmName2 && <span className="text-[11px] text-slate-400"> + {lead.bdmName2}</span>}
                         </div>
-                        <div className="text-[11px] text-slate-600 mt-1">
-                          <span className="text-slate-400 font-semibold">BDM I:</span> {lead.bdmName1}
+                        <div className="text-[11px] text-slate-400 mt-0.5">
+                          Lead: <span className="text-slate-600 font-medium">{lead.leaderName}</span>
                         </div>
-                        {lead.bdmName2 && (
-                          <div className="text-[10px] text-slate-500">
-                            <span className="text-slate-400 font-semibold">BDM II:</span> {lead.bdmName2}
-                          </div>
-                        )}
                       </td>
 
                       {/* Sourcing & Closer */}
-                      <td className="py-3 px-4">
-                        <div className="flex flex-col gap-1 items-start">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
-                            Source: {lead.sourcingStatus}
-                          </span>
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                            lead.closerStatus === 'Self Closer'
-                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                              : 'bg-purple-50 text-purple-800 border-purple-200'
-                          }`}>
-                            {lead.closerStatus}
-                          </span>
-                        </div>
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <div className="text-xs font-semibold text-slate-800">{lead.closerStatus}</div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">Via {lead.sourcingStatus}</div>
                       </td>
 
                       {/* Client Status (Hot, Warm, Lost) */}
-                      <td className="py-3 px-4 min-w-[130px]">
+                      <td className="py-2.5 px-3 whitespace-nowrap">
                         <select
                           value={currentClientStatus}
                           onChange={(e) => handleQuickUpdateLead(lead.id, { clientStatus: e.target.value })}
-                          className={`w-full text-xs font-bold rounded-lg px-2.5 py-1.5 border transition focus:outline-none cursor-pointer ${
+                          className={`text-xs font-bold rounded-md px-2 py-1 border transition focus:outline-none cursor-pointer ${
                             currentClientStatus === 'Hot'
-                              ? 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100'
+                              ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
                               : currentClientStatus === 'Lost'
-                              ? 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
-                              : 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100'
+                              ? 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                              : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
                           }`}
                         >
-                          <option value="Hot">🔥 Hot Client</option>
-                          <option value="Warm">☀️ Warm Client</option>
-                          <option value="Lost">❄️ Lost Client</option>
+                          <option value="Hot">🔥 Hot</option>
+                          <option value="Warm">☀️ Warm</option>
+                          <option value="Lost">❄️ Lost</option>
                         </select>
                       </td>
 
-                      {/* Meeting Status */}
-                      <td className="py-3 px-4 min-w-[160px]">
-                        <select
-                          value={lead.meetingStatus || LMS_MEETING_STATUSES[0]}
-                          onChange={(e) => handleQuickUpdateLead(lead.id, { meetingStatus: e.target.value })}
-                          className={`w-full text-xs font-semibold rounded-lg px-2 py-1.5 border focus:outline-none ${
-                            lead.meetingStatus === 'Document Received'
-                              ? 'bg-cyan-50 text-cyan-800 border-cyan-300'
-                              : lead.meetingStatus === 'Physical Meeting'
-                              ? 'bg-purple-50 text-purple-800 border-purple-300'
-                              : lead.meetingStatus === 'Google/Team Meet'
-                              ? 'bg-blue-50 text-blue-800 border-blue-300'
-                              : 'bg-slate-50 text-slate-800 border-slate-300'
-                          }`}
-                        >
-                          {LMS_MEETING_STATUSES.map((ms) => (
-                            <option key={ms} value={ms}>{ms}</option>
-                          ))}
-                        </select>
+                      {/* Meeting Status & Meeting Date */}
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <div className="flex flex-col gap-1">
+                          <select
+                            value={lead.meetingStatus || LMS_MEETING_STATUSES[0]}
+                            onChange={(e) => handleQuickUpdateLead(lead.id, { meetingStatus: e.target.value })}
+                            className="text-xs font-medium text-slate-800 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-md px-2 py-1 focus:outline-none focus:border-indigo-400 transition cursor-pointer"
+                          >
+                            {LMS_MEETING_STATUSES.map((ms) => (
+                              <option key={ms} value={ms}>{ms}</option>
+                            ))}
+                          </select>
+
+                          {/* Minimal inline Meeting Date */}
+                          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 px-0.5">
+                            <Calendar className="w-3 h-3 text-indigo-500 shrink-0" />
+                            <input
+                              type="date"
+                              value={lead.meetingDate ? new Date(lead.meetingDate).toISOString().split('T')[0] : ''}
+                              onChange={(e) => handleQuickUpdateLead(lead.id, { meetingDate: e.target.value || null })}
+                              className="bg-transparent text-[11px] font-medium text-slate-600 hover:text-indigo-600 focus:outline-none cursor-pointer border-0 p-0"
+                              title="Click to set or change Meeting Date"
+                            />
+                          </div>
+                        </div>
                       </td>
 
                       {/* Expected Closer & Deal Value */}
-                      <td className="py-3 px-4">
-                        <div className="flex flex-col gap-1">
-                          {lead.dealValue ? (
-                            <span className="text-xs font-black text-slate-900 flex items-center gap-1 font-mono">
-                              <span className="text-[10px] text-slate-400 font-normal">Funnel:</span>
-                              ₹{Number(lead.dealValue).toLocaleString('en-IN')}
-                            </span>
-                          ) : (
-                            <span className="text-[11px] text-slate-400 italic">No value</span>
-                          )}
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border ${edcBadge.color}`}>
-                            <Clock className="w-3 h-3" />
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <div className="font-mono font-bold text-xs text-slate-900">
+                          {lead.dealValue ? `₹${Number(lead.dealValue).toLocaleString('en-IN')}` : <span className="text-slate-400 font-normal italic">No value</span>}
+                        </div>
+                        <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
+                          <Clock className="w-3 h-3 text-slate-400 shrink-0" />
+                          <span className={edcBadge.label.includes('Overdue') ? 'text-rose-600 font-semibold' : ''}>
                             {edcBadge.label}
                           </span>
                         </div>
                       </td>
 
                       {/* Quotation Document */}
-                      <td className="py-3 px-4 min-w-[150px]">
+                      <td className="py-2.5 px-3 whitespace-nowrap">
                         {lead.quotationFileName ? (
-                          <div className="flex items-center gap-2">
-                            <div className="flex flex-col max-w-[120px]">
-                              <div className="flex items-center gap-1">
-                                <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${
-                                  isPdf
-                                    ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                    : 'bg-blue-50 text-blue-700 border-blue-200'
-                                }`}>
-                                  {lead.quotationFileName.split('.').pop()}
-                                </span>
-                                <span className="text-xs font-semibold text-slate-800 truncate" title={lead.quotationFileName}>
-                                  {lead.quotationFileName}
-                                </span>
-                              </div>
-                              {lead.quotationFileSize && (
-                                <span className="text-[10px] text-slate-400 mt-0.5">
-                                  {(lead.quotationFileSize / 1024).toFixed(0)} KB
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="flex items-center gap-0.5 shrink-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${
+                              isPdf
+                                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                : 'bg-blue-50 text-blue-700 border-blue-200'
+                            }`}>
+                              {lead.quotationFileName.split('.').pop()}
+                            </span>
+                            <span className="text-xs font-medium text-slate-700 truncate max-w-[90px]" title={lead.quotationFileName}>
+                              {lead.quotationFileName}
+                            </span>
+                            <button
+                              onClick={() => handleDownloadQuotation(lead)}
+                              disabled={downloadingId === lead.id}
+                              title="Download Quotation"
+                              className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                            </button>
+                            {isPdf && (
                               <button
-                                onClick={() => handleDownloadQuotation(lead)}
-                                disabled={downloadingId === lead.id}
-                                title="Download Quotation Document"
-                                className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
+                                onClick={() => handlePreviewQuotation(lead)}
+                                title="Open PDF Preview"
+                                className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition"
                               >
-                                <Download className="w-3.5 h-3.5" />
+                                <Eye className="w-3.5 h-3.5" />
                               </button>
-                              {isPdf && (
-                                <button
-                                  onClick={() => handlePreviewQuotation(lead)}
-                                  title="Open Quotation PDF in New Tab"
-                                  className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
-                                >
-                                  <Eye className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </div>
+                            )}
                           </div>
                         ) : (
-                          <span className="text-[11px] text-slate-400 italic">No document</span>
+                          <span className="text-[11px] text-slate-400 italic">None</span>
                         )}
                       </td>
 
                       {/* Pipeline Stage */}
-                      <td className="py-3 px-4 min-w-[150px]">
+                      <td className="py-2.5 px-3 whitespace-nowrap">
                         <select
                           value={lead.leadStatus || 'OPEN'}
                           onChange={(e) => handleQuickUpdateLead(lead.id, { leadStatus: e.target.value })}
-                          className={`w-full text-xs font-bold rounded-lg px-2.5 py-1.5 border focus:outline-none ${currentStageMeta.color}`}
+                          className={`text-xs font-semibold rounded-md px-2 py-1 border focus:outline-none transition cursor-pointer ${currentStageMeta.color}`}
                         >
                           {LMS_LEAD_STAGES.map((stg) => (
                             <option key={stg.id} value={stg.id}>{stg.label}</option>
@@ -1533,8 +1533,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                       </td>
 
                       {/* Action */}
-                      <td className="py-3 px-4 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
+                      <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                        <div className="flex items-center justify-center gap-1">
                           {/* Convert to Deal Button */}
                           <button
                             onClick={() => {
@@ -1549,9 +1549,9 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                               }
                             }}
                             title="Convert Lead into Active Deal"
-                            className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition shadow-xs flex items-center gap-1 whitespace-nowrap"
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-bold transition shadow-xs flex items-center gap-1"
                           >
-                            <ArrowRight className="w-3.5 h-3.5" />
+                            <ArrowRight className="w-3 h-3" />
                             <span>Deal</span>
                           </button>
 
@@ -1560,7 +1560,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                             <button
                               onClick={() => handleDeleteLead(lead.id)}
                               title="Delete Lead"
-                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                              className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>

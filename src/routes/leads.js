@@ -117,6 +117,7 @@ async function ensureLeadsTable() {
         "closerStatus" TEXT NOT NULL,
         "sourcingStatus" TEXT NOT NULL,
         "meetingStatus" TEXT NOT NULL,
+        "meetingDate" TIMESTAMP(3),
         "clientStatus" TEXT NOT NULL DEFAULT 'Warm',
         "expectedDateOfCloser" TIMESTAMP(3),
         "leadStatus" TEXT NOT NULL DEFAULT 'OPEN',
@@ -146,6 +147,9 @@ async function ensureLeadsTable() {
         EXCEPTION WHEN duplicate_column THEN END;
         BEGIN
           ALTER TABLE "leads" ADD COLUMN "clientStatus" TEXT DEFAULT 'Warm';
+        EXCEPTION WHEN duplicate_column THEN END;
+        BEGIN
+          ALTER TABLE "leads" ADD COLUMN "meetingDate" TIMESTAMP(3);
         EXCEPTION WHEN duplicate_column THEN END;
       END $$;
     `);
@@ -206,20 +210,20 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
         : userFullName;
 
       conditions.push(`(
-        "bdmName1" ILIKE ${paramIndex} 
-        OR "bdmName2" ILIKE ${paramIndex}
-        OR ("createdById" = ${paramIndex + 1} AND ("bdmName1" ILIKE ${paramIndex} OR "bdmName1" = '' OR "bdmName1" IS NULL))
+        "bdmName1" ILIKE $${paramIndex} 
+        OR "bdmName2" ILIKE $${paramIndex}
+        OR ("createdById" = $${paramIndex + 1} AND ("bdmName1" ILIKE $${paramIndex} OR "bdmName1" = '' OR "bdmName1" IS NULL))
       )`);
       params.push(`%${targetBdm}%`, req.user.id);
       paramIndex += 2;
     } else if (bdmName && bdmName !== 'ALL') {
-      conditions.push(`("bdmName1" = ${paramIndex} OR "bdmName2" = ${paramIndex})`);
+      conditions.push(`("bdmName1" = $${paramIndex} OR "bdmName2" = $${paramIndex})`);
       params.push(bdmName);
       paramIndex++;
     }
 
     if (leaderName && leaderName !== 'ALL') {
-      conditions.push(`"leaderName" = ${paramIndex}`);
+      conditions.push(`"leaderName" = $${paramIndex}`);
       params.push(leaderName);
       paramIndex++;
     }
@@ -366,6 +370,7 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
       clientStatus,
       sourcingStatus,
       meetingStatus,
+      meetingDate,
       expectedDateOfCloser,
       leadStatus,
       dealValue,
@@ -449,6 +454,7 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
 
     const id = crypto.randomUUID();
     const edc = expectedDateOfCloser ? new Date(expectedDateOfCloser) : null;
+    const parsedMeetingDate = meetingDate ? new Date(meetingDate) : null;
     const finalStage = leadStatus || 'OPEN';
     const finalValue = dealValue ? parseFloat(dealValue) : null;
 
@@ -456,10 +462,10 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
       `INSERT INTO "leads" (
         "id", "companyName", "directorName", "mobileNo", "emailId",
         "leaderName", "bdmName1", "bdmName2", "closerStatus", "sourcingStatus",
-        "meetingStatus", "clientStatus", "expectedDateOfCloser", "leadStatus", "dealValue",
+        "meetingStatus", "meetingDate", "clientStatus", "expectedDateOfCloser", "leadStatus", "dealValue",
         "remarks", "quotationFileUrl", "quotationFileName", "quotationFileSize",
         "createdById", "createdAt", "updatedAt"
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW(), NOW())`,
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW(), NOW())`,
       id,
       companyName.trim(),
       directorName ? directorName.trim() : null,
@@ -471,6 +477,7 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
       closerStatus,
       sourcingStatus,
       meetingStatus,
+      parsedMeetingDate,
       finalClientStatus,
       edc,
       finalStage,
@@ -566,6 +573,7 @@ router.patch('/:id', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req
       clientStatus,
       sourcingStatus,
       meetingStatus,
+      meetingDate,
       expectedDateOfCloser,
       leadStatus,
       dealValue,
@@ -624,6 +632,10 @@ router.patch('/:id', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req
     if (meetingStatus !== undefined) {
       updates.push(`"meetingStatus" = $${pIdx++}`);
       params.push(meetingStatus);
+    }
+    if (meetingDate !== undefined) {
+      updates.push(`"meetingDate" = $${pIdx++}`);
+      params.push(meetingDate ? new Date(meetingDate) : null);
     }
     if (expectedDateOfCloser !== undefined) {
       updates.push(`"expectedDateOfCloser" = $${pIdx++}`);

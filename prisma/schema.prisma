@@ -389,6 +389,7 @@ model Lead {
   closerStatus         String
   sourcingStatus       String
   meetingStatus        String
+  meetingDate          DateTime?
   clientStatus         String    @default("Warm") // Hot, Warm, Lost
   expectedDateOfCloser DateTime?
   leadStatus           String    @default("OPEN")
