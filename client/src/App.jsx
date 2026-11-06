@@ -286,9 +286,10 @@ export default function App() {
           {/* Quick presets for office team */}
           <div className="mt-6 pt-4 border-t border-slate-200">
             <span className="text-xs text-slate-500 block mb-2 font-semibold">Quick Department Logins:</span>
-            <div className="grid grid-cols-3 gap-2 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
               {[
                 { label: 'BDM (Sales)', email: 'bdm@corporatemart.com', pass: 'bdm123' },
+                { label: 'BDM (Leader)', email: 'leader@corporatemart.com', pass: 'leader123' },
                 { label: 'Accounts', email: 'accounts@corporatemart.com', pass: 'accounts123' },
                 { label: 'Legal', email: 'legal@corporatemart.com', pass: 'legal123' },
                 { label: 'Operations', email: 'ops@corporatemart.com', pass: 'ops123' },
@@ -297,6 +298,7 @@ export default function App() {
               ].map((p, i) => (
                 <button
                   key={i}
+                  type="button"
                   onClick={() => handleDirectLogin(p.email, p.pass)}
                   className="p-2 bg-slate-50 hover:bg-slate-100 text-slate-800 rounded-md border border-slate-200 font-medium truncate"
                 >

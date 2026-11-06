@@ -4,12 +4,12 @@
   "main": "electron/main.js",
   "scripts": {
     "start": "node src/server.js",
-    "server": "node src/server.js",
+    "server": "node --watch src/server.js",
     "client": "npm --prefix client run dev",
     "build": "npm --prefix client run build",
     "postinstall": "prisma generate && npm --prefix client install",
     "desktop": "electron electron/main.js",
-    "dev": "concurrently -k \"node src/server.js\" \"npm --prefix client run dev\"",
+    "dev": "concurrently -k \"node --watch src/server.js\" \"npm --prefix client run dev\"",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "db:seed": "node prisma/seed.js"

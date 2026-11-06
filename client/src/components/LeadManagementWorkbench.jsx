@@ -17,6 +17,7 @@ import {
   UserCheck,
   ChevronDown,
   ChevronUp,
+  ChevronRight,
   Plus,
   Send,
   Layers,
@@ -139,18 +140,6 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState(null);
 
-  // Toggle Form Visibility (BDM only)
-  const [isFormOpen, setIsFormOpen] = useState(!isAdmin);
-
-  // Admin BDM Funnel Leaderboard toggle
-  const [showBdmLeaderboard, setShowBdmLeaderboard] = useState(false);
-
-  // Quotation File Upload State
-  const [quotationFile, setQuotationFile] = useState(null);
-  const [fileError, setFileError] = useState(null);
-  const [downloadingId, setDownloadingId] = useState(null);
-  const quotationInputRef = useRef(null);
-
   // Determine current logged-in BDM's name accurately
   const loggedInBdmName = useMemo(() => {
     if (!currentUser?.fullName) return LMS_BDMS[0];
@@ -161,16 +150,116 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
     return match || currentUser.fullName.replace(/\s*\([^)]*\)/g, '').trim();
   }, [currentUser]);
 
+  // Check if current user is an LMS Leader
+  const matchedLeaderName = useMemo(() => {
+    if (!currentUser?.fullName) return null;
+    const clean = currentUser.fullName.replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+    return LMS_LEADERS.find((l) =>
+      clean.includes(l.toLowerCase()) || l.toLowerCase().includes(clean)
+    ) || null;
+  }, [currentUser]);
+
+  const isLeader = Boolean(matchedLeaderName);
+
+  // Toggle Form Visibility (BDM only - HIDE BY DEFAULT for Leader BDM and Admin, open for regular BDM)
+  const [isFormOpen, setIsFormOpen] = useState(!isAdmin && !isLeader);
+
+  // Auto-sync form visibility state when user changes/switches
+  useEffect(() => {
+    if (isAdmin || isLeader) {
+      setIsFormOpen(false);
+    } else {
+      setIsFormOpen(true);
+    }
+  }, [isAdmin, isLeader, currentUser?.id]);
+
+  // Admin BDM Funnel Leaderboard toggle
+  const [showBdmLeaderboard, setShowBdmLeaderboard] = useState(false);
+
+  // Quotation File Upload State
+  const [quotationFile, setQuotationFile] = useState(null);
+  const [fileError, setFileError] = useState(null);
+  const [downloadingId, setDownloadingId] = useState(null);
+  const quotationInputRef = useRef(null);
+
+  // Expandable lead rows state (Set of lead IDs)
+  const [expandedLeadIds, setExpandedLeadIds] = useState(new Set());
+
+  const toggleLeadExpand = (leadId) => {
+    setExpandedLeadIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(leadId)) {
+        next.delete(leadId);
+      } else {
+        next.add(leadId);
+      }
+      return next;
+    });
+  };
+
+  // Follow-up status recording modal state
+  const [followUpModalLead, setFollowUpModalLead] = useState(null);
+  const [followUpForm, setFollowUpForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    status: 'Hot',
+    remarks: '',
+  });
+  const [savingFollowUp, setSavingFollowUp] = useState(false);
+
+  // Helper to safely parse follow-ups list
+  const getFollowUpsList = (lead) => {
+    if (!lead?.followUps) return [];
+    if (Array.isArray(lead.followUps)) return lead.followUps;
+    try {
+      const parsed = JSON.parse(lead.followUps);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const handleSaveFollowUp = async (e) => {
+    if (e) e.preventDefault();
+    if (!followUpModalLead) return;
+    if (!followUpForm.date) {
+      alert('Please select a follow-up date.');
+      return;
+    }
+    try {
+      setSavingFollowUp(true);
+      await api.post(`/leads/${followUpModalLead.id}/follow-up`, {
+        date: followUpForm.date,
+        status: followUpForm.status,
+        remarks: followUpForm.remarks,
+      });
+      setFeedback({
+        type: 'success',
+        message: `Follow-up on ${followUpForm.date} (${followUpForm.status}) recorded and frozen for "${followUpModalLead.companyName}".`,
+      });
+      setFollowUpModalLead(null);
+      setFollowUpForm({
+        date: new Date().toISOString().split('T')[0],
+        status: 'Hot',
+        remarks: '',
+      });
+      fetchLeads();
+    } catch (err) {
+      alert('Failed to save follow-up: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setSavingFollowUp(false);
+    }
+  };
+
   // Form State (includes clientStatus default 'Warm')
   const initialFormState = {
     companyName: '',
     directorName: '',
     mobileNo: '',
     emailId: '',
-    leaderName: LMS_LEADERS[0],
+    leaderName: isLeader && matchedLeaderName ? matchedLeaderName : LMS_LEADERS[0],
     bdmName1: loggedInBdmName,
     bdmName2: '',
-    closerStatus: LMS_CLOSER_STATUSES[0],
+    closerStatus: isLeader ? 'Self Closer' : LMS_CLOSER_STATUSES[0],
     clientStatus: 'Warm',
     sourcingStatus: LMS_SOURCING_STATUSES[0],
     meetingStatus: LMS_MEETING_STATUSES[0],
@@ -183,12 +272,20 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
 
   const [form, setForm] = useState(initialFormState);
 
-  // Lock BDM-I to logged-in BDM
+  // Lock form fields:
+  // - BDM-I locked to logged-in BDM
+  // - For Leaders: Leader Name locked to themselves, Closer Status locked to 'Self Closer'
   useEffect(() => {
-    if (!isAdmin && loggedInBdmName) {
-      setForm((prev) => ({ ...prev, bdmName1: loggedInBdmName }));
+    if (!isAdmin) {
+      setForm((prev) => ({
+        ...prev,
+        bdmName1: loggedInBdmName || prev.bdmName1,
+        ...(isLeader && matchedLeaderName
+          ? { leaderName: matchedLeaderName, closerStatus: 'Self Closer' }
+          : {}),
+      }));
     }
-  }, [isAdmin, loggedInBdmName]);
+  }, [isAdmin, loggedInBdmName, isLeader, matchedLeaderName]);
 
   // Filters State
   const [searchQuery, setSearchQuery] = useState('');
@@ -208,6 +305,9 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
       if (!isAdmin) {
         params.scope = 'my';
         params.myBdmName = loggedInBdmName;
+        if (matchedLeaderName) {
+          params.myLeaderName = matchedLeaderName;
+        }
       } else {
         if (selectedBdmFilter !== 'ALL') params.bdmName = selectedBdmFilter;
       }
@@ -248,39 +348,195 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
     fetchLeads();
   };
 
-  // Strictly filter leads in BDM portal so BDM sees ONLY their own leads
-  const visibleLeads = useMemo(() => {
-    if (isAdmin) return leads;
+  // Separate Own Direct Leads vs Shared Team Leads
+  // NOTE: Funnel value, lead counts, and personal metrics belong ONLY to own direct leads.
+  // Team member shared leads are visible in the table below for collaborative actions and status/follow-up management.
+  const { ownDirectLeads, sharedTeamLeads, visibleLeads } = useMemo(() => {
+    if (isAdmin) {
+      return {
+        ownDirectLeads: leads,
+        sharedTeamLeads: [],
+        visibleLeads: leads,
+      };
+    }
+
     const myName = (loggedInBdmName || '').toLowerCase().trim();
-    if (!myName) return leads;
-    return leads.filter((lead) => {
+    const leaderKey = (matchedLeaderName || myName).toLowerCase().trim();
+    if (!myName && !leaderKey) {
+      return {
+        ownDirectLeads: leads,
+        sharedTeamLeads: [],
+        visibleLeads: leads,
+      };
+    }
+
+    const own = [];
+    const shared = [];
+
+    leads.forEach((lead) => {
       const bdm1 = (lead.bdmName1 || '').toLowerCase().trim();
       const bdm2 = (lead.bdmName2 || '').toLowerCase().trim();
-      return (
+      const leadLeader = (lead.leaderName || '').toLowerCase().trim();
+
+      // Check if lead belongs directly to this user as BDM or creator
+      const isOwnLead =
         bdm1.includes(myName) ||
         myName.includes(bdm1) ||
         bdm2.includes(myName) ||
-        (lead.createdById === currentUser?.id && (!lead.bdmName1 || bdm1.includes(myName) || myName.includes(bdm1)))
-      );
-    });
-  }, [leads, isAdmin, loggedInBdmName, currentUser]);
+        (lead.createdById === currentUser?.id && (!lead.bdmName1 || bdm1.includes(myName) || myName.includes(bdm1)));
 
-  // BDM's Personal Deal Funnel Value (calculated strictly on visible leads)
+      // Check if lead belongs to a team member and was shared with this user as leader
+      const isSharedWithMeAsLeader =
+        !isOwnLead &&
+        lead.closerStatus === 'Lead Sharing' &&
+        leaderKey &&
+        (leadLeader.includes(leaderKey) || leaderKey.includes(leadLeader));
+
+      if (isOwnLead) {
+        own.push(lead);
+      } else if (isSharedWithMeAsLeader) {
+        shared.push(lead);
+      }
+    });
+
+    return {
+      ownDirectLeads: own,
+      sharedTeamLeads: shared,
+      visibleLeads: [...own, ...shared],
+    };
+  }, [leads, isAdmin, loggedInBdmName, matchedLeaderName, currentUser]);
+
+  // BDM's Personal Deal Funnel Value (calculated STRICTLY on own direct leads, excluding team member leads)
   const bdmPersonalFunnel = useMemo(() => {
-    return visibleLeads.reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
-  }, [visibleLeads]);
+    return ownDirectLeads.reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
+  }, [ownDirectLeads]);
 
   const bdmHotFunnel = useMemo(() => {
-    return visibleLeads
+    return ownDirectLeads
       .filter((l) => (l.clientStatus || '').toLowerCase() === 'hot')
       .reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
-  }, [visibleLeads]);
+  }, [ownDirectLeads]);
 
   const bdmWarmFunnel = useMemo(() => {
-    return visibleLeads
+    return ownDirectLeads
       .filter((l) => (l.clientStatus || 'warm').toLowerCase() === 'warm')
       .reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
-  }, [visibleLeads]);
+  }, [ownDirectLeads]);
+
+  // Filter for Team Member selection (used to filter the leads table by a specific team member)
+  const [selectedTeamMemberFilter, setSelectedTeamMemberFilter] = useState('ALL');
+
+  // Compute team members overview cards for Leader BDM dashboard
+  const teamMembersCards = useMemo(() => {
+    if (!isLeader || !sharedTeamLeads || sharedTeamLeads.length === 0) return [];
+
+    const membersMap = {};
+
+    sharedTeamLeads.forEach((lead) => {
+      const memberName = (lead.bdmName1 || 'Unknown Team Member').trim();
+      if (!membersMap[memberName]) {
+        membersMap[memberName] = {
+          name: memberName,
+          leads: [],
+        };
+      }
+      membersMap[memberName].leads.push(lead);
+    });
+
+    return Object.values(membersMap).map((member) => {
+      const mLeads = member.leads;
+
+      // 1. Active Leads: not CLOSED_WON and not CLOSED_LOST
+      const activeLeads = mLeads.filter(
+        (l) => l.leadStatus !== 'CLOSED_WON' && l.leadStatus !== 'CLOSED_LOST'
+      ).length;
+
+      // 2. Hot
+      const hotCount = mLeads.filter(
+        (l) => (l.clientStatus || '').toLowerCase() === 'hot'
+      ).length;
+
+      // 3. Warm
+      const warmCount = mLeads.filter(
+        (l) => (l.clientStatus || 'warm').toLowerCase() === 'warm'
+      ).length;
+
+      // 4. Lost
+      const lostCount = mLeads.filter(
+        (l) => (l.clientStatus || '').toLowerCase() === 'lost' || l.leadStatus === 'CLOSED_LOST'
+      ).length;
+
+      // 5. Closed (Outcome)
+      const closedCount = mLeads.filter(
+        (l) => l.leadStatus === 'CLOSED_WON' || (l.clientStatus || '').toLowerCase() === 'closed'
+      ).length;
+
+      // 6. Meeting (leads with meeting scheduled, upcoming/recent meeting date & status)
+      const meetingLeads = mLeads.filter(
+        (l) => l.meetingDate || (l.meetingStatus && l.meetingStatus !== 'None')
+      );
+      const sortedMeetings = [...meetingLeads].sort((a, b) => {
+        const da = a.meetingDate ? new Date(a.meetingDate).getTime() : 0;
+        const db = b.meetingDate ? new Date(b.meetingDate).getTime() : 0;
+        return db - da;
+      });
+      const nextMeetingLead = sortedMeetings[0] || null;
+
+      // 7. Last Follow Up: gather all frozen follow-ups from all leads of this member and find the latest
+      const allFollowUps = [];
+      mLeads.forEach((l) => {
+        const fus = getFollowUpsList(l);
+        fus.forEach((fu) => {
+          allFollowUps.push({
+            ...fu,
+            companyName: l.companyName,
+            leadId: l.id,
+          });
+        });
+      });
+      allFollowUps.sort((a, b) => {
+        const ta = new Date(a.addedAt || a.date).getTime();
+        const tb = new Date(b.addedAt || b.date).getTime();
+        return tb - ta;
+      });
+      const lastFollowUp = allFollowUps[0] || null;
+
+      // 8. EDC (Expected Date of Closer): find the nearest upcoming EDC target among active leads
+      const activeLeadsWithEdc = mLeads.filter(
+        (l) => l.expectedDateOfCloser && l.leadStatus !== 'CLOSED_WON' && l.leadStatus !== 'CLOSED_LOST'
+      );
+      activeLeadsWithEdc.sort((a, b) => new Date(a.expectedDateOfCloser) - new Date(b.expectedDateOfCloser));
+      const nearestEdcLead = activeLeadsWithEdc[0] || mLeads.find((l) => l.expectedDateOfCloser) || null;
+
+      // Total Deal Funnel value for this member's shared leads
+      const totalFunnel = mLeads.reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
+
+      return {
+        name: member.name,
+        totalLeads: mLeads.length,
+        activeLeads,
+        hotCount,
+        warmCount,
+        lostCount,
+        closedCount,
+        meetingCount: meetingLeads.length,
+        nextMeetingLead,
+        lastFollowUp,
+        nearestEdcLead,
+        totalFunnel,
+      };
+    });
+  }, [isLeader, sharedTeamLeads]);
+
+  // Leads actually displayed in the table below (supports filtering to a selected team member)
+  const displayedLeads = useMemo(() => {
+    if (selectedTeamMemberFilter && selectedTeamMemberFilter !== 'ALL') {
+      return visibleLeads.filter(
+        (l) => (l.bdmName1 || '').toLowerCase().trim() === selectedTeamMemberFilter.toLowerCase().trim()
+      );
+    }
+    return visibleLeads;
+  }, [visibleLeads, selectedTeamMemberFilter]);
 
   // Memoized BDM Funnel Ranking (for Leaderboard - Robust backend + frontend fallback)
   const bdmFunnelList = useMemo(() => {
@@ -394,15 +650,18 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
 
       const targetBdm = loggedInBdmName || form.bdmName1;
 
+      const targetLeader = isLeader && matchedLeaderName ? matchedLeaderName : form.leaderName;
+      const targetCloser = isLeader ? 'Self Closer' : form.closerStatus;
+
       const formData = new FormData();
       formData.append('companyName', form.companyName.trim());
       formData.append('directorName', form.directorName.trim());
       formData.append('mobileNo', form.mobileNo.trim());
       formData.append('emailId', form.emailId.trim());
-      formData.append('leaderName', form.leaderName);
+      formData.append('leaderName', targetLeader);
       formData.append('bdmName1', targetBdm);
       formData.append('bdmName2', form.bdmName2);
-      formData.append('closerStatus', form.closerStatus);
+      formData.append('closerStatus', targetCloser);
       formData.append('clientStatus', form.clientStatus || 'Warm');
       formData.append('sourcingStatus', form.sourcingStatus);
       formData.append('meetingStatus', form.meetingStatus);
@@ -423,11 +682,12 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
         message: `Lead for "${form.companyName}" successfully logged into your LMS${addedValueMsg}! Your pipeline deal funnel has been updated.`,
       });
 
-      // Reset form (keep BDM & Leader selection)
+      // Reset form (keep BDM & Leader locked appropriately)
       setForm({
         ...initialFormState,
-        leaderName: form.leaderName,
+        leaderName: targetLeader,
         bdmName1: targetBdm,
+        closerStatus: targetCloser,
       });
       setQuotationFile(null);
       setFileError(null);
@@ -536,12 +796,14 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
               <div className="flex items-center gap-2">
                 <h1 className="text-lg font-bold text-slate-900 tracking-tight">Lead Management System (LMS)</h1>
                 <span className="text-[10px] uppercase font-bold tracking-wider px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
-                  {isAdmin ? 'Master LMS Control' : `${loggedInBdmName}'s Workspace`}
+                  {isAdmin ? 'Master LMS Control' : isLeader ? `${loggedInBdmName}'s Leader Workspace` : `${loggedInBdmName}'s Workspace`}
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
                 {isAdmin
                   ? 'Monitor company-wide BDM sales funnels, review lead temperatures (Hot/Warm/Lost), inspect quotations, and export reports'
+                  : isLeader
+                  ? 'Manage your direct leads and shared team leads, collaborate on frozen follow-ups and client statuses, and drive conversions'
                   : 'Capture and manage your prospective clients, build your personal deal funnel, attach quotations, and convert to active deals'}
               </p>
             </div>
@@ -564,12 +826,12 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
           </button>
 
           <button
-            onClick={() => exportLeadsToCsv(visibleLeads, isAdmin ? 'All_Company_LMS_Leads.csv' : `${loggedInBdmName}_LMS_Leads.csv`)}
-            disabled={visibleLeads.length === 0}
+            onClick={() => exportLeadsToCsv(displayedLeads, isAdmin ? 'All_Company_LMS_Leads.csv' : `${loggedInBdmName}_LMS_Leads.csv`)}
+            disabled={displayedLeads.length === 0}
             className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-50"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>Export CSV ({visibleLeads.length})</span>
+            <span>Export CSV ({displayedLeads.length})</span>
           </button>
 
           {/* LOG NEW LEAD BUTTON (BDM ONLY - REMOVED FOR ADMIN) */}
@@ -606,11 +868,18 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
               <TrendingUp className="w-3.5 h-3.5 text-indigo-400" />
-              {isAdmin ? 'Total Pipeline Deal Funnel' : 'My Total Deal Funnel'}
+              {isAdmin ? 'Total Pipeline Deal Funnel' : 'My Personal Deal Funnel'}
             </span>
-            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-200 border border-indigo-400/30">
-              {isAdmin ? (analytics?.totalLeads ?? leads.length) : visibleLeads.length} Leads
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-200 border border-indigo-400/30">
+                {isAdmin ? (analytics?.totalLeads ?? leads.length) : ownDirectLeads.length} Leads
+              </span>
+              {!isAdmin && sharedTeamLeads.length > 0 && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-200 border border-purple-400/30" title="Team member leads shared with you for collaboration">
+                  +{sharedTeamLeads.length} Team
+                </span>
+              )}
+            </div>
           </div>
           <div className="text-2xl font-black text-white mt-1.5 tracking-tight">
             ₹{Number(isAdmin ? (analytics?.totalEstimatedValue || 0) : bdmPersonalFunnel).toLocaleString('en-IN')}
@@ -635,13 +904,14 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
         {/* Total Leads */}
         <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
           <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-            {isAdmin ? 'Total Leads' : 'My Leads'}
+            {isAdmin ? 'Total Leads' : 'My Personal Leads'}
           </span>
           <div className="text-xl font-extrabold text-slate-900 mt-0.5">
-            {isAdmin ? (analytics?.totalLeads ?? leads.length) : visibleLeads.length}
+            {isAdmin ? (analytics?.totalLeads ?? leads.length) : ownDirectLeads.length}
           </div>
           <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1 truncate">
-            <TrendingUp className="w-3 h-3 text-emerald-600" /> Active Leads
+            <TrendingUp className="w-3 h-3 text-emerald-600" />
+            {sharedTeamLeads.length > 0 ? `+${sharedTeamLeads.length} team shared` : 'Active Leads'}
           </div>
         </div>
 
@@ -653,7 +923,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
           <div className="text-xl font-extrabold text-rose-700 mt-0.5">
             {isAdmin
               ? (analytics?.byClientStatus?.Hot ?? 0)
-              : visibleLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'hot').length}
+              : ownDirectLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'hot').length}
           </div>
           <div className="text-[11px] text-rose-600 mt-1 font-semibold truncate">
             Val: ₹{Number(isAdmin ? (analytics?.hotFunnelValue || 0) : bdmHotFunnel).toLocaleString('en-IN')}
@@ -668,7 +938,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
           <div className="text-xl font-extrabold text-amber-700 mt-0.5">
             {isAdmin
               ? (analytics?.byClientStatus?.Warm ?? 0)
-              : visibleLeads.filter((l) => (l.clientStatus || 'warm').toLowerCase() === 'warm').length}
+              : ownDirectLeads.filter((l) => (l.clientStatus || 'warm').toLowerCase() === 'warm').length}
           </div>
           <div className="text-[11px] text-amber-600 mt-1 font-semibold truncate">
             Val: ₹{Number(isAdmin ? (analytics?.warmFunnelValue || 0) : bdmWarmFunnel).toLocaleString('en-IN')}
@@ -683,7 +953,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
           <div className="text-xl font-extrabold text-slate-700 mt-0.5">
             {isAdmin
               ? (analytics?.byClientStatus?.Lost ?? 0)
-              : visibleLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'lost').length}
+              : ownDirectLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'lost').length}
           </div>
           <div className="text-[11px] text-slate-500 mt-1">
             Dropped
@@ -700,7 +970,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
               ? ((analytics?.byMeetingStatus?.['Google/Team Meet'] || 0) +
                  (analytics?.byMeetingStatus?.['Conference Call'] || 0) +
                  (analytics?.byMeetingStatus?.['Physical Meeting'] || 0))
-              : visibleLeads.filter((l) =>
+              : ownDirectLeads.filter((l) =>
                   ['Google/Team Meet', 'Conference Call', 'Physical Meeting'].includes(l.meetingStatus)
                 ).length}
           </div>
@@ -737,7 +1007,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
               </p>
             </div>
             <span className="text-xs font-extrabold text-indigo-900 bg-indigo-50 border border-indigo-200 px-3 py-1 rounded-lg">
-              Total Funnel: ₹{Number(isAdmin ? (analytics?.totalEstimatedValue || 0) : bdmPersonalFunnel).toLocaleString('en-IN')}
+              {isAdmin ? 'Total Funnel: ' : 'My Direct Funnel: '}₹{Number(isAdmin ? (analytics?.totalEstimatedValue || 0) : bdmPersonalFunnel).toLocaleString('en-IN')}
             </span>
           </div>
 
@@ -908,16 +1178,28 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                 <label className="text-xs font-semibold text-slate-700 block mb-1">
                   Leader's Name <span className="text-rose-500">*</span>
                 </label>
-                <select
-                  required
-                  value={form.leaderName}
-                  onChange={(e) => setForm({ ...form, leaderName: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 font-medium focus:bg-white focus:border-slate-800 focus:outline-none"
-                >
-                  {LMS_LEADERS.map((ldr) => (
-                    <option key={ldr} value={ldr}>{ldr}</option>
-                  ))}
-                </select>
+                {isLeader ? (
+                  <div className="w-full bg-slate-100 border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 font-bold flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Award className="w-3.5 h-3.5 text-indigo-600" />
+                      {matchedLeaderName || form.leaderName}
+                    </span>
+                    <span className="text-[10px] text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full font-bold">
+                      Leader (You)
+                    </span>
+                  </div>
+                ) : (
+                  <select
+                    required
+                    value={form.leaderName}
+                    onChange={(e) => setForm({ ...form, leaderName: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 font-medium focus:bg-white focus:border-slate-800 focus:outline-none"
+                  >
+                    {LMS_LEADERS.map((ldr) => (
+                      <option key={ldr} value={ldr}>{ldr}</option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               {/* BDM-I: LOCKED TO CURRENT LOGGED-IN BDM */}
@@ -956,16 +1238,28 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                 <label className="text-xs font-semibold text-slate-700 block mb-1">
                   Closer Status <span className="text-rose-500">*</span>
                 </label>
-                <select
-                  required
-                  value={form.closerStatus}
-                  onChange={(e) => setForm({ ...form, closerStatus: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 font-medium focus:bg-white focus:border-slate-800 focus:outline-none"
-                >
-                  {LMS_CLOSER_STATUSES.map((cs) => (
-                    <option key={cs} value={cs}>{cs}</option>
-                  ))}
-                </select>
+                {isLeader ? (
+                  <div className="w-full bg-slate-100 border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 font-bold flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Briefcase className="w-3.5 h-3.5 text-emerald-600" />
+                      Self Closer
+                    </span>
+                    <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full font-bold">
+                      Self
+                    </span>
+                  </div>
+                ) : (
+                  <select
+                    required
+                    value={form.closerStatus}
+                    onChange={(e) => setForm({ ...form, closerStatus: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 font-medium focus:bg-white focus:border-slate-800 focus:outline-none"
+                  >
+                    {LMS_CLOSER_STATUSES.map((cs) => (
+                      <option key={cs} value={cs}>{cs}</option>
+                    ))}
+                  </select>
+                )}
               </div>
             </div>
 
@@ -1347,18 +1641,318 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
         </button>
       </div>
 
+      {/* 4B. TEAM MEMBERS PIPELINE & PERFORMANCE CARDS (LEADER BDM DASHBOARD) */}
+      {isLeader && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3.5">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-indigo-600" />
+                <h3 className="text-sm font-bold text-slate-900">
+                  Team Members Pipeline & Performance Overview
+                </h3>
+                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                  {teamMembersCards.length} Team {teamMembersCards.length === 1 ? 'Member' : 'Members'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Real-time tracking of active leads, client status distribution, upcoming meetings, last follow-ups, and EDC targets for your team
+              </p>
+            </div>
+
+            {selectedTeamMemberFilter !== 'ALL' && (
+              <button
+                type="button"
+                onClick={() => setSelectedTeamMemberFilter('ALL')}
+                className="text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer"
+              >
+                <span>Clear Team Filter</span>
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {teamMembersCards.length === 0 ? (
+            <div className="bg-slate-50 border border-dashed border-slate-200 rounded-xl p-4 text-center text-xs text-slate-500">
+              <Users className="w-6 h-6 text-slate-300 mx-auto mb-1.5" />
+              <p className="font-semibold text-slate-700">No team member leads shared yet</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                When BDMs select "Lead Sharing" with you as their designated Leader, their pipeline cards, follow-ups, and leads will appear here.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {teamMembersCards.map((member) => {
+                const isSelected = selectedTeamMemberFilter.toLowerCase() === member.name.toLowerCase();
+                const memberInitials = member.name
+                  .split(' ')
+                  .map((n) => n[0])
+                  .filter(Boolean)
+                  .slice(0, 2)
+                  .join('')
+                  .toUpperCase();
+
+                const edcBadge = member.nearestEdcLead
+                  ? getEdcBadge(member.nearestEdcLead.expectedDateOfCloser, member.nearestEdcLead.leadStatus)
+                  : null;
+
+                return (
+                  <div
+                    key={member.name}
+                    className={`bg-white border rounded-xl p-4 transition shadow-xs flex flex-col justify-between gap-3 ${
+                      isSelected
+                        ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/15'
+                        : 'border-slate-200 hover:border-indigo-300 hover:shadow-sm'
+                    }`}
+                  >
+                    <div>
+                      {/* Member Header */}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs">
+                            {memberInitials}
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-bold text-slate-900 leading-tight">
+                              {member.name}
+                            </h4>
+                            <span className="text-[10px] text-slate-400 block font-medium">
+                              BDM Team Member
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <span className="text-[11px] font-mono font-bold text-indigo-900 block">
+                            ₹{Number(member.totalFunnel).toLocaleString('en-IN')}
+                          </span>
+                          <span className="text-[9px] text-slate-400 uppercase font-semibold">
+                            Funnel Value
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Status Badges Row: Active Leads, Hot, Warm, Lost, Closed(outcome) */}
+                      <div className="grid grid-cols-5 gap-1.5 mt-3 text-center">
+                        {/* 1. Active Leads */}
+                        <div className="bg-slate-50 border border-slate-200/90 rounded p-1.5">
+                          <span className="text-[9px] text-slate-500 uppercase font-bold block truncate" title="Active Leads in pipeline">
+                            Active
+                          </span>
+                          <span className="text-xs font-extrabold text-slate-800">
+                            {member.activeLeads}
+                          </span>
+                        </div>
+
+                        {/* 2. Hot */}
+                        <div className="bg-rose-50 border border-rose-200/90 rounded p-1.5">
+                          <span className="text-[9px] text-rose-700 uppercase font-bold block truncate">
+                            🔥 Hot
+                          </span>
+                          <span className="text-xs font-extrabold text-rose-700">
+                            {member.hotCount}
+                          </span>
+                        </div>
+
+                        {/* 3. Warm */}
+                        <div className="bg-amber-50 border border-amber-200/90 rounded p-1.5">
+                          <span className="text-[9px] text-amber-800 uppercase font-bold block truncate">
+                            ☀️ Warm
+                          </span>
+                          <span className="text-xs font-extrabold text-amber-800">
+                            {member.warmCount}
+                          </span>
+                        </div>
+
+                        {/* 4. Lost */}
+                        <div className="bg-slate-100 border border-slate-200 rounded p-1.5">
+                          <span className="text-[9px] text-slate-600 uppercase font-bold block truncate">
+                            ❄️ Lost
+                          </span>
+                          <span className="text-xs font-extrabold text-slate-700">
+                            {member.lostCount}
+                          </span>
+                        </div>
+
+                        {/* 5. Closed (Outcome) */}
+                        <div className="bg-emerald-50 border border-emerald-200/90 rounded p-1.5">
+                          <span className="text-[9px] text-emerald-800 uppercase font-bold block truncate" title="Closed Won outcome">
+                            🏆 Closed
+                          </span>
+                          <span className="text-xs font-extrabold text-emerald-800">
+                            {member.closedCount}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Detail Metrics: Meeting, Last Follow-up, EDC */}
+                      <div className="mt-3 space-y-2 text-xs border-t border-slate-100 pt-2.5">
+                        {/* 6. Meeting */}
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1 shrink-0 mt-0.5">
+                            <Calendar className="w-3 h-3 text-indigo-500" /> Meeting:
+                          </span>
+                          <div className="text-right">
+                            {member.nextMeetingLead ? (
+                              <div className="leading-snug">
+                                <span className="font-semibold text-slate-800 text-[11px]">
+                                  {member.nextMeetingLead.meetingDate
+                                    ? new Date(member.nextMeetingLead.meetingDate).toLocaleDateString('en-IN', {
+                                        day: '2-digit',
+                                        month: 'short',
+                                        year: 'numeric',
+                                      })
+                                    : 'Scheduled'}
+                                </span>
+                                <span className="text-[10px] text-slate-500 block truncate max-w-[170px]" title={`${member.nextMeetingLead.meetingStatus} (${member.nextMeetingLead.companyName})`}>
+                                  {member.nextMeetingLead.meetingStatus} ({member.nextMeetingLead.companyName})
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-slate-400 italic">None scheduled</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 7. Last Follow Up */}
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1 shrink-0 mt-0.5">
+                            <Clock className="w-3 h-3 text-indigo-500" /> Last Follow-up:
+                          </span>
+                          <div className="text-right">
+                            {member.lastFollowUp ? (
+                              <div className="leading-snug">
+                                <div className="flex items-center justify-end gap-1 font-mono text-[11px]">
+                                  <span className="font-semibold text-slate-800">
+                                    {new Date(member.lastFollowUp.date).toLocaleDateString('en-IN', {
+                                      day: '2-digit',
+                                      month: 'short',
+                                    })}
+                                  </span>
+                                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-tight">[Freeze]</span>
+                                  <span
+                                    className={`px-1 py-0.2 rounded text-[9px] font-extrabold border ${
+                                      member.lastFollowUp.status === 'Hot'
+                                        ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                        : member.lastFollowUp.status === 'Warm'
+                                        ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                        : member.lastFollowUp.status === 'Closed'
+                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                        : 'bg-slate-100 text-slate-600 border-slate-300'
+                                    }`}
+                                  >
+                                    {member.lastFollowUp.status}
+                                  </span>
+                                </div>
+                                <span className="text-[10px] text-slate-500 block truncate max-w-[170px]" title={member.lastFollowUp.companyName}>
+                                  For: {member.lastFollowUp.companyName}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-slate-400 italic">No follow-ups yet</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 8. EDC (Expected Date of Closer) */}
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1 shrink-0 mt-0.5">
+                            <Clock className="w-3 h-3 text-purple-500" /> EDC Target:
+                          </span>
+                          <div className="text-right">
+                            {member.nearestEdcLead?.expectedDateOfCloser ? (
+                              <div className="leading-snug">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <span className="font-semibold text-slate-800 text-[11px]">
+                                    {new Date(member.nearestEdcLead.expectedDateOfCloser).toLocaleDateString('en-IN', {
+                                      day: '2-digit',
+                                      month: 'short',
+                                      year: 'numeric',
+                                    })}
+                                  </span>
+                                  {edcBadge && (
+                                    <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${edcBadge.color}`}>
+                                      {edcBadge.label}
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[10px] text-slate-500 block truncate max-w-[170px]" title={member.nearestEdcLead.companyName}>
+                                  For: {member.nearestEdcLead.companyName}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-slate-400 italic">Not set</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Filter Toggle Button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (selectedTeamMemberFilter === member.name) {
+                          setSelectedTeamMemberFilter('ALL');
+                        } else {
+                          setSelectedTeamMemberFilter(member.name);
+                        }
+                      }}
+                      className={`w-full py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                        isSelected
+                          ? 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-xs'
+                          : 'bg-slate-50 text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 border border-slate-200'
+                      }`}
+                    >
+                      {isSelected ? (
+                        <>
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Showing {member.name}'s Leads (Click to Reset)</span>
+                        </>
+                      ) : (
+                        <>
+                          <Filter className="w-3.5 h-3.5" />
+                          <span>Filter Table to {member.name}'s Leads ({member.totalLeads})</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 5. LEADS DATA TABLE */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         {/* Table Scope Indicator Header */}
-        <div className="bg-slate-50/60 border-b border-slate-200 px-5 py-2.5 flex items-center justify-between text-xs text-slate-500">
-          <span>
-            {isAdmin
-              ? `Showing all company leads across all BDMs (${visibleLeads.length})`
-              : `Showing your personal leads only (${visibleLeads.length})`}
-          </span>
+        <div className="bg-slate-50/60 border-b border-slate-200 px-5 py-2.5 flex items-center justify-between text-xs text-slate-500 flex-wrap gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span>
+              {isAdmin
+                ? `Showing all company leads across all BDMs (${displayedLeads.length})`
+                : sharedTeamLeads.length > 0
+                ? selectedTeamMemberFilter !== 'ALL'
+                  ? `Filtered to ${selectedTeamMemberFilter}'s leads (${displayedLeads.length} leads)`
+                  : `Showing ${ownDirectLeads.length} own direct leads + ${sharedTeamLeads.length} team shared leads (${displayedLeads.length} total in table)`
+                : `Showing your personal leads only (${displayedLeads.length})`}
+            </span>
+            {selectedTeamMemberFilter !== 'ALL' && (
+              <button
+                type="button"
+                onClick={() => setSelectedTeamMemberFilter('ALL')}
+                className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2 py-0.5 rounded cursor-pointer transition"
+                title="Reset to all leads"
+              >
+                <span>Filtered: {selectedTeamMemberFilter}</span>
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
           {!isAdmin && (
             <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded">
-              BDM Account: {loggedInBdmName}
+              {isLeader ? `BDM (Leader): ${loggedInBdmName}` : `BDM Account: ${loggedInBdmName}`}
             </span>
           )}
         </div>
@@ -1367,13 +1961,12 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-50/90 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider text-[10px]">
-                <th className="py-2.5 px-3">Company & Director</th>
-                <th className="py-2.5 px-3">Contact</th>
-                <th className="py-2.5 px-3">Leader & BDM</th>
-                <th className="py-2.5 px-3">Source & Closer</th>
+                <th className="py-2.5 px-3">Company (Click for Details)</th>
+                <th className="py-2.5 px-3">Mobile</th>
+                <th className="py-2.5 px-3">BDM</th>
                 <th className="py-2.5 px-3">Client Status</th>
-                <th className="py-2.5 px-3">Meeting Status & Date</th>
-                <th className="py-2.5 px-3">EDC & Deal Value</th>
+                <th className="py-2.5 px-3">Meeting Status</th>
+                <th className="py-2.5 px-3">Deal Value</th>
                 <th className="py-2.5 px-3">Quotation</th>
                 <th className="py-2.5 px-3">Stage</th>
                 <th className="py-2.5 px-3 text-center">Action</th>
@@ -1382,108 +1975,110 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
             <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
               {loading ? (
                 <tr>
-                  <td colSpan={10} className="py-12 text-center text-slate-400 text-xs">
+                  <td colSpan={9} className="py-12 text-center text-slate-400 text-xs">
                     Loading LMS lead records...
                   </td>
                 </tr>
-              ) : visibleLeads.length === 0 ? (
+              ) : displayedLeads.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-12 text-center text-slate-400 text-xs">
+                  <td colSpan={9} className="py-12 text-center text-slate-400 text-xs">
                     {isAdmin
                       ? 'No leads found matching current criteria.'
+                      : selectedTeamMemberFilter !== 'ALL'
+                      ? `No leads found for team member "${selectedTeamMemberFilter}".`
+                      : isLeader
+                      ? 'No personal or shared leads found. Shared leads from team members and your personal leads will appear here.'
                       : 'You have not logged any prospective leads yet. Click "Log New Lead" above to record your first prospective client!'}
                   </td>
                 </tr>
               ) : (
-                visibleLeads.map((lead) => {
+                displayedLeads.map((lead) => {
+                  const isExpanded = expandedLeadIds.has(lead.id);
                   const edcBadge = getEdcBadge(lead.expectedDateOfCloser, lead.leadStatus);
                   const currentStageMeta = LMS_LEAD_STAGES.find((s) => s.id === (lead.leadStatus || 'OPEN')) || LMS_LEAD_STAGES[0];
                   const isPdf = lead.quotationFileName?.toLowerCase().endsWith('.pdf');
                   const currentClientStatus = lead.clientStatus || 'Warm';
+                  const leadFollowUps = getFollowUpsList(lead);
 
                   return (
-                    <tr key={lead.id} className="hover:bg-slate-50/70 transition">
-                      {/* Company & Director with clean Created Date */}
-                      <td className="py-2.5 px-3 whitespace-nowrap">
-                        <div className="font-bold text-slate-900 text-sm leading-snug">{lead.companyName}</div>
-                        <div className="text-[11px] text-slate-500 flex items-center gap-1.5 mt-0.5">
-                          {lead.directorName && (
-                            <>
-                              <span className="font-medium text-slate-700 flex items-center gap-1">
-                                <UserCheck className="w-3 h-3 text-slate-400" />
-                                {lead.directorName}
+                    <React.Fragment key={lead.id}>
+                      {/* MAIN COMPACT ROW */}
+                      <tr className={`hover:bg-slate-50/80 transition ${isExpanded ? 'bg-indigo-50/30 font-semibold' : ''}`}>
+                        {/* Company Name with Expand/Collapse Trigger */}
+                        <td className="py-2.5 px-3">
+                          <button
+                            type="button"
+                            onClick={() => toggleLeadExpand(lead.id)}
+                            className="flex items-center gap-2 text-left group focus:outline-none"
+                            title={isExpanded ? 'Click to hide details' : 'Click to view more information'}
+                          >
+                            <span
+                              className={`p-1 rounded-md transition ${
+                                isExpanded
+                                  ? 'bg-indigo-100 text-indigo-700 rotate-90'
+                                  : 'bg-slate-100 text-slate-400 group-hover:bg-indigo-50 group-hover:text-indigo-600'
+                              }`}
+                            >
+                              <ChevronRight className="w-3.5 h-3.5 transition-transform duration-150" />
+                            </span>
+                            <div>
+                              <span className="font-bold text-slate-900 group-hover:text-indigo-600 text-sm leading-snug block transition">
+                                {lead.companyName}
                               </span>
-                              <span className="text-slate-300">•</span>
-                            </>
-                          )}
-                          <span className="text-slate-400">
-                            Logged {lead.createdAt ? new Date(lead.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'N/A'}
-                          </span>
-                        </div>
-                        {lead.remarks && (
-                          <div className="text-[10px] text-slate-400 italic mt-0.5 line-clamp-1 max-w-[200px]" title={lead.remarks}>
-                            "{lead.remarks}"
-                          </div>
-                        )}
-                      </td>
+                              <span className="text-[10px] text-slate-400 group-hover:text-indigo-500 font-normal">
+                                {isExpanded ? 'Hide details ▴' : 'Click for more info ▾'}
+                              </span>
+                            </div>
+                          </button>
+                        </td>
 
-                      {/* Contact Info */}
-                      <td className="py-2.5 px-3 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5 font-mono text-slate-900 font-semibold text-xs">
-                          <Phone className="w-3 h-3 text-indigo-500" />
-                          <a href={`tel:${lead.mobileNo}`} className="hover:underline">
-                            {lead.mobileNo}
-                          </a>
-                        </div>
-                        {lead.emailId && (
-                          <div className="flex items-center gap-1 text-[11px] text-slate-400 mt-0.5">
-                            <Mail className="w-3 h-3 text-slate-300" />
-                            <a href={`mailto:${lead.emailId}`} className="hover:underline truncate max-w-[140px]">
-                              {lead.emailId}
+                        {/* Mobile No */}
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5 font-mono text-slate-900 font-semibold text-xs">
+                            <Phone className="w-3 h-3 text-indigo-500 shrink-0" />
+                            <a href={`tel:${lead.mobileNo}`} className="hover:underline">
+                              {lead.mobileNo}
                             </a>
                           </div>
-                        )}
-                      </td>
+                        </td>
 
-                      {/* Leader & BDM Team */}
-                      <td className="py-2.5 px-3 whitespace-nowrap">
-                        <div className="text-xs font-medium text-slate-800">
-                          {lead.bdmName1}
-                          {lead.bdmName2 && <span className="text-[11px] text-slate-400"> + {lead.bdmName2}</span>}
-                        </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          Lead: <span className="text-slate-600 font-medium">{lead.leaderName}</span>
-                        </div>
-                      </td>
+                        {/* BDM */}
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <div className="text-xs font-semibold text-slate-800">{lead.bdmName1}</div>
+                          {lead.bdmName2 && <div className="text-[10px] text-slate-400">+ {lead.bdmName2}</div>}
+                          {lead.closerStatus === 'Lead Sharing' && (
+                            <div className="mt-0.5">
+                              <span
+                                className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded"
+                                title={`Lead Sharing assigned to Leader: ${lead.leaderName}`}
+                              >
+                                🤝 Shared ({lead.leaderName})
+                              </span>
+                            </div>
+                          )}
+                        </td>
 
-                      {/* Sourcing & Closer */}
-                      <td className="py-2.5 px-3 whitespace-nowrap">
-                        <div className="text-xs font-semibold text-slate-800">{lead.closerStatus}</div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">Via {lead.sourcingStatus}</div>
-                      </td>
+                        {/* Client Status (Hot, Warm, Lost) */}
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <select
+                            value={currentClientStatus}
+                            onChange={(e) => handleQuickUpdateLead(lead.id, { clientStatus: e.target.value })}
+                            className={`text-xs font-bold rounded-md px-2 py-1 border transition focus:outline-none cursor-pointer ${
+                              currentClientStatus === 'Hot'
+                                ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                                : currentClientStatus === 'Lost'
+                                ? 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                                : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                            }`}
+                          >
+                            <option value="Hot">🔥 Hot</option>
+                            <option value="Warm">☀️ Warm</option>
+                            <option value="Lost">❄️ Lost</option>
+                          </select>
+                        </td>
 
-                      {/* Client Status (Hot, Warm, Lost) */}
-                      <td className="py-2.5 px-3 whitespace-nowrap">
-                        <select
-                          value={currentClientStatus}
-                          onChange={(e) => handleQuickUpdateLead(lead.id, { clientStatus: e.target.value })}
-                          className={`text-xs font-bold rounded-md px-2 py-1 border transition focus:outline-none cursor-pointer ${
-                            currentClientStatus === 'Hot'
-                              ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
-                              : currentClientStatus === 'Lost'
-                              ? 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
-                              : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
-                          }`}
-                        >
-                          <option value="Hot">🔥 Hot</option>
-                          <option value="Warm">☀️ Warm</option>
-                          <option value="Lost">❄️ Lost</option>
-                        </select>
-                      </td>
-
-                      {/* Meeting Status & Meeting Date */}
-                      <td className="py-2.5 px-3 whitespace-nowrap">
-                        <div className="flex flex-col gap-1">
+                        {/* Meeting Status */}
+                        <td className="py-2.5 px-3 whitespace-nowrap">
                           <select
                             value={lead.meetingStatus || LMS_MEETING_STATUSES[0]}
                             onChange={(e) => handleQuickUpdateLead(lead.id, { meetingStatus: e.target.value })}
@@ -1493,120 +2088,289 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                               <option key={ms} value={ms}>{ms}</option>
                             ))}
                           </select>
+                        </td>
 
-                          {/* Minimal inline Meeting Date */}
-                          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 px-0.5">
-                            <Calendar className="w-3 h-3 text-indigo-500 shrink-0" />
-                            <input
-                              type="date"
-                              value={lead.meetingDate ? new Date(lead.meetingDate).toISOString().split('T')[0] : ''}
-                              onChange={(e) => handleQuickUpdateLead(lead.id, { meetingDate: e.target.value || null })}
-                              className="bg-transparent text-[11px] font-medium text-slate-600 hover:text-indigo-600 focus:outline-none cursor-pointer border-0 p-0"
-                              title="Click to set or change Meeting Date"
-                            />
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Expected Closer & Deal Value */}
-                      <td className="py-2.5 px-3 whitespace-nowrap">
-                        <div className="font-mono font-bold text-xs text-slate-900">
-                          {lead.dealValue ? `₹${Number(lead.dealValue).toLocaleString('en-IN')}` : <span className="text-slate-400 font-normal italic">No value</span>}
-                        </div>
-                        <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
-                          <Clock className="w-3 h-3 text-slate-400 shrink-0" />
-                          <span className={edcBadge.label.includes('Overdue') ? 'text-rose-600 font-semibold' : ''}>
-                            {edcBadge.label}
+                        {/* Deal Value */}
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <span className="font-mono font-bold text-xs text-slate-900">
+                            {lead.dealValue ? `₹${Number(lead.dealValue).toLocaleString('en-IN')}` : <span className="text-slate-400 font-normal italic">No value</span>}
                           </span>
-                        </div>
-                      </td>
+                        </td>
 
-                      {/* Quotation Document */}
-                      <td className="py-2.5 px-3 whitespace-nowrap">
-                        {lead.quotationFileName ? (
-                          <div className="flex items-center gap-1.5">
-                            <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${
-                              isPdf
-                                ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                : 'bg-blue-50 text-blue-700 border-blue-200'
-                            }`}>
-                              {lead.quotationFileName.split('.').pop()}
-                            </span>
-                            <span className="text-xs font-medium text-slate-700 truncate max-w-[90px]" title={lead.quotationFileName}>
-                              {lead.quotationFileName}
-                            </span>
-                            <button
-                              onClick={() => handleDownloadQuotation(lead)}
-                              disabled={downloadingId === lead.id}
-                              title="Download Quotation"
-                              className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                            </button>
-                            {isPdf && (
+                        {/* Quotation Document */}
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          {lead.quotationFileName ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${
+                                isPdf
+                                  ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                  : 'bg-blue-50 text-blue-700 border-blue-200'
+                              }`}>
+                                {lead.quotationFileName.split('.').pop()}
+                              </span>
+                              <span className="text-xs font-medium text-slate-700 truncate max-w-[90px]" title={lead.quotationFileName}>
+                                {lead.quotationFileName}
+                              </span>
                               <button
-                                onClick={() => handlePreviewQuotation(lead)}
-                                title="Open PDF Preview"
+                                onClick={() => handleDownloadQuotation(lead)}
+                                disabled={downloadingId === lead.id}
+                                title="Download Quotation"
                                 className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition"
                               >
-                                <Eye className="w-3.5 h-3.5" />
+                                <Download className="w-3.5 h-3.5" />
+                              </button>
+                              {isPdf && (
+                                <button
+                                  onClick={() => handlePreviewQuotation(lead)}
+                                  title="Open PDF Preview"
+                                  className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-slate-400 italic">None</span>
+                          )}
+                        </td>
+
+                        {/* Pipeline Stage */}
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <select
+                            value={lead.leadStatus || 'OPEN'}
+                            onChange={(e) => handleQuickUpdateLead(lead.id, { leadStatus: e.target.value })}
+                            className={`text-xs font-semibold rounded-md px-2 py-1 border focus:outline-none transition cursor-pointer ${currentStageMeta.color}`}
+                          >
+                            {LMS_LEAD_STAGES.map((stg) => (
+                              <option key={stg.id} value={stg.id}>{stg.label}</option>
+                            ))}
+                          </select>
+                        </td>
+
+                        {/* Action */}
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                          <div className="flex items-center justify-center gap-1">
+                            {/* Convert to Deal Button */}
+                            <button
+                              onClick={() => {
+                                if (onConvertToDeal) {
+                                  onConvertToDeal({
+                                    companyName: lead.companyName,
+                                    clientName: lead.directorName || lead.companyName,
+                                    clientPhone: lead.mobileNo,
+                                    clientEmail: lead.emailId || '',
+                                    remarks: `Converted from LMS (Client Status: ${lead.clientStatus || 'Warm'}, Funnel Value: ₹${lead.dealValue || 0}, Leader: ${lead.leaderName}, Source: ${lead.sourcingStatus}). Quotation: ${lead.quotationFileName || 'None'}. ${lead.remarks || ''}`,
+                                  });
+                                }
+                              }}
+                              title="Convert Lead into Active Deal"
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-bold transition shadow-xs flex items-center gap-1"
+                            >
+                              <ArrowRight className="w-3 h-3" />
+                              <span>Deal</span>
+                            </button>
+
+                            {/* Delete Lead */}
+                            {(isAdmin || lead.createdById === currentUser?.id) && (
+                              <button
+                                onClick={() => handleDeleteLead(lead.id)}
+                                title="Delete Lead"
+                                className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             )}
                           </div>
-                        ) : (
-                          <span className="text-[11px] text-slate-400 italic">None</span>
-                        )}
-                      </td>
+                        </td>
+                      </tr>
 
-                      {/* Pipeline Stage */}
-                      <td className="py-2.5 px-3 whitespace-nowrap">
-                        <select
-                          value={lead.leadStatus || 'OPEN'}
-                          onChange={(e) => handleQuickUpdateLead(lead.id, { leadStatus: e.target.value })}
-                          className={`text-xs font-semibold rounded-md px-2 py-1 border focus:outline-none transition cursor-pointer ${currentStageMeta.color}`}
-                        >
-                          {LMS_LEAD_STAGES.map((stg) => (
-                            <option key={stg.id} value={stg.id}>{stg.label}</option>
-                          ))}
-                        </select>
-                      </td>
+                      {/* EXPANDED DOWNWARD ROW: Shows Logged Date, Director Name, Email ID, Leader Name, Source, Meeting Date, EDC */}
+                      {isExpanded && (
+                        <tr className="bg-slate-50/80 border-b border-indigo-100">
+                          <td colSpan={9} className="p-3.5 pl-7">
+                            <div className="bg-white border border-indigo-100/90 rounded-xl p-3.5 shadow-2xs space-y-3">
+                              {/* Header inside drawer */}
+                              <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 text-xs flex-wrap gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-slate-900 text-xs">
+                                    {lead.companyName} — Additional Details
+                                  </span>
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                    Expanded Info
+                                  </span>
+                                  {lead.closerStatus === 'Lead Sharing' && (
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
+                                      🤝 Shared with Leader: {lead.leaderName}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] text-slate-500 flex items-center gap-1.5 font-medium">
+                                  <Calendar className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                  <span className="font-bold text-slate-700">Logged Date:</span>
+                                  <span>
+                                    {lead.createdAt
+                                      ? new Date(lead.createdAt).toLocaleString('en-IN', {
+                                          day: '2-digit',
+                                          month: 'short',
+                                          year: 'numeric',
+                                          hour: '2-digit',
+                                          minute: '2-digit',
+                                          hour12: true,
+                                        })
+                                      : 'N/A'}
+                                  </span>
+                                </div>
+                              </div>
 
-                      {/* Action */}
-                      <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                        <div className="flex items-center justify-center gap-1">
-                          {/* Convert to Deal Button */}
-                          <button
-                            onClick={() => {
-                              if (onConvertToDeal) {
-                                onConvertToDeal({
-                                  companyName: lead.companyName,
-                                  clientName: lead.directorName || lead.companyName,
-                                  clientPhone: lead.mobileNo,
-                                  clientEmail: lead.emailId || '',
-                                  remarks: `Converted from LMS (Client Status: ${lead.clientStatus || 'Warm'}, Funnel Value: ₹${lead.dealValue || 0}, Leader: ${lead.leaderName}, Source: ${lead.sourcingStatus}). Quotation: ${lead.quotationFileName || 'None'}. ${lead.remarks || ''}`,
-                                });
-                              }
-                            }}
-                            title="Convert Lead into Active Deal"
-                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-bold transition shadow-xs flex items-center gap-1"
-                          >
-                            <ArrowRight className="w-3 h-3" />
-                            <span>Deal</span>
-                          </button>
+                              {/* Responsive grid for the requested fields + follow-up timeline */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 text-xs">
+                                {/* 1. Director Name */}
+                                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/70">
+                                  <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                                    <UserCheck className="w-3 h-3 text-slate-400" /> Director Name
+                                  </span>
+                                  <div className="font-semibold text-slate-900 mt-1 truncate" title={lead.directorName || 'Not Specified'}>
+                                    {lead.directorName || <span className="text-slate-400 italic font-normal">Not Specified</span>}
+                                  </div>
+                                </div>
 
-                          {/* Delete Lead */}
-                          {(isAdmin || lead.createdById === currentUser?.id) && (
-                            <button
-                              onClick={() => handleDeleteLead(lead.id)}
-                              title="Delete Lead"
-                              className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
+                                {/* 2. Email ID */}
+                                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/70">
+                                  <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                                    <Mail className="w-3 h-3 text-slate-400" /> Email ID
+                                  </span>
+                                  <div className="font-semibold text-slate-900 mt-1 truncate">
+                                    {lead.emailId ? (
+                                      <a href={`mailto:${lead.emailId}`} className="text-indigo-600 hover:underline">
+                                        {lead.emailId}
+                                      </a>
+                                    ) : (
+                                      <span className="text-slate-400 italic font-normal">Not Specified</span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* 3. Leader Name */}
+                                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/70">
+                                  <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                                    <Award className="w-3 h-3 text-slate-400" /> Leader Name
+                                  </span>
+                                  <div className="font-semibold text-slate-900 mt-1">
+                                    {lead.leaderName || 'Not Assigned'}
+                                  </div>
+                                </div>
+
+                                {/* 4. Sourcing & Closer */}
+                                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/70">
+                                  <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                                    <Briefcase className="w-3 h-3 text-slate-400" /> Sourcing Status
+                                  </span>
+                                  <div className="font-semibold text-slate-900 mt-1">
+                                    {lead.sourcingStatus}
+                                    <span className="text-[10px] text-slate-500 block font-normal mt-0.5">
+                                      Closer: <strong className="text-slate-700">{lead.closerStatus}</strong>
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* 5. Meeting Date */}
+                                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/70">
+                                  <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                                    <Calendar className="w-3 h-3 text-indigo-500" /> Meeting Date
+                                  </span>
+                                  <div className="mt-1">
+                                    <input
+                                      type="date"
+                                      value={lead.meetingDate ? new Date(lead.meetingDate).toISOString().split('T')[0] : ''}
+                                      onChange={(e) => handleQuickUpdateLead(lead.id, { meetingDate: e.target.value || null })}
+                                      className="bg-white border border-slate-200 rounded px-2 py-1 text-xs font-semibold text-slate-800 focus:outline-none focus:border-indigo-400 cursor-pointer w-full shadow-2xs"
+                                      title="Click to set or change Meeting Date"
+                                    />
+                                  </div>
+                                </div>
+
+                                {/* 6. Expected Date of Closer (EDC) */}
+                                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/70">
+                                  <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                                    <Clock className="w-3 h-3 text-slate-400" /> EDC Target
+                                  </span>
+                                  <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${edcBadge.color}`}>
+                                      {edcBadge.label}
+                                    </span>
+                                    <span className="text-[11px] text-slate-600 font-semibold">
+                                      {lead.expectedDateOfCloser ? new Date(lead.expectedDateOfCloser).toLocaleDateString('en-IN') : 'Not Set'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Follow-up Timeline Summary in Drawer */}
+                              <div className="bg-slate-50 p-3 rounded-lg border border-slate-200/70 text-xs space-y-1.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1.5">
+                                    <Clock className="w-3.5 h-3.5 text-indigo-500" /> Follow-up Status History ({leadFollowUps.length})
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setFollowUpModalLead(lead);
+                                      setFollowUpForm({
+                                        date: new Date().toISOString().split('T')[0],
+                                        status: 'Hot',
+                                        remarks: '',
+                                      });
+                                    }}
+                                    className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 bg-white hover:bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded transition shadow-2xs flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Plus className="w-3 h-3" /> Add Follow-up
+                                  </button>
+                                </div>
+                                {leadFollowUps.length > 0 ? (
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 pt-1">
+                                    {leadFollowUps.map((fu, idx) => (
+                                      <div
+                                        key={fu.id || idx}
+                                        className="flex items-center justify-between bg-white border border-slate-200 rounded p-2 text-xs shadow-2xs"
+                                      >
+                                        <div className="flex items-center gap-1 font-mono text-slate-700 font-semibold">
+                                          <Calendar className="w-3 h-3 text-slate-400" />
+                                          <span>{fu.date ? new Date(fu.date).toLocaleDateString('en-IN') : 'N/A'}</span>
+                                          <span className="text-[9px] text-slate-400 font-bold uppercase tracking-tight">[Freeze]</span>
+                                        </div>
+                                        <span
+                                          className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold border ${
+                                            fu.status === 'Hot'
+                                              ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                              : fu.status === 'Warm'
+                                              ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                              : fu.status === 'Closed'
+                                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                              : 'bg-slate-100 text-slate-600 border-slate-300'
+                                          }`}
+                                        >
+                                          {fu.status}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <span className="text-[11px] text-slate-400 italic block">No follow-ups recorded yet.</span>
+                                )}
+                              </div>
+
+                              {/* Remarks / Notes (if present) */}
+                              {lead.remarks && (
+                                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/60 text-xs">
+                                  <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Remarks / Client Notes</span>
+                                  <p className="text-slate-700 italic">"{lead.remarks}"</p>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })
               )}
@@ -1614,6 +2378,171 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
           </table>
         </div>
       </div>
+
+      {/* 6. RECORD FOLLOW-UP STATUS MODAL (FROZEN AUDIT TRAIL) */}
+      {followUpModalLead && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden">
+            {/* Modal Header */}
+            <div className="bg-slate-900 text-white p-4 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 rounded-xl bg-indigo-600/30 text-indigo-300 border border-indigo-400/30">
+                  <Clock className="w-5 h-5 text-indigo-400" />
+                </span>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Record Follow-up Status</h3>
+                  <p className="text-[11px] text-slate-400 truncate max-w-xs">{followUpModalLead.companyName}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFollowUpModalLead(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleSaveFollowUp} className="p-5 space-y-4">
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 flex items-start gap-2">
+                <Lock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="block font-bold">Freeze Guarantee (Non-editable)</strong>
+                  Once saved, this follow-up date and status are permanently frozen and non-editable.
+                </div>
+              </div>
+
+              {/* Follow-up Date */}
+              <div>
+                <label className="text-xs font-bold text-slate-800 block mb-1">
+                  Follow-up Date <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="date"
+                    required
+                    value={followUpForm.date}
+                    onChange={(e) => setFollowUpForm({ ...followUpForm, date: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-900 font-semibold focus:bg-white focus:border-slate-900 focus:outline-none cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              {/* Follow-up Status (Hot, Warm, Closed, Lost) */}
+              <div>
+                <label className="text-xs font-bold text-slate-800 block mb-1">
+                  Follow-up Status <span className="text-rose-500">*</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'Hot', label: 'Hot', icon: '🔥', desc: 'Ready / urgent conversion', color: 'bg-rose-50 border-rose-300 text-rose-700' },
+                    { id: 'Warm', label: 'Warm', icon: '☀️', desc: 'Interested / in evaluation', color: 'bg-amber-50 border-amber-300 text-amber-800' },
+                    { id: 'Closed', label: 'Closed', icon: '🏆', desc: 'Deal finalized / won', color: 'bg-emerald-50 border-emerald-300 text-emerald-800' },
+                    { id: 'Lost', label: 'Lost', icon: '❄️', desc: 'Not interested / dropped', color: 'bg-slate-100 border-slate-300 text-slate-700' },
+                  ].map((st) => {
+                    const active = followUpForm.status === st.id;
+                    return (
+                      <button
+                        key={st.id}
+                        type="button"
+                        onClick={() => setFollowUpForm({ ...followUpForm, status: st.id })}
+                        className={`p-2.5 rounded-xl border text-left transition flex items-center justify-between cursor-pointer ${
+                          active
+                            ? st.id === 'Hot'
+                              ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
+                              : st.id === 'Warm'
+                              ? 'bg-amber-500 text-white border-amber-500 shadow-xs'
+                              : st.id === 'Closed'
+                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                              : 'bg-slate-700 text-white border-slate-700 shadow-xs'
+                            : `${st.color} hover:border-slate-400`
+                        }`}
+                      >
+                        <div>
+                          <div className="font-bold text-xs flex items-center gap-1.5">
+                            <span>{st.icon}</span>
+                            <span>{st.label}</span>
+                          </div>
+                          <div className={`text-[10px] mt-0.5 ${active ? 'text-white/80' : 'text-slate-500'}`}>
+                            {st.desc}
+                          </div>
+                        </div>
+                        {active && <CheckCircle2 className="w-4 h-4 text-white shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Remarks / Discussion notes */}
+              <div>
+                <label className="text-xs font-semibold text-slate-700 block mb-1">
+                  Follow-up Notes / Remarks <span className="text-slate-400 font-normal">(Optional)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Spoke with client, requested revised quote"
+                  value={followUpForm.remarks}
+                  onChange={(e) => setFollowUpForm({ ...followUpForm, remarks: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 focus:bg-white focus:border-slate-900 focus:outline-none"
+                />
+              </div>
+
+              {/* Past follow-ups list inside modal */}
+              {getFollowUpsList(followUpModalLead).length > 0 && (
+                <div className="pt-2 border-t border-slate-100">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1.5">
+                    Previous Frozen Entries ({getFollowUpsList(followUpModalLead).length})
+                  </span>
+                  <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
+                    {getFollowUpsList(followUpModalLead).map((fu, idx) => (
+                      <div key={idx} className="flex items-center justify-between text-[11px] bg-slate-50 p-1.5 rounded border border-slate-200">
+                        <span className="font-mono text-slate-700 font-medium">
+                          📅 {fu.date ? new Date(fu.date).toLocaleDateString('en-IN') : 'N/A'} - [Freeze]
+                        </span>
+                        <span className="font-bold text-xs">
+                          {fu.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Modal Actions */}
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setFollowUpModalLead(null)}
+                  disabled={savingFollowUp}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingFollowUp}
+                  className="px-4 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition shadow-xs flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                >
+                  {savingFollowUp ? (
+                    <>
+                      <Clock className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving & Freezing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>Save & Freeze Follow-up</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -127,6 +127,7 @@ async function ensureLeadsTable() {
         "quotationFileName" TEXT,
         "quotationFileSize" INTEGER,
         "createdById" TEXT,
+        "followUps" JSONB DEFAULT '[]'::jsonb,
         "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
         "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
@@ -150,6 +151,9 @@ async function ensureLeadsTable() {
         EXCEPTION WHEN duplicate_column THEN END;
         BEGIN
           ALTER TABLE "leads" ADD COLUMN "meetingDate" TIMESTAMP(3);
+        EXCEPTION WHEN duplicate_column THEN END;
+        BEGIN
+          ALTER TABLE "leads" ADD COLUMN "followUps" JSONB DEFAULT '[]'::jsonb;
         EXCEPTION WHEN duplicate_column THEN END;
       END $$;
     `);
@@ -202,20 +206,26 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
     const params = [];
     let paramIndex = 1;
 
-    // RBAC: If BDM and scope is 'my' (or default for BDM), strictly restrict to ONLY their own leads
+    // RBAC: If BDM and scope is 'my' (or default for BDM), strictly restrict to:
+    // 1. Their own leads (as BDM-1, BDM-2, or creator)
+    // 2. Leads where closerStatus = 'Lead Sharing' and the user is the assigned Leader
     if (isBdmOnly || scope === 'my') {
       const userFullName = (req.user.fullName || '').replace(/\s*\([^)]*\)/g, '').trim();
       const targetBdm = (req.query.myBdmName && req.query.myBdmName.trim()) 
         ? req.query.myBdmName.trim() 
+        : userFullName;
+      const targetLeader = (req.query.myLeaderName && req.query.myLeaderName.trim())
+        ? req.query.myLeaderName.trim()
         : userFullName;
 
       conditions.push(`(
         "bdmName1" ILIKE $${paramIndex} 
         OR "bdmName2" ILIKE $${paramIndex}
         OR ("createdById" = $${paramIndex + 1} AND ("bdmName1" ILIKE $${paramIndex} OR "bdmName1" = '' OR "bdmName1" IS NULL))
+        OR ("closerStatus" ILIKE '%Lead Sharing%' AND ("leaderName" ILIKE $${paramIndex} OR "leaderName" ILIKE $${paramIndex + 2}))
       )`);
-      params.push(`%${targetBdm}%`, req.user.id);
-      paramIndex += 2;
+      params.push(`%${targetBdm}%`, req.user.id, `%${targetLeader}%`);
+      paramIndex += 3;
     } else if (bdmName && bdmName !== 'ALL') {
       conditions.push(`("bdmName1" = $${paramIndex} OR "bdmName2" = $${paramIndex})`);
       params.push(bdmName);
@@ -701,6 +711,91 @@ router.patch('/:id', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req
   } catch (error) {
     console.error('[LMS] Update lead error:', error);
     return res.status(500).json({ error: 'Failed to update lead: ' + error.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// POST /api/leads/:id/follow-up - Add Frozen Follow-up Status Entry
+// -----------------------------------------------------------------------------
+router.post('/:id/follow-up', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res) => {
+  try {
+    await ensureLeadsTable();
+    const { id } = req.params;
+    const { date, status, remarks } = req.body;
+
+    if (!date) {
+      return res.status(400).json({ error: 'Follow-up date is mandatory.' });
+    }
+    if (!status) {
+      return res.status(400).json({ error: 'Follow-up status is mandatory.' });
+    }
+
+    const validStatuses = ['Hot', 'Warm', 'Closed', 'Lost'];
+    const matchedStatus = validStatuses.find((s) => s.toLowerCase() === status.trim().toLowerCase());
+    if (!matchedStatus) {
+      return res.status(400).json({ error: `Invalid status "${status}". Allowed: ${validStatuses.join(', ')}` });
+    }
+
+    const [lead] = await prisma.$queryRawUnsafe(`SELECT * FROM "leads" WHERE "id" = $1`, id);
+    if (!lead) {
+      return res.status(404).json({ error: 'Lead not found.' });
+    }
+
+    let existingFollowUps = [];
+    if (lead.followUps) {
+      existingFollowUps = typeof lead.followUps === 'string' ? JSON.parse(lead.followUps) : lead.followUps;
+    }
+    if (!Array.isArray(existingFollowUps)) {
+      existingFollowUps = [];
+    }
+
+    // New immutable/frozen entry
+    const newEntry = {
+      id: crypto.randomUUID(),
+      date: date,
+      status: matchedStatus,
+      remarks: remarks && remarks.trim() ? remarks.trim() : null,
+      addedAt: new Date().toISOString(),
+      addedById: req.user.id,
+      addedByName: req.user.fullName,
+    };
+
+    const updatedFollowUps = [...existingFollowUps, newEntry];
+
+    // Synchronize clientStatus and leadStatus accordingly
+    let finalClientStatus = lead.clientStatus || 'Warm';
+    let finalLeadStatus = lead.leadStatus || 'OPEN';
+
+    if (['Hot', 'Warm', 'Lost'].includes(matchedStatus)) {
+      finalClientStatus = matchedStatus;
+    } else if (matchedStatus === 'Closed') {
+      finalLeadStatus = 'CLOSED_WON';
+    }
+
+    await prisma.$executeRawUnsafe(
+      `UPDATE "leads" SET 
+        "followUps" = $1::jsonb,
+        "clientStatus" = $2,
+        "leadStatus" = $3,
+        "updatedAt" = NOW()
+      WHERE "id" = $4`,
+      JSON.stringify(updatedFollowUps),
+      finalClientStatus,
+      finalLeadStatus,
+      id
+    );
+
+    const [updated] = await prisma.$queryRawUnsafe(`SELECT * FROM "leads" WHERE "id" = $1`, id);
+
+    return res.status(200).json({
+      message: `Follow-up on ${date} (${matchedStatus}) recorded and frozen successfully.`,
+      followUp: newEntry,
+      followUps: updatedFollowUps,
+      lead: updated,
+    });
+  } catch (error) {
+    console.error('[LMS] Follow-up recording error:', error);
+    return res.status(500).json({ error: 'Failed to record follow-up: ' + error.message });
   }
 });
 

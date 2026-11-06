@@ -331,6 +331,7 @@ export function exportLeadsToCsv(leads, filename = 'CorporateMart_LMS_Leads.csv'
     { key: 'bdmName2', label: "BDM's Name - II" },
     { key: 'closerStatus', label: 'Closer Status' },
     { key: 'clientStatus', label: 'Client Status (Hot/Warm/Lost)' },
+    { key: 'followUpHistory', label: 'Follow-up Status History' },
     { key: 'sourcingStatus', label: 'Sourcing Status' },
     { key: 'meetingStatus', label: 'Meeting Status' },
     { key: 'meetingDate', label: 'Meeting Date' },
@@ -352,6 +353,14 @@ export function exportLeadsToCsv(leads, filename = 'CorporateMart_LMS_Leads.csv'
     bdmName2: l.bdmName2 || 'None',
     closerStatus: l.closerStatus || 'N/A',
     clientStatus: l.clientStatus || 'Warm',
+    followUpHistory: (() => {
+      let fus = [];
+      if (l.followUps) {
+        fus = typeof l.followUps === 'string' ? JSON.parse(l.followUps) : l.followUps;
+      }
+      if (!Array.isArray(fus) || fus.length === 0) return 'No follow-ups';
+      return fus.map((f) => `${f.date}: ${f.status}`).join(' | ');
+    })(),
     sourcingStatus: l.sourcingStatus || 'N/A',
     meetingStatus: l.meetingStatus || 'N/A',
     meetingDate: l.meetingDate ? new Date(l.meetingDate).toLocaleDateString('en-IN') : 'Not Set',
