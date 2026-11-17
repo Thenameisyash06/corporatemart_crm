@@ -11,6 +11,8 @@ import OperationsWorkbench from './components/OperationsWorkbench';
 import RmWorkbench from './components/RmWorkbench';
 import AdminDashboard from './components/AdminDashboard';
 import LeadManagementWorkbench from './components/LeadManagementWorkbench';
+import MeetingTodayPopup from './components/MeetingTodayPopup';
+import { filterTodayMeetings } from './lib/meetingUtils';
 import api from './lib/api';
 import {
   Plus,
@@ -37,6 +39,11 @@ export default function App() {
   const [isNewDealOpen, setIsNewDealOpen] = useState(false);
   const [balanceModalDeal, setBalanceModalDeal] = useState(null);
   const [newDealInitialData, setNewDealInitialData] = useState(null);
+
+  // Today's Meetings State & Notification Alerts
+  const [todayMeetings, setTodayMeetings] = useState([]);
+  const [showMeetingPopup, setShowMeetingPopup] = useState(false);
+  const [highlightLeadId, setHighlightLeadId] = useState(null);
 
   // Filters for Pipeline tab
   const [activeFilterId, setActiveFilterId] = useState('ALL');
@@ -155,11 +162,50 @@ export default function App() {
     }
   };
 
+  // Fetch today's meetings for BDM and Admin users
+  const fetchTodayMeetings = async () => {
+    if (!currentUser || (currentUser.role !== 'BDM' && currentUser.role !== 'ADMIN')) {
+      setTodayMeetings([]);
+      setShowMeetingPopup(false);
+      return;
+    }
+    try {
+      const res = await api.get('/leads');
+      const leads = res.data?.leads || [];
+      const meetingsToday = filterTodayMeetings(leads);
+      setTodayMeetings(meetingsToday);
+
+      // Trigger popup upon login or page refresh if meetings exist today
+      if (meetingsToday.length > 0) {
+        setShowMeetingPopup(true);
+      }
+    } catch (err) {
+      console.warn('[LMS] Could not fetch today meetings:', err.message);
+    }
+  };
+
   useEffect(() => {
     if (currentUser) {
       fetchData();
+      fetchTodayMeetings();
     }
-  }, [currentUser, activeStageKey, searchQuery]);
+
+    const handleLeadsChanged = () => {
+      fetchTodayMeetings();
+    };
+
+    window.addEventListener('lms_leads_changed', handleLeadsChanged);
+    return () => {
+      window.removeEventListener('lms_leads_changed', handleLeadsChanged);
+    };
+  }, [currentUser]);
+
+  const handleNavigateToLms = (lead) => {
+    setActiveTab('lms');
+    if (lead?.id) {
+      setHighlightLeadId(lead.id);
+    }
+  };
 
   const handleFilterSelect = (filterId, stageKey) => {
     setActiveFilterId(filterId);
@@ -314,12 +360,27 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
-      {/* Top Navbar */}
+      {/* Top Navbar with Notification Bell & Indicator Dot */}
       <Navbar
         currentUser={currentUser}
         onUserChange={handleUserChange}
-        onRefresh={fetchData}
+        onRefresh={() => {
+          fetchData();
+          fetchTodayMeetings();
+        }}
+        todayMeetings={todayMeetings}
+        onNavigateToLms={handleNavigateToLms}
       />
+
+      {/* TODAY'S MEETING ALERT POPUP (3-4 SECONDS ON LOGIN / REFRESH) */}
+      {showMeetingPopup && todayMeetings.length > 0 && (
+        <MeetingTodayPopup
+          meetings={todayMeetings}
+          onClose={() => setShowMeetingPopup(false)}
+          onNavigateToLms={handleNavigateToLms}
+          durationMs={4000}
+        />
+      )}
 
       {/* Main Container */}
       <main className="flex-1 p-6 max-w-7xl mx-auto w-full space-y-5">
@@ -386,6 +447,7 @@ export default function App() {
         {activeTab === 'lms' && (currentUser?.role === 'BDM' || currentUser?.role === 'ADMIN') && (
           <LeadManagementWorkbench
             currentUser={currentUser}
+            highlightLeadId={highlightLeadId}
             onConvertToDeal={(leadData) => {
               setNewDealInitialData(leadData);
               setIsNewDealOpen(true);
@@ -471,10 +533,16 @@ export default function App() {
       {/* MODALS */}
       <NewDealWizardModal
         isOpen={isNewDealOpen}
-        onClose={() => setIsNewDealOpen(false)}
+        initialData={newDealInitialData}
+        onClose={() => {
+          setIsNewDealOpen(false);
+          setNewDealInitialData(null);
+        }}
         onSuccess={(newDealId) => {
           fetchData();
           setSelectedDealId(newDealId);
+          setIsNewDealOpen(false);
+          setNewDealInitialData(null);
         }}
       />
 

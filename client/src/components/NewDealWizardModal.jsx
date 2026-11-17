@@ -38,25 +38,69 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
 
 
   useEffect(() => {
-    if (initialData && isOpen) {
-      setForm((prev) => ({
-        ...prev,
-        companyName: initialData.companyName || prev.companyName,
-        clientName: initialData.clientName || prev.clientName,
-        clientEmail: initialData.clientEmail || prev.clientEmail,
-        clientPhone: initialData.clientPhone || prev.clientPhone,
-        remarks: initialData.remarks || prev.remarks,
-        directors: [
-          {
-            name: initialData.clientName || '',
-            email: initialData.clientEmail || '',
-            phone: initialData.clientPhone || '',
-            din: '',
-            pan: '',
-          },
-          { name: '', din: '', pan: '', email: '', phone: '' },
-        ],
-      }));
+    if (isOpen) {
+      if (initialData) {
+        setForm((prev) => ({
+          ...prev,
+          companyName: initialData.companyName || '',
+          clientName: initialData.clientName || '',
+          clientEmail: initialData.clientEmail || '',
+          clientPhone: initialData.clientPhone || '',
+          remarks: initialData.remarks || '',
+          directors: [
+            {
+              name: initialData.clientName || '',
+              email: initialData.clientEmail || '',
+              phone: initialData.clientPhone || '',
+              din: '',
+              pan: '',
+            },
+            { name: '', din: '', pan: '', email: '', phone: '' },
+          ],
+        }));
+      } else {
+        setForm({
+          companyName: '',
+          clientName: '',
+          clientEmail: '',
+          clientPhone: '',
+          coBdmIds: [],
+          panNumber: '',
+          gstStatus: false,
+          gstin: '',
+          consultantName: '',
+          industry: '',
+          sector: '',
+          billingAddress: '',
+          city: '',
+          state: '',
+          pincode: '',
+          remarks: '',
+          accountName: RECEIVING_ACCOUNTS[0],
+          cashCollectorName: '',
+          directors: [
+            { name: '', din: '', pan: '', email: '', phone: '' },
+            { name: '', din: '', pan: '', email: '', phone: '' },
+          ],
+          services: [
+            {
+              serviceName: DEFAULT_SERVICES[0].name,
+              standardAmount: DEFAULT_SERVICES[0].standardAmount,
+              dealAmount: '15000',
+              govtFee: DEFAULT_SERVICES[0].govtFee,
+            },
+          ],
+          standardAmount: '18000',
+          totalAmount: '18000',
+          amountReceived: '10000',
+          paymentType: 'PART_PAYMENT',
+          paymentMode: 'UPI',
+          transactionReference: '',
+          paymentDate: new Date().toISOString().split('T')[0],
+        });
+      }
+      setStep(1);
+      setError(null);
     }
   }, [initialData, isOpen]);
 

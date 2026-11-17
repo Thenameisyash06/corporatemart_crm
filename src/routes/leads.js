@@ -97,6 +97,29 @@ const LEAD_STAGES_LIST = [
   'CLOSED_LOST',
 ];
 
+const EXACT_10_DIGIT_PHONE_REGEX = /^[6-9]\d{9}$/;
+
+/**
+ * Access Control Helper: Checks if a user has permission to access a specific lead
+ */
+function userCanAccessLead(lead, user) {
+  if (!user || !lead) return false;
+  if (user.role === 'ADMIN') return true;
+
+  const userName = (user.fullName || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+  const bdm1 = (lead.bdmName1 || '').toLowerCase();
+  const bdm2 = (lead.bdmName2 || '').toLowerCase();
+  const leader = (lead.leaderName || '').toLowerCase();
+  const isCreator = lead.createdById === user.id;
+
+  if (isCreator) return true;
+  if (bdm1 && (bdm1.includes(userName) || userName.includes(bdm1))) return true;
+  if (bdm2 && (bdm2.includes(userName) || userName.includes(bdm2))) return true;
+  if ((lead.closerStatus || '').includes('Lead Sharing') && (leader.includes(userName) || userName.includes(leader))) return true;
+
+  return false;
+}
+
 // -----------------------------------------------------------------------------
 // AUTOMATIC TABLE INITIALIZATION (PostgreSQL)
 // -----------------------------------------------------------------------------
@@ -211,10 +234,10 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
     // 2. Leads where closerStatus = 'Lead Sharing' and the user is the assigned Leader
     if (isBdmOnly || scope === 'my') {
       const userFullName = (req.user.fullName || '').replace(/\s*\([^)]*\)/g, '').trim();
-      const targetBdm = (req.query.myBdmName && req.query.myBdmName.trim()) 
+      const targetBdm = (!isBdmOnly && req.query.myBdmName && req.query.myBdmName.trim()) 
         ? req.query.myBdmName.trim() 
         : userFullName;
-      const targetLeader = (req.query.myLeaderName && req.query.myLeaderName.trim())
+      const targetLeader = (!isBdmOnly && req.query.myLeaderName && req.query.myLeaderName.trim())
         ? req.query.myLeaderName.trim()
         : userFullName;
 
@@ -433,9 +456,27 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
     if (!companyName || !companyName.trim()) {
       return res.status(400).json({ error: 'Company Name is mandatory.' });
     }
-    if (!mobileNo || !mobileNo.trim()) {
+    const cleanPhone = (mobileNo || '').trim();
+    if (!cleanPhone) {
       return res.status(400).json({ error: 'Mobile Number is mandatory.' });
     }
+    if (!EXACT_10_DIGIT_PHONE_REGEX.test(cleanPhone)) {
+      return res.status(400).json({
+        error: 'Invalid mobile number. Must be exactly 10 digits without symbols, spaces, or country code (starting with 6-9).',
+      });
+    }
+
+    // Duplicate check by mobile number
+    const [existingPhoneLead] = await prisma.$queryRawUnsafe(
+      `SELECT "id", "companyName" FROM "leads" WHERE "mobileNo" = $1 LIMIT 1`,
+      cleanPhone
+    );
+    if (existingPhoneLead) {
+      return res.status(400).json({
+        error: `A lead with phone number ${cleanPhone} already exists (${existingPhoneLead.companyName}).`,
+      });
+    }
+
     if (!leaderName) {
       return res.status(400).json({ error: "Leader's Name is mandatory." });
     }
@@ -450,6 +491,11 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
     }
     if (!meetingStatus) {
       return res.status(400).json({ error: 'Meeting Status is mandatory.' });
+    }
+    if (leadStatus && !LEAD_STAGES_LIST.includes(leadStatus)) {
+      return res.status(400).json({
+        error: `Invalid leadStatus "${leadStatus}". Allowed values: ${LEAD_STAGES_LIST.join(', ')}`,
+      });
     }
 
     const ext = path.extname(file.originalname).toLowerCase();
@@ -557,12 +603,24 @@ router.get('/:id/quotation', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Quotation file not found for this lead.' });
     }
 
+    // RBAC: Verify user has permission to access this lead's quotation
+    if (!userCanAccessLead(lead, req.user)) {
+      return res.status(403).json({ error: 'You are not authorized to view or download this quotation.' });
+    }
+
     const filename = lead.quotationFileName || 'quotation';
+    const isInline = req.query.inline === 'true';
+    const isJsonAccept = req.headers.accept?.includes('application/json');
 
     // 1. Check local filesystem first
     if (lead.quotationFileUrl.startsWith('/uploads/')) {
       const fullPath = path.join(__dirname, '../..', lead.quotationFileUrl);
       if (fs.existsSync(fullPath)) {
+        if (isInline) {
+          res.setHeader('Content-Type', filename.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+          res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+          return fs.createReadStream(fullPath).pipe(res);
+        }
         return res.download(fullPath, filename);
       }
     }
@@ -573,6 +631,12 @@ router.get('/:id/quotation', authenticateToken, async (req, res) => {
       const files = fs.readdirSync(localDir);
       const matched = files.find((f) => f.includes(lead.quotationFileName));
       if (matched) {
+        const fullPath = path.join(localDir, matched);
+        if (isInline) {
+          res.setHeader('Content-Type', filename.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+          res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+          return fs.createReadStream(fullPath).pipe(res);
+        }
         return res.download(path.join(localDir, matched), filename);
       }
     }
@@ -580,6 +644,9 @@ router.get('/:id/quotation', authenticateToken, async (req, res) => {
     // 3. Check Supabase Storage signed URL
     try {
       const signedUrl = await getSignedUrl(lead.quotationFileUrl);
+      if (isInline && isJsonAccept) {
+        return res.json({ signedUrl, fileName: filename });
+      }
       return res.redirect(signedUrl);
     } catch (err) {
       console.error('[LMS] Signed URL error:', err);
@@ -602,6 +669,11 @@ router.patch('/:id', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req
     const existing = await prisma.$queryRawUnsafe(`SELECT * FROM "leads" WHERE "id" = $1`, id);
     if (!existing || existing.length === 0) {
       return res.status(404).json({ error: 'Lead not found.' });
+    }
+
+    const currentLead = existing[0];
+    if (!userCanAccessLead(currentLead, req.user)) {
+      return res.status(403).json({ error: 'You are not authorized to update this lead.' });
     }
 
     const {
@@ -636,8 +708,14 @@ router.patch('/:id', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req
       params.push(directorName ? directorName.trim() : null);
     }
     if (mobileNo !== undefined) {
+      const cleanPhone = mobileNo.trim();
+      if (!EXACT_10_DIGIT_PHONE_REGEX.test(cleanPhone)) {
+        return res.status(400).json({
+          error: 'Invalid mobile number. Must be exactly 10 digits without symbols, spaces, or country code (starting with 6-9).',
+        });
+      }
       updates.push(`"mobileNo" = $${pIdx++}`);
-      params.push(mobileNo.trim());
+      params.push(cleanPhone);
     }
     if (emailId !== undefined) {
       updates.push(`"emailId" = $${pIdx++}`);
@@ -685,6 +763,9 @@ router.patch('/:id', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req
       params.push(expectedDateOfCloser ? new Date(expectedDateOfCloser) : null);
     }
     if (leadStatus !== undefined) {
+      if (!LEAD_STAGES_LIST.includes(leadStatus)) {
+        return res.status(400).json({ error: `Invalid leadStatus "${leadStatus}". Allowed values: ${LEAD_STAGES_LIST.join(', ')}` });
+      }
       updates.push(`"leadStatus" = $${pIdx++}`);
       params.push(leadStatus);
     }
@@ -741,12 +822,8 @@ router.post('/:id/follow-up', authenticateToken, requireRoles('BDM', 'ADMIN'), a
       return res.status(404).json({ error: 'Lead not found.' });
     }
 
-    let existingFollowUps = [];
-    if (lead.followUps) {
-      existingFollowUps = typeof lead.followUps === 'string' ? JSON.parse(lead.followUps) : lead.followUps;
-    }
-    if (!Array.isArray(existingFollowUps)) {
-      existingFollowUps = [];
+    if (!userCanAccessLead(lead, req.user)) {
+      return res.status(403).json({ error: 'You are not authorized to add follow-up to this lead.' });
     }
 
     // New immutable/frozen entry
@@ -760,8 +837,6 @@ router.post('/:id/follow-up', authenticateToken, requireRoles('BDM', 'ADMIN'), a
       addedByName: req.user.fullName,
     };
 
-    const updatedFollowUps = [...existingFollowUps, newEntry];
-
     // Synchronize clientStatus and leadStatus accordingly
     let finalClientStatus = lead.clientStatus || 'Warm';
     let finalLeadStatus = lead.leadStatus || 'OPEN';
@@ -772,20 +847,22 @@ router.post('/:id/follow-up', authenticateToken, requireRoles('BDM', 'ADMIN'), a
       finalLeadStatus = 'CLOSED_WON';
     }
 
+    // Atomic SQL JSONB append to prevent race conditions
     await prisma.$executeRawUnsafe(
       `UPDATE "leads" SET 
-        "followUps" = $1::jsonb,
+        "followUps" = COALESCE("followUps", '[]'::jsonb) || $1::jsonb,
         "clientStatus" = $2,
         "leadStatus" = $3,
         "updatedAt" = NOW()
       WHERE "id" = $4`,
-      JSON.stringify(updatedFollowUps),
+      JSON.stringify([newEntry]),
       finalClientStatus,
       finalLeadStatus,
       id
     );
 
     const [updated] = await prisma.$queryRawUnsafe(`SELECT * FROM "leads" WHERE "id" = $1`, id);
+    const updatedFollowUps = typeof updated.followUps === 'string' ? JSON.parse(updated.followUps) : (updated.followUps || []);
 
     return res.status(200).json({
       message: `Follow-up on ${date} (${matchedStatus}) recorded and frozen successfully.`,
