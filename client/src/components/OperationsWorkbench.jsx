@@ -30,12 +30,35 @@ import {
   Briefcase,
   Plus,
   FileSpreadsheet,
+  LayoutGrid,
+  List,
+  Trash2,
+  Paperclip,
+  UploadCloud,
+  ChevronDown,
+  ChevronUp,
+  FolderOpen,
+  File,
 } from 'lucide-react';
 import api from '../lib/api';
 import {
   exportOpsServicesToCsv,
   exportOpsTeamWorkloadToCsv,
 } from '../lib/exportCsv';
+
+// -----------------------------------------------------------------------------
+// DOCUMENT CATEGORIES FOR OPERATIONS
+// -----------------------------------------------------------------------------
+export const OPS_DOCUMENT_TYPES = [
+  { value: 'FINAL_DELIVERABLE_CERTIFICATE', label: 'Final Deliverable Certificate (COI / License / Approval PDF)' },
+  { value: 'INCORPORATION_FORM', label: 'Govt / MCA Filing Form / Challan Receipt' },
+  { value: 'LEGAL_AGREEMENT', label: 'Service / Legal Agreement' },
+  { value: 'OTHER', label: 'Working Paper / Objection Reply / Other Document' },
+  { value: 'KYC_PAN', label: 'Director PAN Card' },
+  { value: 'KYC_AADHAAR', label: 'Director Aadhaar Card' },
+  { value: 'ADDRESS_PROOF', label: 'Office / Electricity Address Proof' },
+  { value: 'DSC_TOKEN', label: 'DSC / Token Document' },
+];
 
 // -----------------------------------------------------------------------------
 // EXPERTISE SECTORS CONFIGURATION (Mock Data - Swappable with Real List Later)
@@ -150,14 +173,14 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
   // Navigation Tabs:
   // Manager: 'allocation' | 'team' | 'dossier'
-  // Specialist: 'my_tasks' | 'pool' | 'dossier'
+  // Specialist: 'my_tasks' (Unified Tasks & Dossier) | 'pool'
   const [activeTab, setActiveTab] = useState(isManager ? 'allocation' : 'my_tasks');
 
   useEffect(() => {
     if (isManager) {
       if (activeTab === 'my_tasks' || activeTab === 'pool') setActiveTab('allocation');
     } else {
-      if (activeTab === 'allocation' || activeTab === 'team') setActiveTab('my_tasks');
+      if (activeTab === 'allocation' || activeTab === 'team' || activeTab === 'dossier') setActiveTab('my_tasks');
     }
   }, [isManager, currentUser?.id, currentUser?.email]);
 
@@ -169,10 +192,20 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
   const [actionLoading, setActionLoading] = useState(false);
   const [feedback, setFeedback] = useState(null);
 
-  // Filters for Manager Allocation Hub
+  // Specialist Unified Workspace & Files State
+  const [selectedTaskId, setSelectedTaskId] = useState(null);
+  const [viewMode, setViewMode] = useState('workspace'); // 'workspace' | 'table'
+  const [expandedTaskId, setExpandedTaskId] = useState(null);
+  const [uploadDocType, setUploadDocType] = useState('FINAL_DELIVERABLE_CERTIFICATE');
+  const [uploadDocTitle, setUploadDocTitle] = useState('');
+  const [uploadDocFile, setUploadDocFile] = useState(null);
+  const [isUploadingDoc, setIsUploadingDoc] = useState(false);
+  const [previewDoc, setPreviewDoc] = useState(null);
+
+  // Filters for Specialist & Manager
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSectorFilter, setSelectedSectorFilter] = useState('ALL');
-  const [selectedStatusFilter, setSelectedStatusFilter] = useState('ALL');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState(isManager ? 'ALL' : 'ACTIVE');
   const [selectedAssigneeFilter, setSelectedAssigneeFilter] = useState('ALL');
   const [selectedUrgencyFilter, setSelectedUrgencyFilter] = useState('ALL'); // 'ALL' | 'OVERDUE' | 'DUE_48H' | 'THIS_WEEK'
 
@@ -263,12 +296,12 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
           isOverdue,
           daysLeft,
           deadlineStatus,
+          deal: d,
         });
       });
     });
     return list;
   }, [deals]);
-
 
   // Detect specialist's core sector
   const specialistSector = useMemo(() => {
@@ -276,7 +309,13 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
     const name = currentUser?.fullName || '';
     const email = currentUser?.email || '';
     for (const sector of EXPERTISE_SECTORS) {
-      if (sector.specialists.some((s) => name.toLowerCase().includes(s.toLowerCase().split(' ')[0]) || email.toLowerCase().includes(s.toLowerCase().split(' ')[0]))) {
+      if (
+        sector.specialists.some(
+          (s) =>
+            name.toLowerCase().includes(s.toLowerCase().split(' ')[0]) ||
+            email.toLowerCase().includes(s.toLowerCase().split(' ')[0])
+        )
+      ) {
         return sector;
       }
     }
@@ -286,7 +325,9 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
   // Specialist's personal assigned services
   const myServices = useMemo(() => {
     return allServices.filter(
-      (s) => s.assignedOpsUserId === currentUser?.id || (currentUser?.email && s.assignedOpsUser?.email === currentUser?.email)
+      (s) =>
+        s.assignedOpsUserId === currentUser?.id ||
+        (currentUser?.email && s.assignedOpsUser?.email === currentUser?.email)
     );
   }, [allServices, currentUser]);
 
@@ -298,7 +339,12 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
   // Filtered Services for Specialist Personal View
   const filteredMyServices = useMemo(() => {
     return myServices.filter((s) => {
-      if (selectedStatusFilter !== 'ALL' && s.status !== selectedStatusFilter) return false;
+      // By default ACTIVE hides completed / approved services so they are removed from active workspace
+      if (selectedStatusFilter === 'ACTIVE') {
+        if (s.status === 'COMPLETED' || s.status === 'APPROVED') return false;
+      } else if (selectedStatusFilter !== 'ALL' && s.status !== selectedStatusFilter) {
+        return false;
+      }
 
       if (selectedUrgencyFilter === 'OVERDUE' && !s.isOverdue) return false;
       if (selectedUrgencyFilter === 'DUE_48H') {
@@ -322,6 +368,23 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
       return true;
     });
   }, [myServices, selectedStatusFilter, selectedUrgencyFilter, searchQuery]);
+
+  // Active Selected Task & Deal for the Unified Section
+  const activeTask = useMemo(() => {
+    if (filteredMyServices.length === 0) return null;
+    if (selectedTaskId) {
+      const found = filteredMyServices.find((s) => s.id === selectedTaskId);
+      if (found) return found;
+    }
+    return filteredMyServices[0];
+  }, [filteredMyServices, selectedTaskId]);
+
+  const activeDeal = useMemo(() => {
+    if (activeTask?.dealId) {
+      return deals.find((d) => d.id === activeTask.dealId) || activeTask.deal || null;
+    }
+    return selectedDeal || deals[0] || null;
+  }, [activeTask, deals, selectedDeal]);
 
   // Filtered Services for Manager View
   const filteredServices = useMemo(() => {
@@ -403,7 +466,14 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
     try {
       setActionLoading(true);
       await api.patch(`/deals/${dealId}/services/${serviceId}`, updates);
-      setFeedback({ type: 'success', message: 'Service task updated successfully.' });
+      if (updates.status === 'COMPLETED') {
+        setFeedback({
+          type: 'success',
+          message: 'Service marked as COMPLETED and removed from your active workspace!',
+        });
+      } else {
+        setFeedback({ type: 'success', message: 'Service task updated successfully.' });
+      }
       await fetchOpsData();
       if (onRefreshParent) onRefreshParent();
     } catch (err) {
@@ -440,15 +510,27 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
     }
   };
 
-  const handleCompleteService = async () => {
-    if (!selectedDeal) return;
+  const handleCompleteService = async (dealTarget) => {
+    const target = dealTarget || selectedDeal;
+    if (!target) return;
+
+    // A deal is not self-completable: all individual services must be completed first
+    const incompleteServices = (target.services || []).filter((s) => s.status !== 'COMPLETED');
+    if (incompleteServices.length > 0) {
+      setFeedback({
+        type: 'error',
+        message: `Cannot complete deal. All ${target.services?.length || 0} services must be completed by operations first (${incompleteServices.length} still in progress).`,
+      });
+      return;
+    }
+
     try {
       setActionLoading(true);
       setFeedback(null);
 
       if (deliverableFile) {
         const formData = new FormData();
-        formData.append('dealId', selectedDeal.id);
+        formData.append('dealId', target.id);
         formData.append('documentType', 'FINAL_DELIVERABLE_CERTIFICATE');
         formData.append('title', `Final Deliverable Certificate - ${deliverableFile.name}`);
         formData.append('file', deliverableFile);
@@ -457,11 +539,11 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
         });
       }
 
-      await api.post(`/deals/${selectedDeal.id}/service-complete`, {
+      await api.post(`/deals/${target.id}/service-complete`, {
         outcomeNotes: 'All filings completed, government certificates generated and verified.',
       });
 
-      setFeedback({ type: 'success', message: `Deal ${selectedDeal.dealCode} marked as Service Completed (Stage 07)!` });
+      setFeedback({ type: 'success', message: `Deal ${target.dealCode} marked as Service Completed (Stage 07)!` });
       setDeliverableFile(null);
       await fetchOpsData();
       if (onRefreshParent) onRefreshParent();
@@ -472,13 +554,14 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
     }
   };
 
-  const handleDeliverToClient = async () => {
-    if (!selectedDeal) return;
+  const handleDeliverToClient = async (dealTarget) => {
+    const target = dealTarget || selectedDeal;
+    if (!target) return;
     try {
       setActionLoading(true);
       setFeedback(null);
 
-      await api.post(`/deals/${selectedDeal.id}/final-delivery`, {
+      await api.post(`/deals/${target.id}/final-delivery`, {
         deliveryProof: 'Delivered via Email Portal & WhatsApp Notification',
       });
 
@@ -487,6 +570,71 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
       if (onRefreshParent) onRefreshParent();
     } catch (err) {
       setFeedback({ type: 'error', message: err.response?.data?.error || 'Delivery dispatch failed.' });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // DOCUMENT VAULT & FILE ATTACHMENT HANDLERS
+  // ---------------------------------------------------------------------------
+  const handleUploadDocument = async (dealId) => {
+    if (!dealId) {
+      setFeedback({ type: 'error', message: 'No active deal selected to attach document.' });
+      return;
+    }
+    if (!uploadDocFile) {
+      setFeedback({ type: 'error', message: 'Please select a file to attach.' });
+      return;
+    }
+
+    try {
+      setIsUploadingDoc(true);
+      setFeedback(null);
+      const formData = new FormData();
+      formData.append('dealId', dealId);
+      formData.append('documentType', uploadDocType || 'OTHER');
+      formData.append('title', uploadDocTitle.trim() || uploadDocFile.name);
+      formData.append('file', uploadDocFile);
+
+      await api.post('/documents/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
+      setFeedback({ type: 'success', message: `File "${uploadDocFile.name}" attached successfully to deal dossier!` });
+      setUploadDocFile(null);
+      setUploadDocTitle('');
+      const fileInput = document.getElementById('ops-doc-file-input');
+      if (fileInput) fileInput.value = '';
+
+      await fetchOpsData();
+      if (onRefreshParent) onRefreshParent();
+    } catch (err) {
+      setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to attach document.' });
+    } finally {
+      setIsUploadingDoc(false);
+    }
+  };
+
+  const handlePreviewDocument = async (docId) => {
+    try {
+      const res = await api.get(`/documents/${docId}/signed-url`);
+      setPreviewDoc(res.data);
+    } catch (err) {
+      setFeedback({ type: 'error', message: 'Failed to generate document preview link.' });
+    }
+  };
+
+  const handleDeleteDocument = async (docId, docTitle) => {
+    if (!window.confirm(`Are you sure you want to remove document "${docTitle}" from the deal dossier?`)) return;
+    try {
+      setActionLoading(true);
+      await api.delete(`/documents/${docId}`);
+      setFeedback({ type: 'success', message: 'Document removed from deal dossier.' });
+      await fetchOpsData();
+      if (onRefreshParent) onRefreshParent();
+    } catch (err) {
+      setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to delete document.' });
     } finally {
       setActionLoading(false);
     }
@@ -592,9 +740,9 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                 }`}
               >
                 <Briefcase className="w-3.5 h-3.5 text-emerald-600" />
-                <span>My Assigned Tasks</span>
+                <span>My Assigned Tasks & Deal Dossier</span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-emerald-50 text-emerald-700">
-                  {myServices.length}
+                  {myServices.filter((s) => s.status !== 'COMPLETED' && s.status !== 'APPROVED').length}
                 </span>
               </button>
 
@@ -610,21 +758,6 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                 <span>General Task Pool</span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-amber-50 text-amber-700">
                   {poolServices.length}
-                </span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('dossier')}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
-                  activeTab === 'dossier'
-                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <FileCheck className="w-3.5 h-3.5 text-cyan-600" />
-                <span>Deal Dossier & Files</span>
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-cyan-50 text-cyan-700">
-                  {deals.length}
                 </span>
               </button>
             </>
@@ -654,19 +787,34 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
         <div className="space-y-4">
           {/* Top Specialist Personal Metrics */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
-            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+            <div
+              onClick={() => setSelectedStatusFilter('ACTIVE')}
+              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${
+                selectedStatusFilter === 'ACTIVE'
+                  ? 'bg-slate-50 border-slate-900 ring-1 ring-slate-900'
+                  : 'bg-white border-slate-200 hover:border-slate-300'
+              }`}
+            >
               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-                My Assigned Filings
+                My Active Filings
               </span>
               <div className="text-xl font-extrabold text-slate-900 mt-0.5">
-                {myServices.length} <span className="text-xs font-normal text-slate-500">active tasks</span>
+                {myServices.filter((s) => s.status !== 'COMPLETED' && s.status !== 'APPROVED').length}{' '}
+                <span className="text-xs font-normal text-slate-500">pending tasks</span>
               </div>
               <div className="text-[11px] text-slate-500 mt-1">
-                Value: ₹{myServices.reduce((sum, s) => sum + Number(s.serviceFee || 0), 0).toLocaleString('en-IN')}
+                Value: ₹{myServices.filter((s) => s.status !== 'COMPLETED' && s.status !== 'APPROVED').reduce((sum, s) => sum + Number(s.serviceFee || 0), 0).toLocaleString('en-IN')}
               </div>
             </div>
 
-            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+            <div
+              onClick={() => setSelectedStatusFilter('IN_PROGRESS')}
+              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${
+                selectedStatusFilter === 'IN_PROGRESS'
+                  ? 'bg-blue-50/50 border-blue-500 ring-1 ring-blue-500'
+                  : 'bg-white border-slate-200 hover:border-slate-300'
+              }`}
+            >
               <span className="text-[10px] font-bold text-blue-700 uppercase tracking-wider block">
                 In Progress / Submitted
               </span>
@@ -678,212 +826,915 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
               </div>
             </div>
 
-            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+            <div
+              onClick={() => setSelectedUrgencyFilter(selectedUrgencyFilter === 'OVERDUE' ? 'ALL' : 'OVERDUE')}
+              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${
+                selectedUrgencyFilter === 'OVERDUE'
+                  ? 'bg-rose-50/50 border-rose-500 ring-1 ring-rose-500'
+                  : 'bg-white border-slate-200 hover:border-slate-300'
+              }`}
+            >
               <span className="text-[10px] font-bold text-rose-700 uppercase tracking-wider block">
                 Overdue / Urgent
               </span>
               <div className="text-xl font-extrabold text-rose-600 mt-0.5">
-                {myServices.filter((s) => s.isOverdue).length}
+                {myServices.filter((s) => s.isOverdue && s.status !== 'COMPLETED' && s.status !== 'APPROVED').length}
               </div>
               <div className="text-[11px] text-rose-700/80 mt-1">
                 Immediate Action Required
               </div>
             </div>
 
-            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+            <div
+              onClick={() => setSelectedStatusFilter('COMPLETED')}
+              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${
+                selectedStatusFilter === 'COMPLETED'
+                  ? 'bg-emerald-50/50 border-emerald-500 ring-1 ring-emerald-500'
+                  : 'bg-white border-slate-200 hover:border-slate-300'
+              }`}
+            >
               <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">
-                Completed & Approved
+                Completed & Cleared
               </span>
               <div className="text-xl font-extrabold text-emerald-600 mt-0.5">
                 {myServices.filter((s) => s.status === 'COMPLETED' || s.status === 'APPROVED').length}
               </div>
               <div className="text-[11px] text-emerald-700/80 mt-1">
-                Filing cleared & certified
+                Removed from workspace
               </div>
             </div>
           </div>
 
-          {/* Specialist Table Controls */}
-          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
+          {/* Unified Controls: Search, Filters & View Mode Switcher */}
+          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
             <div className="relative flex-1 w-full">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search my tasks by deal, company, or service..."
+                placeholder="Search assigned tasks by deal code, company, or service..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-800"
               />
             </div>
 
-            <div className="flex items-center gap-2 self-stretch sm:self-auto">
+            <div className="flex flex-wrap items-center gap-2 self-stretch md:self-auto justify-between sm:justify-end">
               <select
                 value={selectedStatusFilter}
                 onChange={(e) => setSelectedStatusFilter(e.target.value)}
-                className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 font-medium focus:outline-none focus:border-slate-800"
+                className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 font-medium focus:outline-none focus:border-slate-800"
               >
-                <option value="ALL">All Statuses</option>
-                <option value="NOT_STARTED">Not Started</option>
+                <option value="ACTIVE">Active Tasks (In Workspace)</option>
                 <option value="IN_PROGRESS">In Progress</option>
                 <option value="GOVT_SUBMITTED">Govt / MCA Submitted</option>
                 <option value="QUERY_RAISED">Query Raised</option>
-                <option value="COMPLETED">Completed</option>
+                <option value="NOT_STARTED">Not Started</option>
+                <option value="COMPLETED">Completed History</option>
+                <option value="ALL">All Statuses</option>
               </select>
 
               <select
                 value={selectedUrgencyFilter}
                 onChange={(e) => setSelectedUrgencyFilter(e.target.value)}
-                className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 font-medium focus:outline-none focus:border-slate-800"
+                className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 font-medium focus:outline-none focus:border-slate-800"
               >
                 <option value="ALL">All Deadlines</option>
                 <option value="OVERDUE">Overdue Only</option>
                 <option value="DUE_48H">Due Next 48 Hours</option>
                 <option value="THIS_WEEK">Due This Week</option>
               </select>
+
+              {/* View Mode Toggle */}
+              <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('workspace')}
+                  className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${
+                    viewMode === 'workspace'
+                      ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title="Workspace View"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5 text-indigo-600" />
+                  <span className="hidden sm:inline">Workspace View</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('table')}
+                  className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${
+                    viewMode === 'table'
+                      ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title="Table View"
+                >
+                  <List className="w-3.5 h-3.5 text-emerald-600" />
+                  <span className="hidden sm:inline">Table View</span>
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* My Tasks Table */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
-                    <th className="py-3 px-4">Deal / Company</th>
-                    <th className="py-3 px-4">Service Task & Sector</th>
-                    <th className="py-3 px-4">My Milestone Status</th>
-                    <th className="py-3 px-4">SRN / MCA Reference</th>
-                    <th className="py-3 px-4">Target Deadline</th>
-                    <th className="py-3 px-4 text-center">Filing Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+          {/* VIEW MODE 1: UNIFIED WORKSPACE (SPLIT DESK) */}
+          {viewMode === 'workspace' && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-[640px]">
+              {/* LEFT COLUMN: Assigned Task Queue (4 cols) */}
+              <div className="lg:col-span-4 bg-white border border-slate-200 rounded-xl flex flex-col overflow-hidden shadow-xs">
+                <div className="p-3.5 border-b border-slate-200 bg-slate-50/70 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-700 block">
+                      My Assigned Tasks ({filteredMyServices.length})
+                    </span>
+                    <span className="text-[10px] text-slate-500">
+                      Select a filing to manage dossier, documents, & status
+                    </span>
+                  </div>
+                  <button
+                    onClick={fetchOpsData}
+                    className="text-xs text-slate-600 hover:text-slate-900 flex items-center gap-1 font-medium px-2 py-1 rounded hover:bg-slate-200/60 transition"
+                    title="Refresh tasks"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto divide-y divide-slate-100 p-2 space-y-1.5 max-h-[750px]">
                   {filteredMyServices.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="py-12 text-center text-slate-400 text-xs">
-                        No service filings currently assigned to you. Click "General Task Pool" above to pick up unassigned tasks!
-                      </td>
-                    </tr>
+                    <div className="p-8 text-center text-slate-400 text-xs">
+                      <CheckCircle2 className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                      No assigned filings found matching filters. Pick up tasks from the General Task Pool!
+                    </div>
                   ) : (
-                    filteredMyServices.map((svc) => (
-                      <tr key={svc.id} className="hover:bg-slate-50/70 transition">
-                        <td className="py-3 px-4">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-mono font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 text-[11px]">
+                    filteredMyServices.map((svc) => {
+                      const isSelected = activeTask?.id === svc.id;
+                      const svcDeal = svc.deal || deals.find((d) => d.id === svc.dealId);
+                      const docCount = svcDeal?.documents?.length || 0;
+
+                      return (
+                        <div
+                          key={svc.id}
+                          onClick={() => setSelectedTaskId(svc.id)}
+                          className={`p-3 rounded-xl cursor-pointer transition border text-left ${
+                            isSelected
+                              ? 'bg-slate-50 border-slate-900 shadow-xs ring-1 ring-slate-900/20'
+                              : 'bg-white border-slate-200/70 hover:bg-slate-50 hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1.5">
+                            <span className="font-mono text-[11px] font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
                               {svc.dealCode}
                             </span>
-                            <button
-                              onClick={() => onOpenDossier(svc.dealId)}
-                              title="Open Deal Dossier"
-                              className="text-slate-400 hover:text-slate-800"
+                            <span
+                              className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                                svc.status === 'COMPLETED' || svc.status === 'APPROVED'
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                  : svc.status === 'GOVT_SUBMITTED'
+                                  ? 'bg-blue-50 text-blue-800 border-blue-200'
+                                  : svc.status === 'QUERY_RAISED'
+                                  ? 'bg-rose-50 text-rose-800 border-rose-200'
+                                  : svc.status === 'IN_PROGRESS'
+                                  ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                  : 'bg-slate-100 text-slate-700 border-slate-200'
+                              }`}
                             >
-                              <ExternalLink className="w-3.5 h-3.5" />
-                            </button>
+                              {svc.status?.replace(/_/g, ' ')}
+                            </span>
                           </div>
-                          <div className="font-bold text-slate-900 mt-1 truncate max-w-[200px]">
+
+                          <div className="font-bold text-slate-900 text-xs mt-1.5 truncate">
                             {svc.companyName}
                           </div>
-                          <div className="text-[11px] text-slate-500">
+                          <div className="text-[11px] text-slate-500 truncate">
                             {svc.clientName} ({svc.clientPhone})
                           </div>
-                        </td>
 
-                        <td className="py-3 px-4">
-                          <div className="font-bold text-slate-900 text-sm">{svc.serviceName}</div>
-                          <div className="flex items-center gap-1.5 mt-1">
-                            <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold border ${svc.sectorBadge}`}>
-                              {svc.sectorName}
+                          <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                            <span className="font-semibold text-slate-800 truncate max-w-[150px]">
+                              {svc.serviceName}
                             </span>
-                            <span className="text-[11px] text-slate-500">Fee: ₹{Number(svc.serviceFee || 0).toLocaleString('en-IN')}</span>
+                            <span
+                              className={`px-1.5 py-0.5 rounded font-bold text-[10px] border ${
+                                svc.isOverdue
+                                  ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                  : svc.daysLeft !== null && svc.daysLeft <= 2
+                                  ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                  : 'bg-slate-50 text-slate-600 border-slate-200'
+                              }`}
+                            >
+                              {svc.deadlineStatus}
+                            </span>
                           </div>
-                        </td>
 
-                        <td className="py-3 px-4 min-w-[180px]">
-                          <select
-                            value={svc.status || 'NOT_STARTED'}
-                            onChange={(e) =>
-                              handleUpdateService(svc.dealId, svc.id, {
-                                status: e.target.value,
-                                completedAt: e.target.value === 'COMPLETED' ? new Date().toISOString() : undefined,
-                              })
-                            }
-                            className={`w-full text-xs font-bold rounded-lg px-2.5 py-1.5 border focus:outline-none ${
-                              svc.status === 'COMPLETED' || svc.status === 'APPROVED'
-                                ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                                : svc.status === 'GOVT_SUBMITTED'
-                                ? 'bg-blue-50 text-blue-800 border-blue-300'
-                                : svc.status === 'QUERY_RAISED'
-                                ? 'bg-rose-50 text-rose-800 border-rose-300'
-                                : svc.status === 'IN_PROGRESS'
-                                ? 'bg-amber-50 text-amber-800 border-amber-300'
-                                : 'bg-slate-50 text-slate-700 border-slate-300'
-                            }`}
-                          >
-                            <option value="NOT_STARTED">Not Started</option>
-                            <option value="IN_PROGRESS">In Progress (Drafting)</option>
-                            <option value="GOVT_SUBMITTED">Govt / MCA Submitted</option>
-                            <option value="QUERY_RAISED">Query / Resubmission</option>
-                            <option value="COMPLETED">Completed / Approved</option>
-                          </select>
-                        </td>
+                          <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500">
+                            <span className="font-mono">SRN: {svc.govApplicationNumber || 'Pending'}</span>
+                            <span className="inline-flex items-center gap-1 font-medium text-slate-600">
+                              <Paperclip className="w-3 h-3 text-slate-400" /> {docCount} {docCount === 1 ? 'file' : 'files'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
 
-                        <td className="py-3 px-4 min-w-[160px]">
-                          <input
-                            type="text"
-                            defaultValue={svc.govApplicationNumber || ''}
-                            placeholder="Enter SRN / Ref..."
-                            onBlur={(e) => {
-                              if (e.target.value !== (svc.govApplicationNumber || '')) {
-                                handleUpdateService(svc.dealId, svc.id, {
-                                  govApplicationNumber: e.target.value.trim(),
-                                });
-                              }
-                            }}
-                            className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1 text-xs font-mono text-slate-800 focus:outline-none focus:border-slate-800"
-                          />
-                        </td>
-
-                        <td className="py-3 px-4">
-                          <span
-                            className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold border ${
-                              svc.isOverdue
-                                ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                : svc.daysLeft !== null && svc.daysLeft <= 2
-                                ? 'bg-amber-50 text-amber-800 border-amber-200'
-                                : 'bg-slate-50 text-slate-600 border-slate-200'
-                            }`}
-                          >
-                            <Clock className="w-3 h-3" />
-                            {svc.deadlineStatus}
+              {/* RIGHT COLUMN: Unified Deal Dossier, Files, & Task Status Controls (8 cols) */}
+              <div className="lg:col-span-8 bg-white border border-slate-200 rounded-xl flex flex-col overflow-hidden shadow-xs">
+                {activeTask && activeDeal ? (
+                  <div className="flex-1 overflow-y-auto p-5 space-y-5">
+                    {/* WORKSPACE HEADER */}
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-3.5 border-b border-slate-200 gap-3">
+                      <div>
+                        <div className="flex items-center space-x-2.5">
+                          <span className="font-mono text-xs font-bold text-slate-800 px-2.5 py-1 rounded-md bg-slate-100 border border-slate-200">
+                            {activeDeal.dealCode}
                           </span>
-                        </td>
+                          <h3 className="text-base font-bold text-slate-900">{activeDeal.client?.companyName || activeTask.companyName}</h3>
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${activeTask.sectorBadge}`}>
+                            {activeTask.sectorName}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600 mt-1">
+                          Client: <strong className="text-slate-800">{activeDeal.client?.clientName}</strong> ({activeDeal.client?.phone}) • Email: <span className="font-mono">{activeDeal.client?.email || 'N/A'}</span>
+                        </p>
+                      </div>
 
-                        <td className="py-3 px-4 text-center">
-                          {svc.status === 'COMPLETED' ? (
+                      <button
+                        onClick={() => onOpenDossier(activeDeal.id)}
+                        className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-md border border-slate-300 flex items-center gap-1.5 transition shadow-xs whitespace-nowrap"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> View Full Modal Dossier
+                      </button>
+                    </div>
+
+                    {/* 1. MY ASSIGNED TASK STATUS & FILING MILESTONE CONTROLS */}
+                    <div className="p-4 bg-slate-50/80 border border-slate-200 rounded-xl space-y-3.5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm font-bold text-slate-900">{activeTask.serviceName}</h4>
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${activeTask.sectorBadge}`}>
+                              My Assigned Filing
+                            </span>
+                          </div>
+                          <div className="text-xs text-slate-600 mt-0.5">
+                            Service Fee: <strong className="text-slate-800">₹{Number(activeTask.serviceFee || 0).toLocaleString('en-IN')}</strong>{' '}
+                            {activeTask.govtFee && `• Govt Challan Fee: ₹${Number(activeTask.govtFee).toLocaleString('en-IN')}`}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {activeTask.status === 'COMPLETED' ? (
                             <span className="inline-flex items-center gap-1 text-xs text-emerald-700 font-bold bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
-                              <CheckCircle2 className="w-3.5 h-3.5" /> Cleared
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Completed
                             </span>
                           ) : (
                             <button
                               onClick={() =>
-                                handleUpdateService(svc.dealId, svc.id, {
+                                handleUpdateService(activeTask.dealId, activeTask.id, {
                                   status: 'COMPLETED',
                                   completedAt: new Date().toISOString(),
                                 })
                               }
-                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition shadow-xs flex items-center gap-1 mx-auto"
+                              disabled={actionLoading}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition shadow-xs flex items-center gap-1"
                             >
-                              <Check className="w-3.5 h-3.5" /> Mark Done
+                              <Check className="w-3.5 h-3.5" /> Mark Completed
                             </button>
                           )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-slate-200 text-xs">
+                        <div>
+                          <label className="text-xs text-slate-700 font-semibold block mb-1">
+                            Update Milestone Status
+                          </label>
+                          <select
+                            value={activeTask.status || 'PENDING'}
+                            onChange={(e) =>
+                              handleUpdateService(activeTask.dealId, activeTask.id, {
+                                status: e.target.value,
+                                completedAt: e.target.value === 'COMPLETED' ? new Date().toISOString() : null,
+                              })
+                            }
+                            disabled={actionLoading}
+                            className={`w-full text-xs font-bold rounded-lg px-2.5 py-1.5 border focus:outline-none ${
+                              activeTask.status === 'COMPLETED' || activeTask.status === 'APPROVED'
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                : activeTask.status === 'GOVT_SUBMITTED'
+                                ? 'bg-blue-50 text-blue-800 border-blue-300'
+                                : activeTask.status === 'QUERY_RAISED'
+                                ? 'bg-rose-50 text-rose-800 border-rose-300'
+                                : activeTask.status === 'IN_PROGRESS'
+                                ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                : 'bg-white text-slate-700 border-slate-300'
+                            }`}
+                          >
+                            <option value="PENDING">PENDING (Not Started)</option>
+                            <option value="IN_PROGRESS">IN_PROGRESS (Drafting)</option>
+                            <option value="GOVT_SUBMITTED">GOVT_SUBMITTED (Filed)</option>
+                            <option value="QUERY_RAISED">QUERY_RAISED (Resubmission)</option>
+                            <option value="APPROVED">APPROVED (Authority Cleared)</option>
+                            <option value="COMPLETED">COMPLETED</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-xs text-slate-700 font-semibold block mb-1">
+                            Govt Application / SRN Number
+                          </label>
+                          <input
+                            type="text"
+                            defaultValue={activeTask.govApplicationNumber || ''}
+                            placeholder="e.g. SRN29182371 / Ref"
+                            onBlur={(e) => {
+                              if (e.target.value !== (activeTask.govApplicationNumber || '')) {
+                                handleUpdateService(activeTask.dealId, activeTask.id, {
+                                  govApplicationNumber: e.target.value.trim() || null,
+                                });
+                              }
+                            }}
+                            className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-800 focus:outline-none focus:border-slate-800"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-xs text-slate-700 font-semibold block mb-1">
+                            Target Completion Date
+                          </label>
+                          <input
+                            type="date"
+                            defaultValue={
+                              activeTask.targetCompletionDate
+                                ? new Date(activeTask.targetCompletionDate).toISOString().split('T')[0]
+                                : ''
+                            }
+                            onChange={(e) => {
+                              handleUpdateService(activeTask.dealId, activeTask.id, {
+                                targetCompletionDate: e.target.value || null,
+                              });
+                            }}
+                            className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-slate-800"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 2. DEAL DOSSIER: COMPANY DETAILS & DIRECTORS */}
+                    <div className="bg-white border border-slate-200 rounded-xl p-4.5 space-y-3.5 shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                          <Building2 className="w-4 h-4 text-slate-500" /> Deal Dossier & Client Profile
+                        </h4>
+                        <span className="text-[11px] text-slate-500 font-medium">
+                          Stage: <strong className="text-slate-800">{activeDeal.stage?.replace(/_/g, ' ')}</strong>
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                        <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/80">
+                          <span className="text-[10px] text-slate-500 font-medium block">GSTIN</span>
+                          <span className="font-mono font-bold text-slate-900 mt-0.5 block truncate">
+                            {activeDeal.client?.gstin || (activeDeal.client?.gstStatus ? 'Pending' : 'Non-GST')}
+                          </span>
+                        </div>
+
+                        <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/80">
+                          <span className="text-[10px] text-slate-500 font-medium block">Company PAN</span>
+                          <span className="font-mono font-bold text-slate-900 mt-0.5 block truncate">
+                            {activeDeal.client?.pan || 'Not Provided'}
+                          </span>
+                        </div>
+
+                        <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/80">
+                          <span className="text-[10px] text-slate-500 font-medium block">Industry / Sector</span>
+                          <span className="font-semibold text-slate-900 mt-0.5 block truncate">
+                            {activeDeal.client?.industry || activeDeal.client?.sector || 'General Corporate'}
+                          </span>
+                        </div>
+
+                        <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/80">
+                          <span className="text-[10px] text-slate-500 font-medium block">City / State</span>
+                          <span className="font-semibold text-slate-900 mt-0.5 block truncate">
+                            {[activeDeal.client?.city, activeDeal.client?.state].filter(Boolean).join(', ') || 'N/A'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {activeDeal.client?.billingAddress && (
+                        <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200/70 text-xs">
+                          <span className="text-[10px] font-medium text-slate-500 block mb-0.5">Registered / Office Address:</span>
+                          <span className="font-medium text-slate-800">{activeDeal.client.billingAddress}</span>
+                        </div>
+                      )}
+
+                      {/* Company Directors */}
+                      {activeDeal.client?.directors && activeDeal.client.directors.length > 0 && (
+                        <div className="pt-2">
+                          <span className="text-[11px] font-bold text-slate-700 block mb-2">
+                            Directors ({activeDeal.client.directors.length}):
+                          </span>
+                          <div className="border border-slate-200 rounded-lg overflow-hidden">
+                            <table className="w-full text-left text-xs">
+                              <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 text-[10px] uppercase font-bold">
+                                <tr>
+                                  <th className="py-2 px-3">Name</th>
+                                  <th className="py-2 px-3">DIN</th>
+                                  <th className="py-2 px-3">PAN</th>
+                                  <th className="py-2 px-3">Mobile</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
+                                {activeDeal.client.directors.map((d) => (
+                                  <tr key={d.id} className="hover:bg-slate-50/70">
+                                    <td className="py-2 px-3 font-bold text-slate-900">{d.name}</td>
+                                    <td className="py-2 px-3 font-mono text-[11px]">{d.din || 'N/A'}</td>
+                                    <td className="py-2 px-3 font-mono text-[11px]">{d.pan || 'N/A'}</td>
+                                    <td className="py-2 px-3 text-slate-600">{d.phone || 'N/A'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 3. DEAL DOSSIER & ATTACHED FILES (VIEW & PREVIEW) */}
+                    <div className="bg-white border border-slate-200 rounded-xl p-4.5 space-y-3.5 shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                          <FolderOpen className="w-4 h-4 text-cyan-600" /> Deal Dossier & Attached Files ({activeDeal.documents?.length || 0})
+                        </h4>
+                        <span className="text-[11px] text-slate-500">
+                          KYC, MOA/AOA, Filing Proofs, Challans, & Deliverables
+                        </span>
+                      </div>
+
+                      <div className="space-y-2">
+                        {!activeDeal.documents || activeDeal.documents.length === 0 ? (
+                          <div className="p-6 text-center text-slate-400 text-xs border border-dashed border-slate-200 rounded-lg">
+                            <Paperclip className="w-5 h-5 mx-auto mb-1 text-slate-300" />
+                            No files attached to this deal yet. Attach files using the form below.
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            {activeDeal.documents.map((doc) => (
+                              <div
+                                key={doc.id}
+                                className="p-3 bg-slate-50/80 hover:bg-slate-100/70 border border-slate-200 rounded-xl flex items-center justify-between text-xs transition"
+                              >
+                                <div className="flex items-center space-x-2.5 truncate mr-2">
+                                  <div className="p-2 bg-white border border-slate-200 text-slate-700 rounded-lg shadow-xs flex-shrink-0">
+                                    <FileText className="w-4 h-4 text-indigo-600" />
+                                  </div>
+                                  <div className="truncate">
+                                    <div className="font-semibold text-slate-900 truncate" title={doc.title}>
+                                      {doc.title}
+                                    </div>
+                                    <div className="text-[10px] text-slate-500 font-mono mt-0.5 truncate flex items-center gap-1.5">
+                                      <span className="px-1.5 py-0.2 rounded font-sans font-bold bg-white text-slate-700 border border-slate-200">
+                                        {doc.documentType}
+                                      </span>
+                                      {doc.fileSize && <span>{(doc.fileSize / 1024).toFixed(0)} KB</span>}
+                                      {doc.isVerified && (
+                                        <span className="text-emerald-700 font-bold font-sans">✓ Verified</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center space-x-1.5 flex-shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => handlePreviewDocument(doc.id)}
+                                    className="px-2.5 py-1 bg-white hover:bg-slate-200/80 text-slate-700 rounded-md border border-slate-300 text-xs font-semibold flex items-center gap-1 transition shadow-xs"
+                                    title="Preview Document"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" /> Preview
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteDocument(doc.id, doc.title)}
+                                    className="p-1 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded transition"
+                                    title="Delete Document"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 4. ATTACH NEW DOCUMENT / FILING PROOF / DELIVERABLE */}
+                    <div className="bg-white border border-slate-200 rounded-xl p-4.5 space-y-3.5 shadow-xs">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                        <UploadCloud className="w-4 h-4 text-emerald-600" /> Attach Document or Deliverable to Deal Dossier
+                      </h4>
+
+                      <div className="p-3.5 bg-slate-50/70 border border-slate-200 rounded-lg space-y-3 text-xs">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-xs font-semibold text-slate-700 block mb-1">
+                              Document Category
+                            </label>
+                            <select
+                              value={uploadDocType}
+                              onChange={(e) => setUploadDocType(e.target.value)}
+                              className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-slate-800"
+                            >
+                              {OPS_DOCUMENT_TYPES.map((dt) => (
+                                <option key={dt.value} value={dt.value}>
+                                  {dt.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-semibold text-slate-700 block mb-1">
+                              Document Title / Note (Optional)
+                            </label>
+                            <input
+                              type="text"
+                              value={uploadDocTitle}
+                              onChange={(e) => setUploadDocTitle(e.target.value)}
+                              placeholder="e.g. SPICe+ Part B Filing Acknowledgment"
+                              className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-slate-800"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-xs font-semibold text-slate-700 block mb-1">
+                            Select File (PDF, DOCX, Images up to 50MB)
+                          </label>
+                          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                            <input
+                              id="ops-doc-file-input"
+                              type="file"
+                              accept="application/pdf,image/*,.doc,.docx,.xls,.xlsx"
+                              onChange={(e) => setUploadDocFile(e.target.files?.[0] || null)}
+                              className="text-xs text-slate-700 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-slate-900 file:text-white hover:file:bg-slate-800"
+                            />
+
+                            <button
+                              type="button"
+                              onClick={() => handleUploadDocument(activeDeal.id)}
+                              disabled={!uploadDocFile || isUploadingDoc}
+                              className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition disabled:opacity-40 whitespace-nowrap self-stretch sm:self-auto justify-center"
+                            >
+                              <UploadCloud className="w-4 h-4" />
+                              <span>{isUploadingDoc ? 'Uploading...' : 'Attach & Upload'}</span>
+                            </button>
+                          </div>
+                          {uploadDocFile && (
+                            <div className="text-xs text-emerald-700 font-medium flex items-center gap-1.5 mt-2">
+                              <Check className="w-3.5 h-3.5" /> Selected: {uploadDocFile.name} ({(uploadDocFile.size / 1024).toFixed(0)} KB)
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center p-12 text-center text-slate-400">
+                    <CheckCircle2 className="w-12 h-12 text-emerald-500 mb-3" />
+                    <h3 className="text-base font-bold text-slate-800">Workspace Queue Clear</h3>
+                    <p className="text-xs text-slate-500 mt-1 max-w-sm">
+                      {selectedStatusFilter === 'ACTIVE'
+                        ? 'All your assigned service filings are completed! Pick up new tasks from the General Task Pool matching your sector.'
+                        : 'No filings found matching your search and filter criteria.'}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* VIEW MODE 2: TABLE WITH EXPANDABLE DOSSIER & FILES DRAWER */}
+          {viewMode === 'table' && (
+            <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
+                      <th className="py-3 px-4">Deal / Company</th>
+                      <th className="py-3 px-4">Service Task & Sector</th>
+                      <th className="py-3 px-4">My Milestone Status</th>
+                      <th className="py-3 px-4">SRN / MCA Reference</th>
+                      <th className="py-3 px-4">Target Deadline</th>
+                      <th className="py-3 px-4 text-center">Dossier & Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                    {filteredMyServices.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-12 text-center text-slate-400 text-xs">
+                          No service filings currently assigned to you. Click "General Task Pool" above to pick up unassigned tasks!
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    ) : (
+                      filteredMyServices.map((svc) => {
+                        const isExpanded = expandedTaskId === svc.id;
+                        const svcDeal = svc.deal || deals.find((d) => d.id === svc.dealId);
+                        const docCount = svcDeal?.documents?.length || 0;
+
+                        return (
+                          <React.Fragment key={svc.id}>
+                            <tr className={`hover:bg-slate-50/70 transition ${isExpanded ? 'bg-indigo-50/20' : ''}`}>
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-mono font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 text-[11px]">
+                                    {svc.dealCode}
+                                  </span>
+                                  <button
+                                    onClick={() => onOpenDossier(svc.dealId)}
+                                    title="Open Deal Dossier Modal"
+                                    className="text-slate-400 hover:text-slate-800"
+                                  >
+                                    <ExternalLink className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                                <div className="font-bold text-slate-900 mt-1 truncate max-w-[200px]">
+                                  {svc.companyName}
+                                </div>
+                                <div className="text-[11px] text-slate-500">
+                                  {svc.clientName} ({svc.clientPhone})
+                                </div>
+                              </td>
+
+                              <td className="py-3 px-4">
+                                <div className="font-bold text-slate-900 text-sm">{svc.serviceName}</div>
+                                <div className="flex items-center gap-1.5 mt-1">
+                                  <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold border ${svc.sectorBadge}`}>
+                                    {svc.sectorName}
+                                  </span>
+                                  <span className="text-[11px] text-slate-500">Fee: ₹{Number(svc.serviceFee || 0).toLocaleString('en-IN')}</span>
+                                </div>
+                              </td>
+
+                              <td className="py-3 px-4 min-w-[180px]">
+                                <select
+                                  value={svc.status || 'NOT_STARTED'}
+                                  onChange={(e) =>
+                                    handleUpdateService(svc.dealId, svc.id, {
+                                      status: e.target.value,
+                                      completedAt: e.target.value === 'COMPLETED' ? new Date().toISOString() : undefined,
+                                    })
+                                  }
+                                  className={`w-full text-xs font-bold rounded-lg px-2.5 py-1.5 border focus:outline-none ${
+                                    svc.status === 'COMPLETED' || svc.status === 'APPROVED'
+                                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                      : svc.status === 'GOVT_SUBMITTED'
+                                      ? 'bg-blue-50 text-blue-800 border-blue-300'
+                                      : svc.status === 'QUERY_RAISED'
+                                      ? 'bg-rose-50 text-rose-800 border-rose-300'
+                                      : svc.status === 'IN_PROGRESS'
+                                      ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                      : 'bg-slate-50 text-slate-700 border-slate-300'
+                                  }`}
+                                >
+                                  <option value="NOT_STARTED">Not Started</option>
+                                  <option value="IN_PROGRESS">In Progress (Drafting)</option>
+                                  <option value="GOVT_SUBMITTED">Govt / MCA Submitted</option>
+                                  <option value="QUERY_RAISED">Query / Resubmission</option>
+                                  <option value="COMPLETED">Completed / Approved</option>
+                                </select>
+                              </td>
+
+                              <td className="py-3 px-4 min-w-[160px]">
+                                <input
+                                  type="text"
+                                  defaultValue={svc.govApplicationNumber || ''}
+                                  placeholder="Enter SRN / Ref..."
+                                  onBlur={(e) => {
+                                    if (e.target.value !== (svc.govApplicationNumber || '')) {
+                                      handleUpdateService(svc.dealId, svc.id, {
+                                        govApplicationNumber: e.target.value.trim(),
+                                      });
+                                    }
+                                  }}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1 text-xs font-mono text-slate-800 focus:outline-none focus:border-slate-800"
+                                />
+                              </td>
+
+                              <td className="py-3 px-4">
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold border ${
+                                    svc.isOverdue
+                                      ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                      : svc.daysLeft !== null && svc.daysLeft <= 2
+                                      ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                      : 'bg-slate-50 text-slate-600 border-slate-200'
+                                  }`}
+                                >
+                                  <Clock className="w-3 h-3" />
+                                  {svc.deadlineStatus}
+                                </span>
+                              </td>
+
+                              <td className="py-3 px-4 text-center">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedTaskId(isExpanded ? null : svc.id)}
+                                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition border ${
+                                      isExpanded
+                                        ? 'bg-indigo-600 text-white border-indigo-600'
+                                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                                    }`}
+                                    title="View Dossier & Files"
+                                  >
+                                    <Paperclip className="w-3.5 h-3.5" />
+                                    <span>{docCount} Files</span>
+                                    {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                  </button>
+
+                                  {svc.status === 'COMPLETED' ? (
+                                    <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-bold bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-200">
+                                      <CheckCircle2 className="w-3 h-3" /> Done
+                                    </span>
+                                  ) : (
+                                    <button
+                                      onClick={() =>
+                                        handleUpdateService(svc.dealId, svc.id, {
+                                          status: 'COMPLETED',
+                                          completedAt: new Date().toISOString(),
+                                        })
+                                      }
+                                      className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-semibold transition shadow-xs flex items-center gap-1"
+                                      title="Mark task completed"
+                                    >
+                                      <Check className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+
+                            {/* EXPANDABLE ROW: INLINE DOSSIER & FILES DRAWER */}
+                            {isExpanded && svcDeal && (
+                              <tr className="bg-slate-50/90 border-b border-slate-200">
+                                <td colSpan={6} className="p-4">
+                                  <div className="bg-white border border-slate-200 rounded-xl p-4.5 space-y-4 shadow-sm">
+                                    <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-mono text-xs font-bold text-slate-800 px-2 py-0.5 rounded bg-slate-100 border border-slate-200">
+                                          {svcDeal.dealCode}
+                                        </span>
+                                        <h4 className="font-bold text-slate-900 text-sm">{svcDeal.client?.companyName}</h4>
+                                        <span className="text-xs text-slate-500 font-mono">
+                                          • {svcDeal.client?.clientName} ({svcDeal.client?.phone})
+                                        </span>
+                                      </div>
+                                      <button
+                                        onClick={() => onOpenDossier(svcDeal.id)}
+                                        className="text-xs text-slate-600 hover:text-slate-900 font-semibold flex items-center gap-1"
+                                      >
+                                        <Eye className="w-3.5 h-3.5" /> Full Modal Dossier
+                                      </button>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                                      {/* Col 1: Dossier Details */}
+                                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2.5">
+                                        <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider block">
+                                          Company & Director Dossier
+                                        </span>
+                                        <div className="space-y-1">
+                                          <div><span className="text-slate-500">GSTIN:</span> <strong className="font-mono text-slate-900">{svcDeal.client?.gstin || 'Pending/Non-GST'}</strong></div>
+                                          <div><span className="text-slate-500">PAN:</span> <strong className="font-mono text-slate-900">{svcDeal.client?.pan || 'N/A'}</strong></div>
+                                          <div><span className="text-slate-500">Industry:</span> <span className="font-medium text-slate-900">{svcDeal.client?.industry || 'N/A'}</span></div>
+                                          <div><span className="text-slate-500">Address:</span> <span className="font-medium text-slate-900">{svcDeal.client?.billingAddress || 'N/A'}</span></div>
+                                        </div>
+
+                                        {svcDeal.client?.directors && svcDeal.client.directors.length > 0 && (
+                                          <div className="pt-2 border-t border-slate-200/70">
+                                            <span className="text-[11px] font-bold text-slate-700 block mb-1">Directors:</span>
+                                            <div className="space-y-1">
+                                              {svcDeal.client.directors.map((d) => (
+                                                <div key={d.id} className="text-[11px] text-slate-800 font-medium">
+                                                  • {d.name} {d.din ? `(DIN: ${d.din})` : ''}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      {/* Col 2: Attached Documents */}
+                                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2.5">
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider block">
+                                            Attached Files ({svcDeal.documents?.length || 0})
+                                          </span>
+                                        </div>
+                                        <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                                          {!svcDeal.documents || svcDeal.documents.length === 0 ? (
+                                            <p className="text-[11px] text-slate-400 italic">No files attached yet</p>
+                                          ) : (
+                                            svcDeal.documents.map((doc) => (
+                                              <div
+                                                key={doc.id}
+                                                className="p-2 bg-white rounded-lg border border-slate-200 flex items-center justify-between text-xs"
+                                              >
+                                                <div className="truncate mr-2">
+                                                  <div className="font-semibold text-slate-900 truncate" title={doc.title}>
+                                                    {doc.title}
+                                                  </div>
+                                                  <div className="text-[10px] text-slate-500 font-mono">
+                                                    {doc.documentType} {doc.fileSize && `• ${(doc.fileSize / 1024).toFixed(0)} KB`}
+                                                  </div>
+                                                </div>
+                                                <div className="flex items-center gap-1 flex-shrink-0">
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => handlePreviewDocument(doc.id)}
+                                                    className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-semibold"
+                                                  >
+                                                    Preview
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => handleDeleteDocument(doc.id, doc.title)}
+                                                    className="p-0.5 text-slate-400 hover:text-rose-600 rounded"
+                                                    title="Delete"
+                                                  >
+                                                    <Trash2 className="w-3 h-3" />
+                                                  </button>
+                                                </div>
+                                              </div>
+                                            ))
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      {/* Col 3: Upload Document Form */}
+                                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2.5">
+                                        <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider block">
+                                          Attach Document to Deal
+                                        </span>
+                                        <div className="space-y-2">
+                                          <select
+                                            value={uploadDocType}
+                                            onChange={(e) => setUploadDocType(e.target.value)}
+                                            className="w-full bg-white border border-slate-300 rounded px-2 py-1 text-xs text-slate-800"
+                                          >
+                                            {OPS_DOCUMENT_TYPES.map((dt) => (
+                                              <option key={dt.value} value={dt.value}>
+                                                {dt.label}
+                                              </option>
+                                            ))}
+                                          </select>
+
+                                          <input
+                                            type="text"
+                                            value={uploadDocTitle}
+                                            onChange={(e) => setUploadDocTitle(e.target.value)}
+                                            placeholder="Document Title (optional)"
+                                            className="w-full bg-white border border-slate-300 rounded px-2 py-1 text-xs text-slate-800"
+                                          />
+
+                                          <div className="flex items-center gap-1.5">
+                                            <input
+                                              type="file"
+                                              accept="application/pdf,image/*,.doc,.docx,.xls,.xlsx"
+                                              onChange={(e) => setUploadDocFile(e.target.files?.[0] || null)}
+                                              className="text-xs text-slate-700 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[11px] file:font-semibold file:bg-slate-900 file:text-white"
+                                            />
+                                          </div>
+
+                                          <button
+                                            type="button"
+                                            onClick={() => handleUploadDocument(svcDeal.id)}
+                                            disabled={!uploadDocFile || isUploadingDoc}
+                                            className="w-full py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded text-xs font-semibold flex items-center justify-center gap-1 transition disabled:opacity-40"
+                                          >
+                                            <UploadCloud className="w-3.5 h-3.5" />
+                                            <span>{isUploadingDoc ? 'Uploading...' : 'Upload & Attach'}</span>
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -1581,102 +2432,271 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                   </div>
                 </div>
 
-                {/* SERVICES IN THIS DEAL */}
-                <div className="space-y-3.5">
-                  <div className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
-                    <Layers className="w-4 h-4 text-slate-500" /> Service Filing Tasks ({selectedDeal.services?.length || 0})
+                {/* SERVICES IN THIS DEAL (Only Unassigned/Operable Tasks Shown to Manager) */}
+                {(() => {
+                  const managerOperableServices = (selectedDeal.services || []).filter(
+                    (svc) => !svc.assignedOpsUserId || (currentUser?.id && svc.assignedOpsUserId === currentUser.id)
+                  );
+                  const assignedToSpecialistsCount = (selectedDeal.services || []).length - managerOperableServices.length;
+
+                  return (
+                    <div className="space-y-3.5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                        <div className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                          <Layers className="w-4 h-4 text-slate-500" /> Service Filing Tasks ({managerOperableServices.length})
+                        </div>
+                        {assignedToSpecialistsCount > 0 && (
+                          <span className="text-[11px] text-slate-500 font-medium">
+                            {assignedToSpecialistsCount} assigned to specialist desk{assignedToSpecialistsCount > 1 ? 's' : ''} (hidden from manager execution)
+                          </span>
+                        )}
+                      </div>
+
+                      {managerOperableServices.length === 0 ? (
+                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 flex items-start gap-2.5">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
+                          <div>
+                            <p className="font-semibold text-slate-800">
+                              All services in this deal are assigned to team specialists.
+                            </p>
+                            <p className="mt-0.5 text-slate-500">
+                              Assigned services are operated directly by specialists in their assigned workspaces and cannot be operated from the manager dossier view. To reallocate, use the Team Dispatch & Workload tab.
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        managerOperableServices.map((svc) => {
+                          const sector = detectSector(svc.serviceName);
+
+                          return (
+                            <div
+                              key={svc.id}
+                              className="p-4 bg-slate-50/70 border border-slate-200 rounded-xl space-y-3.5"
+                            >
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <h4 className="text-sm font-bold text-slate-900">{svc.serviceName}</h4>
+                                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${sector.badgeColor}`}>
+                                      {sector.name}
+                                    </span>
+                                  </div>
+                                  <div className="text-xs text-slate-600 mt-0.5">
+                                    Service Fee: <strong className="text-slate-800">₹{Number(svc.serviceFee).toLocaleString('en-IN')}</strong>{' '}
+                                    {svc.govtFee && `• Govt Challan: ₹${Number(svc.govtFee).toLocaleString('en-IN')}`}
+                                  </div>
+                                </div>
+
+                                <span className="text-xs px-2.5 py-1 rounded-md bg-white text-slate-800 border border-slate-300 font-semibold self-start sm:self-auto shadow-xs">
+                                  {svc.status}
+                                </span>
+                              </div>
+
+                              {/* Execution Controls Grid */}
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-slate-200 text-xs">
+                                <div>
+                                  <label className="text-xs text-slate-600 font-medium block mb-1">
+                                    Assign Specialist
+                                  </label>
+                                  <select
+                                    value={svc.assignedOpsUserId || ''}
+                                    onChange={(e) =>
+                                      handleUpdateService(selectedDeal.id, svc.id, {
+                                        assignedOpsUserId: e.target.value || null,
+                                      })
+                                    }
+                                    className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-slate-800"
+                                  >
+                                    <option value="">-- Select Specialist --</option>
+                                    {opsTeam.map((u) => (
+                                      <option key={u.id} value={u.id}>{u.fullName}</option>
+                                    ))}
+                                  </select>
+                                </div>
+
+                                <div>
+                                  <label className="text-xs text-slate-600 font-medium block mb-1">
+                                    Govt Application / SRN Number
+                                  </label>
+                                  <input
+                                    type="text"
+                                    defaultValue={svc.govApplicationNumber || ''}
+                                    placeholder="e.g. SRN29182371"
+                                    onBlur={(e) =>
+                                      handleUpdateService(selectedDeal.id, svc.id, {
+                                        govApplicationNumber: e.target.value.trim() || null,
+                                      })
+                                    }
+                                    className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-800 focus:outline-none focus:border-slate-800"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="text-xs text-slate-600 font-medium block mb-1">Milestone Stage</label>
+                                  <select
+                                    defaultValue={svc.status}
+                                    onChange={(e) =>
+                                      handleUpdateService(selectedDeal.id, svc.id, {
+                                        status: e.target.value,
+                                        completedAt: e.target.value === 'COMPLETED' ? new Date().toISOString() : null,
+                                      })
+                                    }
+                                    className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:outline-none focus:border-slate-800"
+                                  >
+                                    <option value="PENDING">PENDING</option>
+                                    <option value="IN_PROGRESS">IN_PROGRESS (Drafting)</option>
+                                    <option value="GOVT_SUBMITTED">GOVT_SUBMITTED (Filed)</option>
+                                    <option value="QUERY_RAISED">QUERY_RAISED (Resubmit)</option>
+                                    <option value="APPROVED">APPROVED (Authority Cleared)</option>
+                                    <option value="COMPLETED">COMPLETED</option>
+                                  </select>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* DEAL DOSSIER: ATTACHED DOCUMENTS & VAULT */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4.5 space-y-3.5 shadow-xs">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                      <FolderOpen className="w-4 h-4 text-cyan-600" /> Deal Dossier Documents ({selectedDeal.documents?.length || 0})
+                    </h4>
+                    <span className="text-[11px] text-slate-500">
+                      KYC, Forms, Agreements, & Deliverables
+                    </span>
                   </div>
 
-                  {selectedDeal.services?.map((svc) => {
-                    const sector = detectSector(svc.serviceName);
-
-                    return (
-                      <div
-                        key={svc.id}
-                        className="p-4 bg-slate-50/70 border border-slate-200 rounded-xl space-y-3.5"
-                      >
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h4 className="text-sm font-bold text-slate-900">{svc.serviceName}</h4>
-                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${sector.badgeColor}`}>
-                                {sector.name}
-                              </span>
-                            </div>
-                            <div className="text-xs text-slate-600 mt-0.5">
-                              Service Fee: <strong className="text-slate-800">₹{Number(svc.serviceFee).toLocaleString('en-IN')}</strong>{' '}
-                              {svc.govtFee && `• Govt Challan: ₹${Number(svc.govtFee).toLocaleString('en-IN')}`}
-                            </div>
-                          </div>
-
-                          <span className="text-xs px-2.5 py-1 rounded-md bg-white text-slate-800 border border-slate-300 font-semibold self-start sm:self-auto shadow-xs">
-                            {svc.status}
-                          </span>
-                        </div>
-
-                        {/* Execution Controls Grid */}
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-slate-200 text-xs">
-                          <div>
-                            <label className="text-xs text-slate-600 font-medium block mb-1">
-                              Assigned Specialist
-                            </label>
-                            <select
-                              value={svc.assignedOpsUserId || ''}
-                              onChange={(e) =>
-                                handleUpdateService(selectedDeal.id, svc.id, {
-                                  assignedOpsUserId: e.target.value || null,
-                                })
-                              }
-                              className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-slate-800"
-                            >
-                              <option value="">-- Select Specialist --</option>
-                              {opsTeam.map((u) => (
-                                <option key={u.id} value={u.id}>{u.fullName}</option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="text-xs text-slate-600 font-medium block mb-1">
-                              Govt Application / SRN Number
-                            </label>
-                            <input
-                              type="text"
-                              defaultValue={svc.govApplicationNumber || ''}
-                              placeholder="e.g. SRN29182371"
-                              onBlur={(e) =>
-                                handleUpdateService(selectedDeal.id, svc.id, {
-                                  govApplicationNumber: e.target.value.trim() || null,
-                                })
-                              }
-                              className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-800 focus:outline-none focus:border-slate-800"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="text-xs text-slate-600 font-medium block mb-1">Milestone Stage</label>
-                            <select
-                              defaultValue={svc.status}
-                              onChange={(e) =>
-                                handleUpdateService(selectedDeal.id, svc.id, {
-                                  status: e.target.value,
-                                  completedAt: e.target.value === 'COMPLETED' ? new Date().toISOString() : null,
-                                })
-                              }
-                              className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:outline-none focus:border-slate-800"
-                            >
-                              <option value="PENDING">PENDING</option>
-                              <option value="IN_PROGRESS">IN_PROGRESS (Drafting)</option>
-                              <option value="GOVT_SUBMITTED">GOVT_SUBMITTED (Filed)</option>
-                              <option value="QUERY_RAISED">QUERY_RAISED (Resubmit)</option>
-                              <option value="APPROVED">APPROVED (Authority Cleared)</option>
-                              <option value="COMPLETED">COMPLETED</option>
-                            </select>
-                          </div>
-                        </div>
+                  <div className="space-y-2">
+                    {!selectedDeal.documents || selectedDeal.documents.length === 0 ? (
+                      <div className="p-6 text-center text-slate-400 text-xs border border-dashed border-slate-200 rounded-lg">
+                        <Paperclip className="w-5 h-5 mx-auto mb-1 text-slate-300" />
+                        No files currently attached to this deal.
                       </div>
-                    );
-                  })}
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {selectedDeal.documents.map((doc) => (
+                          <div
+                            key={doc.id}
+                            className="p-3 bg-slate-50/80 hover:bg-slate-100/70 border border-slate-200 rounded-xl flex items-center justify-between text-xs transition"
+                          >
+                            <div className="flex items-center space-x-2.5 truncate mr-2">
+                              <div className="p-2 bg-white border border-slate-200 text-slate-700 rounded-lg shadow-xs flex-shrink-0">
+                                <FileText className="w-4 h-4 text-indigo-600" />
+                              </div>
+                              <div className="truncate">
+                                <div className="font-semibold text-slate-900 truncate" title={doc.title}>
+                                  {doc.title}
+                                </div>
+                                <div className="text-[10px] text-slate-500 font-mono mt-0.5 truncate flex items-center gap-1.5">
+                                  <span className="px-1.5 py-0.2 rounded font-sans font-bold bg-white text-slate-700 border border-slate-200">
+                                    {doc.documentType}
+                                  </span>
+                                  {doc.fileSize && <span>{(doc.fileSize / 1024).toFixed(0)} KB</span>}
+                                  {doc.isVerified && (
+                                    <span className="text-emerald-700 font-bold font-sans">✓ Verified</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center space-x-1.5 flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handlePreviewDocument(doc.id)}
+                                className="px-2.5 py-1 bg-white hover:bg-slate-200/80 text-slate-700 rounded-md border border-slate-300 text-xs font-semibold flex items-center gap-1 transition shadow-xs"
+                                title="Preview Document"
+                              >
+                                <Eye className="w-3.5 h-3.5" /> Preview
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteDocument(doc.id, doc.title)}
+                                className="p-1 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded transition"
+                                title="Delete Document"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* ATTACH NEW DOCUMENT TO DEAL */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4.5 space-y-3.5 shadow-xs">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                    <UploadCloud className="w-4 h-4 text-emerald-600" /> Attach Document to Dossier
+                  </h4>
+
+                  <div className="p-3.5 bg-slate-50/70 border border-slate-200 rounded-lg space-y-3 text-xs">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs font-semibold text-slate-700 block mb-1">
+                          Document Category
+                        </label>
+                        <select
+                          value={uploadDocType}
+                          onChange={(e) => setUploadDocType(e.target.value)}
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-slate-800"
+                        >
+                          {OPS_DOCUMENT_TYPES.map((dt) => (
+                            <option key={dt.value} value={dt.value}>
+                              {dt.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-semibold text-slate-700 block mb-1">
+                          Document Title / Note (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={uploadDocTitle}
+                          onChange={(e) => setUploadDocTitle(e.target.value)}
+                          placeholder="e.g. SPICe+ Part B Filing Acknowledgment"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-slate-800"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Select File (PDF, DOCX, Images up to 50MB)
+                      </label>
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                        <input
+                          type="file"
+                          accept="application/pdf,image/*,.doc,.docx,.xls,.xlsx"
+                          onChange={(e) => setUploadDocFile(e.target.files?.[0] || null)}
+                          className="text-xs text-slate-700 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-slate-900 file:text-white hover:file:bg-slate-800"
+                        />
+
+                        <button
+                          type="button"
+                          onClick={() => handleUploadDocument(selectedDeal.id)}
+                          disabled={!uploadDocFile || isUploadingDoc}
+                          className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition disabled:opacity-40 whitespace-nowrap self-stretch sm:self-auto justify-center"
+                        >
+                          <UploadCloud className="w-4 h-4" />
+                          <span>{isUploadingDoc ? 'Uploading...' : 'Attach & Upload'}</span>
+                        </button>
+                      </div>
+                      {uploadDocFile && (
+                        <div className="text-xs text-emerald-700 font-medium flex items-center gap-1.5 mt-2">
+                          <Check className="w-3.5 h-3.5" /> Selected: {uploadDocFile.name} ({(uploadDocFile.size / 1024).toFixed(0)} KB)
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
                 {/* DELIVERABLE CERTIFICATE UPLOAD & STAGE ACTIONS */}
@@ -1720,14 +2740,39 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                   {/* Stage Action Buttons */}
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2.5 border-t border-slate-100">
                     {selectedDeal.stage === 'STAGE_06_OPERATIONS_PROCESSING' && (
-                      <button
-                        onClick={handleCompleteService}
-                        disabled={actionLoading || (!deliverableFile && !hasDeliverable)}
-                        className="w-full sm:w-auto px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold shadow-xs flex items-center justify-center gap-2 transition disabled:opacity-50"
-                      >
-                        <FileCheck className="w-4 h-4" />
-                        <span>Mark Service Completed (Stage 07 Gate)</span>
-                      </button>
+                      <div className="w-full flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                        {(() => {
+                          const incompleteCount = (selectedDeal.services || []).filter((s) => s.status !== 'COMPLETED').length;
+                          const totalServices = (selectedDeal.services || []).length;
+                          const allDone = totalServices > 0 && incompleteCount === 0;
+
+                          return (
+                            <>
+                              <div className="text-xs text-slate-500">
+                                {allDone ? (
+                                  <span className="text-emerald-700 font-semibold flex items-center gap-1.5">
+                                    <Check className="w-4 h-4 text-emerald-600" /> All {totalServices} services completed. Ready to close deal stage.
+                                  </span>
+                                ) : (
+                                  <span className="text-amber-700 font-medium">
+                                    ⏳ Filing Active: {totalServices - incompleteCount}/{totalServices} services completed ({incompleteCount} pending).
+                                  </span>
+                                )}
+                              </div>
+
+                              <button
+                                onClick={handleCompleteService}
+                                disabled={actionLoading || !allDone || (!deliverableFile && !hasDeliverable)}
+                                className="w-full sm:w-auto px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold shadow-xs flex items-center justify-center gap-2 transition disabled:opacity-50"
+                                title={!allDone ? `Cannot complete: ${incompleteCount} service(s) still in progress` : ''}
+                              >
+                                <FileCheck className="w-4 h-4" />
+                                <span>Mark Service Completed (Stage 07 Gate)</span>
+                              </button>
+                            </>
+                          );
+                        })()}
+                      </div>
                     )}
 
                     {selectedDeal.stage === 'STAGE_07_SERVICE_COMPLETED' && (
@@ -1748,6 +2793,54 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                 Select an operations file to track filings.
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* DOCUMENT PREVIEW MODAL */}
+      {previewDoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white border border-slate-200 rounded-xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden shadow-2xl">
+            <div className="p-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div className="font-semibold text-xs text-slate-800 flex items-center gap-2 truncate mr-3">
+                <FileText className="w-4 h-4 text-indigo-600 flex-shrink-0" />
+                <span className="font-bold truncate">{previewDoc.title || previewDoc.fileName}</span>
+                <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">({previewDoc.fileName})</span>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <a
+                  href={previewDoc.signedUrl}
+                  download={previewDoc.fileName}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 rounded border border-slate-300 text-xs font-semibold flex items-center gap-1 transition shadow-xs"
+                >
+                  <Download className="w-3.5 h-3.5" /> Download
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setPreviewDoc(null)}
+                  className="p-1 text-slate-400 hover:text-slate-700 font-bold text-sm"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 bg-slate-100 p-2 overflow-auto flex items-center justify-center">
+              {previewDoc.mimeType?.includes('pdf') ? (
+                <iframe
+                  src={previewDoc.signedUrl}
+                  className="w-full h-full rounded border-0"
+                  title="PDF Viewer"
+                />
+              ) : (
+                <img
+                  src={previewDoc.signedUrl}
+                  alt="Preview"
+                  className="max-w-full max-h-full object-contain rounded"
+                />
+              )}
+            </div>
           </div>
         </div>
       )}
