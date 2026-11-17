@@ -107,7 +107,7 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
       await fetchAccountsQueue();
       onRefreshParent();
     } catch (err) {
-      setFeedback({ type: 'error', message: err.response?.data?.error || 'Assignment Failed.' });
+      setFeedback({ type: 'error', message: err.response?.data?.error || 'Assignment failed.' });
     } finally {
       setActionLoading(false);
     }
@@ -287,10 +287,10 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
       {feedback && (
         <div
           className={`p-3 rounded-lg text-xs flex items-center justify-between border ${feedback.type === 'success'
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-              : feedback.type === 'warning'
-                ? 'bg-amber-50 border-amber-200 text-amber-800'
-                : 'bg-rose-50 border-rose-200 text-rose-800'
+            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+            : feedback.type === 'warning'
+              ? 'bg-amber-50 border-amber-200 text-amber-800'
+              : 'bg-rose-50 border-rose-200 text-rose-800'
             }`}
         >
           <span>{feedback.message}</span>
@@ -332,8 +332,8 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
                     key={d.id}
                     onClick={() => setSelectedDeal(d)}
                     className={`p-3.5 rounded-lg cursor-pointer transition border text-left ${isSelected
-                        ? 'bg-slate-50 border-slate-800 shadow-sm ring-1 ring-slate-800/20'
-                        : 'bg-white border-slate-200/70 hover:bg-slate-50 hover:border-slate-300'
+                      ? 'bg-slate-50 border-slate-800 shadow-sm ring-1 ring-slate-800/20'
+                      : 'bg-white border-slate-200/70 hover:bg-slate-50 hover:border-slate-300'
                       }`}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -342,12 +342,12 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
                       </span>
                       <span
                         className={`text-xs font-medium px-2 py-0.5 rounded border ${isRejected
-                            ? 'bg-rose-50 text-rose-700 border-rose-200 font-semibold'
-                            : hasBalancePending
-                              ? 'bg-amber-100 text-amber-900 border-amber-300 font-bold'
-                              : d.stage === 'STAGE_03_BDM_HANDOVER_PENDING'
-                                ? 'bg-blue-50 text-blue-700 border-blue-200 font-medium'
-                                : 'bg-amber-50 text-amber-700 border-amber-200'
+                          ? 'bg-rose-50 text-rose-700 border-rose-200 font-semibold'
+                          : hasBalancePending
+                            ? 'bg-amber-100 text-amber-900 border-amber-300 font-bold'
+                            : d.stage === 'STAGE_03_BDM_HANDOVER_PENDING'
+                              ? 'bg-blue-50 text-blue-700 border-blue-200 font-medium'
+                              : 'bg-amber-50 text-amber-700 border-amber-200'
                           }`}
                       >
                         {isRejected ? 'Discrepancy' : hasBalancePending ? 'Balance Pending' : d.stage === 'STAGE_03_BDM_HANDOVER_PENDING' ? 'New Deal Entry' : 'Stage 04 Entry'}
@@ -476,8 +476,8 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
                       <div
                         key={p.id}
                         className={`p-3 rounded-lg border text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 ${isTranchePending
-                            ? 'bg-amber-50/80 border-amber-300'
-                            : 'bg-white border-slate-200'
+                          ? 'bg-amber-50/80 border-amber-300'
+                          : 'bg-white border-slate-200'
                           }`}
                       >
                         <div>
@@ -490,10 +490,10 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
                             </span>
                             <span
                               className={`text-xs px-2 py-0.5 rounded font-semibold border ${p.status === 'VERIFIED'
-                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                  : p.status === 'REJECTED'
-                                    ? 'bg-rose-50 text-rose-800 border-rose-200'
-                                    : 'bg-amber-100 text-amber-900 border-amber-300'
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                : p.status === 'REJECTED'
+                                  ? 'bg-rose-50 text-rose-800 border-rose-200'
+                                  : 'bg-amber-100 text-amber-900 border-amber-300'
                                 }`}
                             >
                               {p.status.replace('_', ' ')}
@@ -588,10 +588,10 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
                   </div>
                   <span
                     className={`text-xs px-2.5 py-0.5 rounded-full font-semibold border flex items-center gap-1 ${companyPanDoc?.isVerified
-                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                        : selectedDeal.client.panNumber && companyPanDoc
-                          ? 'bg-amber-50 text-amber-800 border-amber-200'
-                          : 'bg-rose-50 text-rose-800 border-rose-200'
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                      : selectedDeal.client.panNumber && companyPanDoc
+                        ? 'bg-amber-50 text-amber-800 border-amber-200'
+                        : 'bg-rose-50 text-rose-800 border-rose-200'
                       }`}
                   >
                     {companyPanDoc?.isVerified ? (
@@ -692,8 +692,8 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
                       {companyPanDoc ? (
                         <span
                           className={`text-[11px] px-2 py-0.5 rounded font-semibold border ${companyPanDoc.isVerified
-                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                              : 'bg-amber-50 text-amber-800 border-amber-200'
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            : 'bg-amber-50 text-amber-800 border-amber-200'
                             }`}
                         >
                           {companyPanDoc.isVerified ? '✓ Verified' : 'Pending Verification'}
@@ -732,8 +732,8 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
                             onClick={() => handleVerifyPanDocument(companyPanDoc.id, !companyPanDoc.isVerified)}
                             disabled={verifyingPan}
                             className={`px-3 py-1.5 rounded text-xs font-semibold flex items-center gap-1.5 transition ${companyPanDoc.isVerified
-                                ? 'bg-emerald-100 hover:bg-rose-50 text-emerald-900 hover:text-rose-700 border border-emerald-300 hover:border-rose-300'
-                                : 'bg-emerald-700 hover:bg-emerald-800 text-white shadow-xs'
+                              ? 'bg-emerald-100 hover:bg-rose-50 text-emerald-900 hover:text-rose-700 border border-emerald-300 hover:border-rose-300'
+                              : 'bg-emerald-700 hover:bg-emerald-800 text-white shadow-xs'
                               }`}
                           >
                             <Check className="w-3.5 h-3.5" />
