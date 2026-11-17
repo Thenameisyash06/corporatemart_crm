@@ -6,18 +6,25 @@ import {
   Briefcase,
   X,
   ArrowRight,
+  ChevronRight,
 } from 'lucide-react';
 
 /**
- * Professional Meeting Alert Pop-up
+ * Professional Sequential Meeting Alert Pop-up
  * Matches CorporateMart CRM's clean enterprise theme (Slate / White / Subtle Accents).
- * Automatically displays on page refresh or login for 3.5 - 4 seconds when meetings are scheduled today.
+ *
+ * Behavior:
+ * - If there are multiple meetings today, displays them sequentially one by one (e.g. 4 seconds each).
+ * - Meeting 1 displays for 4 seconds -> then transitions to Meeting 2 -> Meeting 3, etc.
+ * - Pauses countdown on hover so the user can inspect details comfortably.
+ * - Cancel button (X) at top right immediately removes/dismisses the pop-up queue.
+ * - View in LMS navigates directly to the meeting in the LMS workbench.
  *
  * Props:
  * - meetings: Array of lead objects that have meetingDate scheduled for today
- * - onClose: Callback to close the pop-up
+ * - onClose: Callback to dismiss the pop-up
  * - onNavigateToLms: Callback to switch active tab to LMS and highlight meeting
- * - durationMs: Duration in milliseconds before auto-dismiss (default: 4000ms = 4s)
+ * - durationMs: Duration in milliseconds before advancing to next meeting (default: 4000ms = 4s)
  */
 export default function MeetingTodayPopup({
   meetings = [],
@@ -30,12 +37,21 @@ export default function MeetingTodayPopup({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [progress, setProgress] = useState(100);
+
   const activeMeeting = meetings[currentIndex] || meetings[0];
+  const totalMeetings = meetings.length;
 
   const startTimeRef = useRef(Date.now());
   const remainingTimeRef = useRef(durationMs);
 
-  // Auto-dismiss countdown timer (3-4 seconds) with pause-on-hover
+  // Reset timer whenever currentIndex changes (advancing to next meeting in queue)
+  useEffect(() => {
+    remainingTimeRef.current = durationMs;
+    startTimeRef.current = Date.now();
+    setProgress(100);
+  }, [currentIndex, durationMs]);
+
+  // Sequential countdown timer (4 seconds per meeting) with pause-on-hover
   useEffect(() => {
     if (isPaused) return;
 
@@ -50,7 +66,13 @@ export default function MeetingTodayPopup({
 
       if (currentRemaining <= 0) {
         clearInterval(timer);
-        onClose();
+        if (currentIndex < totalMeetings - 1) {
+          // Advance to the next meeting popup in sequence
+          setCurrentIndex((prev) => prev + 1);
+        } else {
+          // All popups in the queue have completed
+          onClose();
+        }
       }
     }, interval);
 
@@ -59,10 +81,18 @@ export default function MeetingTodayPopup({
       remainingTimeRef.current = Math.max(0, remainingTimeRef.current - elapsed);
       clearInterval(timer);
     };
-  }, [isPaused, durationMs, onClose]);
+  }, [currentIndex, isPaused, durationMs, totalMeetings, onClose]);
 
   const handleMouseEnter = () => setIsPaused(true);
   const handleMouseLeave = () => setIsPaused(false);
+
+  const handleNextMeeting = () => {
+    if (currentIndex < totalMeetings - 1) {
+      setCurrentIndex((prev) => prev + 1);
+    } else {
+      onClose();
+    }
+  };
 
   return (
     <div
@@ -83,23 +113,27 @@ export default function MeetingTodayPopup({
           <div>
             <div className="flex items-center gap-1.5">
               <span className="text-xs font-bold text-slate-900 leading-tight">
-                Scheduled Meeting Today
+                Scheduled Meeting
               </span>
               <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 uppercase tracking-wide">
-                Today
+                {totalMeetings > 1 ? `${currentIndex + 1} of ${totalMeetings}` : 'Today'}
               </span>
             </div>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              Official client follow-up reminder
+              {totalMeetings > 1
+                ? `Follow-up alert ${currentIndex + 1} of ${totalMeetings} scheduled for today`
+                : 'Official client follow-up reminder'}
             </p>
           </div>
         </div>
 
+        {/* Cancel button at top right to remove/dismiss popups */}
         <button
           type="button"
           onClick={onClose}
           className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-md transition cursor-pointer"
-          title="Dismiss notification"
+          title="Cancel and dismiss all meeting alerts"
+          aria-label="Cancel"
         >
           <X className="w-4 h-4" />
         </button>
@@ -107,8 +141,11 @@ export default function MeetingTodayPopup({
 
       {/* Main Body */}
       <div className="p-4 space-y-3">
-        {/* Company & Closer Status Box */}
-        <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-3 space-y-2.5">
+        {/* Animated Meeting Details Box */}
+        <div
+          key={activeMeeting.id || currentIndex}
+          className="bg-slate-50 border border-slate-200/80 rounded-lg p-3 space-y-2.5 animate-in fade-in slide-in-from-right-2 duration-200"
+        >
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
               <Building2 className="w-4 h-4 text-slate-500 shrink-0" />
@@ -157,10 +194,10 @@ export default function MeetingTodayPopup({
           </div>
         </div>
 
-        {/* Footer: Multi-meeting pagination (if >1) & Action Button */}
-        <div className="flex items-center justify-between pt-0.5">
-          {meetings.length > 1 ? (
-            <div className="flex items-center gap-1">
+        {/* Footer: Multi-meeting indicators & Actions */}
+        <div className="flex items-center justify-between pt-0.5 gap-2">
+          {totalMeetings > 1 ? (
+            <div className="flex items-center gap-1.5">
               {meetings.map((_, i) => (
                 <button
                   key={i}
@@ -169,12 +206,20 @@ export default function MeetingTodayPopup({
                   className={`h-1.5 rounded-full transition-all cursor-pointer ${
                     i === currentIndex ? 'w-5 bg-slate-900' : 'w-2 bg-slate-300 hover:bg-slate-400'
                   }`}
-                  title={`View meeting ${i + 1}`}
+                  title={`Jump to meeting ${i + 1}`}
                 />
               ))}
-              <span className="text-[10px] text-slate-500 font-medium ml-1.5">
-                {currentIndex + 1} of {meetings.length}
-              </span>
+              {currentIndex < totalMeetings - 1 && (
+                <button
+                  type="button"
+                  onClick={handleNextMeeting}
+                  className="text-[10px] text-slate-500 hover:text-slate-800 font-semibold ml-1 flex items-center transition cursor-pointer"
+                  title="Skip to next meeting"
+                >
+                  <span>Next</span>
+                  <ChevronRight className="w-3 h-3" />
+                </button>
+              )}
             </div>
           ) : (
             <span className="text-[10px] text-slate-400 italic">
@@ -182,21 +227,23 @@ export default function MeetingTodayPopup({
             </span>
           )}
 
-          <button
-            type="button"
-            onClick={() => {
-              if (onNavigateToLms) onNavigateToLms(activeMeeting);
-              onClose();
-            }}
-            className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-xs ml-auto cursor-pointer"
-          >
-            <span>View in LMS</span>
-            <ArrowRight className="w-3 h-3" />
-          </button>
+          <div className="flex items-center gap-2 ml-auto">
+            <button
+              type="button"
+              onClick={() => {
+                if (onNavigateToLms) onNavigateToLms(activeMeeting);
+                onClose();
+              }}
+              className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+            >
+              <span>View in LMS</span>
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Auto-dismiss Animated Progress Bar */}
+      {/* Auto-dismiss Animated Progress Bar (resets for each 4-second meeting cycle) */}
       <div className="w-full bg-slate-100 h-1">
         <div
           className="bg-slate-800 h-full transition-all duration-75 ease-linear"
