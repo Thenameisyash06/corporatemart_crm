@@ -131,7 +131,7 @@ export const LMS_LEAD_STAGES = [
   { id: 'CLOSED_LOST', label: 'Closed Lost / Dropped', color: 'bg-slate-100 text-slate-600 border-slate-200' },
 ];
 
-export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }) {
+export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, highlightLeadId }) {
   const isAdmin = currentUser?.role === 'ADMIN';
 
   const [leads, setLeads] = useState([]);
@@ -139,6 +139,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState(null);
+  const [formErrors, setFormErrors] = useState({});
 
   // Determine current logged-in BDM's name accurately
   const loggedInBdmName = useMemo(() => {
@@ -182,8 +183,25 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
   const [downloadingId, setDownloadingId] = useState(null);
   const quotationInputRef = useRef(null);
 
+  // In-app Quotation Document Preview Modal State
+  const [previewQuotationDoc, setPreviewQuotationDoc] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
   // Expandable lead rows state (Set of lead IDs)
   const [expandedLeadIds, setExpandedLeadIds] = useState(new Set());
+
+  // Auto-expand lead when navigated from notification
+  useEffect(() => {
+    if (highlightLeadId) {
+      setExpandedLeadIds((prev) => new Set([...prev, highlightLeadId]));
+      setTimeout(() => {
+        const el = document.getElementById(`lead-row-${highlightLeadId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 300);
+    }
+  }, [highlightLeadId]);
 
   const toggleLeadExpand = (leadId) => {
     setExpandedLeadIds((prev) => {
@@ -634,8 +652,17 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
       setFeedback({ type: 'error', message: 'Company Name is required.' });
       return;
     }
-    if (!form.mobileNo.trim()) {
+    const cleanPhone = form.mobileNo.trim();
+    if (!cleanPhone) {
       setFeedback({ type: 'error', message: 'Mobile Number is required.' });
+      return;
+    }
+    const exact10DigitPhoneRegex = /^[6-9]\d{9}$/;
+    if (!exact10DigitPhoneRegex.test(cleanPhone)) {
+      setFeedback({
+        type: 'error',
+        message: 'Invalid phone number. Must be exactly 10 digits without symbols, spaces, or country code (starting with 6-9).',
+      });
       return;
     }
     if (!quotationFile) {
@@ -693,6 +720,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
       setFileError(null);
       if (quotationInputRef.current) quotationInputRef.current.value = '';
       fetchLeads();
+      window.dispatchEvent(new Event('lms_leads_changed'));
     } catch (err) {
       setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to create lead.' });
     } finally {
@@ -725,11 +753,52 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
     }
   };
 
-  // Preview Quotation PDF in New Tab
-  const handlePreviewQuotation = (lead) => {
-    const token = localStorage.getItem('cm_crm_token');
-    const previewUrl = `/api/leads/${lead.id}/quotation?token=${encodeURIComponent(token || '')}`;
-    window.open(previewUrl, '_blank');
+  // Preview Quotation PDF via Secure In-App Viewer Modal
+  const handlePreviewQuotation = async (lead) => {
+    try {
+      setPreviewLoading(true);
+      const res = await api.get(`/leads/${lead.id}/quotation?inline=true`, {
+        responseType: 'blob',
+        headers: { Accept: 'application/pdf, application/json' },
+      });
+
+      if (res.data instanceof Blob && res.data.type === 'application/json') {
+        const text = await res.data.text();
+        const json = JSON.parse(text);
+        setPreviewQuotationDoc({
+          fileName: json.fileName || lead.quotationFileName,
+          url: json.signedUrl,
+          leadId: lead.id,
+          leadCompany: lead.companyName,
+          isBlob: false,
+        });
+        return;
+      }
+
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const objectUrl = window.URL.createObjectURL(blob);
+      setPreviewQuotationDoc({
+        fileName: lead.quotationFileName || 'Quotation.pdf',
+        url: objectUrl,
+        leadId: lead.id,
+        leadCompany: lead.companyName,
+        isBlob: true,
+      });
+    } catch (err) {
+      console.error('Failed to preview quotation:', err);
+      const token = localStorage.getItem('cm_crm_token');
+      const fallbackUrl = `/api/leads/${lead.id}/quotation?inline=true&token=${encodeURIComponent(token || '')}`;
+      window.open(fallbackUrl, '_blank');
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleClosePreview = () => {
+    if (previewQuotationDoc?.isBlob && previewQuotationDoc?.url) {
+      window.URL.revokeObjectURL(previewQuotationDoc.url);
+    }
+    setPreviewQuotationDoc(null);
   };
 
   // Quick Update Lead Fields (Client Status, Meeting Status, EDC, Stage)
@@ -738,6 +807,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
       await api.patch(`/leads/${leadId}`, updates);
       setFeedback({ type: 'success', message: 'Lead updated successfully.' });
       fetchLeads();
+      window.dispatchEvent(new Event('lms_leads_changed'));
     } catch (err) {
       setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to update lead.' });
     }
@@ -750,6 +820,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
       await api.delete(`/leads/${leadId}`);
       setFeedback({ type: 'success', message: 'Lead deleted.' });
       fetchLeads();
+      window.dispatchEvent(new Event('lms_leads_changed'));
     } catch (err) {
       setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to delete lead.' });
     }
@@ -1147,10 +1218,11 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                   <input
                     type="tel"
                     required
+                    maxLength={10}
                     value={form.mobileNo}
-                    onChange={(e) => setForm({ ...form, mobileNo: e.target.value })}
-                    placeholder="+91 98765 43210"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-900 focus:bg-white focus:border-slate-800 focus:outline-none"
+                    onChange={(e) => setForm({ ...form, mobileNo: e.target.value.replace(/\D/g, '').slice(0, 10) })}
+                    placeholder="9876543210 (10 digits)"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-900 focus:bg-white focus:border-slate-800 focus:outline-none font-mono"
                   />
                 </div>
               </div>
@@ -1957,19 +2029,19 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
           )}
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="w-full">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-50/90 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider text-[10px]">
-                <th className="py-2.5 px-3">Company (Click for Details)</th>
-                <th className="py-2.5 px-3">Mobile</th>
-                <th className="py-2.5 px-3">BDM</th>
-                <th className="py-2.5 px-3">Client Status</th>
-                <th className="py-2.5 px-3">Meeting Status</th>
-                <th className="py-2.5 px-3">Deal Value</th>
-                <th className="py-2.5 px-3">Quotation</th>
-                <th className="py-2.5 px-3">Stage</th>
-                <th className="py-2.5 px-3 text-center">Action</th>
+                <th className="py-2 px-2.5">Company</th>
+                <th className="py-2 px-1.5">Mobile</th>
+                <th className="py-2 px-1.5">BDM</th>
+                <th className="py-2 px-1.5">Client Status</th>
+                <th className="py-2 px-1.5">Meeting Status</th>
+                <th className="py-2 px-1.5">Deal Value</th>
+                <th className="py-2 px-1.5 text-center">Quotation</th>
+                <th className="py-2 px-1.5">Stage</th>
+                <th className="py-2 px-2 text-center">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
@@ -2003,17 +2075,22 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                   return (
                     <React.Fragment key={lead.id}>
                       {/* MAIN COMPACT ROW */}
-                      <tr className={`hover:bg-slate-50/80 transition ${isExpanded ? 'bg-indigo-50/30 font-semibold' : ''}`}>
+                      <tr
+                        id={`lead-row-${lead.id}`}
+                        className={`hover:bg-slate-50/80 transition ${
+                          isExpanded ? 'bg-indigo-50/30 font-semibold' : ''
+                        } ${highlightLeadId === lead.id ? 'ring-2 ring-indigo-500 bg-indigo-50/60' : ''}`}
+                      >
                         {/* Company Name with Expand/Collapse Trigger */}
-                        <td className="py-2.5 px-3">
+                        <td className="py-2 px-2.5">
                           <button
                             type="button"
                             onClick={() => toggleLeadExpand(lead.id)}
-                            className="flex items-center gap-2 text-left group focus:outline-none"
+                            className="flex items-center gap-1.5 text-left group focus:outline-none max-w-full"
                             title={isExpanded ? 'Click to hide details' : 'Click to view more information'}
                           >
                             <span
-                              className={`p-1 rounded-md transition ${
+                              className={`p-0.5 rounded transition shrink-0 ${
                                 isExpanded
                                   ? 'bg-indigo-100 text-indigo-700 rotate-90'
                                   : 'bg-slate-100 text-slate-400 group-hover:bg-indigo-50 group-hover:text-indigo-600'
@@ -2021,49 +2098,53 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                             >
                               <ChevronRight className="w-3.5 h-3.5 transition-transform duration-150" />
                             </span>
-                            <div>
-                              <span className="font-bold text-slate-900 group-hover:text-indigo-600 text-sm leading-snug block transition">
+                            <div className="min-w-0">
+                              <span className="font-bold text-slate-900 group-hover:text-indigo-600 text-xs leading-snug block truncate" title={lead.companyName}>
                                 {lead.companyName}
                               </span>
-                              <span className="text-[10px] text-slate-400 group-hover:text-indigo-500 font-normal">
-                                {isExpanded ? 'Hide details ▴' : 'Click for more info ▾'}
-                              </span>
+                              {lead.directorName && (
+                                <span className="text-[10px] text-slate-500 block truncate" title={lead.directorName}>
+                                  {lead.directorName}
+                                </span>
+                              )}
                             </div>
                           </button>
                         </td>
 
                         {/* Mobile No */}
-                        <td className="py-2.5 px-3 whitespace-nowrap">
-                          <div className="flex items-center gap-1.5 font-mono text-slate-900 font-semibold text-xs">
-                            <Phone className="w-3 h-3 text-indigo-500 shrink-0" />
-                            <a href={`tel:${lead.mobileNo}`} className="hover:underline">
-                              {lead.mobileNo}
-                            </a>
-                          </div>
+                        <td className="py-2 px-1.5 whitespace-nowrap">
+                          <a
+                            href={`tel:${lead.mobileNo}`}
+                            className="font-mono text-slate-800 font-semibold text-[11px] hover:underline flex items-center gap-1"
+                          >
+                            <Phone className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                            <span>{lead.mobileNo}</span>
+                          </a>
                         </td>
 
                         {/* BDM */}
-                        <td className="py-2.5 px-3 whitespace-nowrap">
-                          <div className="text-xs font-semibold text-slate-800">{lead.bdmName1}</div>
-                          {lead.bdmName2 && <div className="text-[10px] text-slate-400">+ {lead.bdmName2}</div>}
-                          {lead.closerStatus === 'Lead Sharing' && (
-                            <div className="mt-0.5">
-                              <span
-                                className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded"
-                                title={`Lead Sharing assigned to Leader: ${lead.leaderName}`}
-                              >
-                                🤝 Shared ({lead.leaderName})
-                              </span>
-                            </div>
-                          )}
+                        <td className="py-2 px-1.5">
+                          <div className="text-xs font-semibold text-slate-800 truncate" title={lead.bdmName1}>
+                            {lead.bdmName1}
+                          </div>
+                          {lead.closerStatus === 'Lead Sharing' ? (
+                            <span
+                              className="inline-block text-[9px] font-bold px-1 py-0.2 bg-purple-50 text-purple-700 border border-purple-200 rounded mt-0.5"
+                              title={`Shared with Leader: ${lead.leaderName}`}
+                            >
+                              🤝 Shared
+                            </span>
+                          ) : lead.bdmName2 ? (
+                            <div className="text-[10px] text-slate-400 truncate">+ {lead.bdmName2}</div>
+                          ) : null}
                         </td>
 
                         {/* Client Status (Hot, Warm, Lost) */}
-                        <td className="py-2.5 px-3 whitespace-nowrap">
+                        <td className="py-2 px-1.5">
                           <select
                             value={currentClientStatus}
                             onChange={(e) => handleQuickUpdateLead(lead.id, { clientStatus: e.target.value })}
-                            className={`text-xs font-bold rounded-md px-2 py-1 border transition focus:outline-none cursor-pointer ${
+                            className={`text-[11px] font-bold rounded px-1.5 py-0.5 border transition focus:outline-none cursor-pointer w-full max-w-[80px] ${
                               currentClientStatus === 'Hot'
                                 ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
                                 : currentClientStatus === 'Lost'
@@ -2078,54 +2159,59 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                         </td>
 
                         {/* Meeting Status */}
-                        <td className="py-2.5 px-3 whitespace-nowrap">
+                        <td className="py-2 px-1.5">
                           <select
                             value={lead.meetingStatus || LMS_MEETING_STATUSES[0]}
                             onChange={(e) => handleQuickUpdateLead(lead.id, { meetingStatus: e.target.value })}
-                            className="text-xs font-medium text-slate-800 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-md px-2 py-1 focus:outline-none focus:border-indigo-400 transition cursor-pointer"
+                            className="text-[11px] font-medium text-slate-800 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 focus:outline-none transition cursor-pointer w-full max-w-[115px] truncate"
                           >
                             {LMS_MEETING_STATUSES.map((ms) => (
                               <option key={ms} value={ms}>{ms}</option>
                             ))}
                           </select>
+                          {lead.meetingDate && (
+                            <span
+                              className="text-[9px] text-slate-500 font-medium block mt-0.5 truncate"
+                              title={`Meeting on ${new Date(lead.meetingDate).toLocaleDateString('en-IN')}`}
+                            >
+                              📅 {new Date(lead.meetingDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                            </span>
+                          )}
                         </td>
 
                         {/* Deal Value */}
-                        <td className="py-2.5 px-3 whitespace-nowrap">
+                        <td className="py-2 px-1.5 whitespace-nowrap">
                           <span className="font-mono font-bold text-xs text-slate-900">
-                            {lead.dealValue ? `₹${Number(lead.dealValue).toLocaleString('en-IN')}` : <span className="text-slate-400 font-normal italic">No value</span>}
+                            {lead.dealValue ? `₹${Number(lead.dealValue).toLocaleString('en-IN')}` : <span className="text-slate-400 font-normal italic text-[11px]">No val</span>}
                           </span>
                         </td>
 
                         {/* Quotation Document */}
-                        <td className="py-2.5 px-3 whitespace-nowrap">
+                        <td className="py-2 px-1.5 text-center whitespace-nowrap">
                           {lead.quotationFileName ? (
-                            <div className="flex items-center gap-1.5">
-                              <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${
+                            <div className="inline-flex items-center gap-1 justify-center">
+                              <span className={`text-[9px] font-extrabold uppercase px-1 py-0.2 rounded border ${
                                 isPdf
                                   ? 'bg-rose-50 text-rose-700 border-rose-200'
                                   : 'bg-blue-50 text-blue-700 border-blue-200'
                               }`}>
                                 {lead.quotationFileName.split('.').pop()}
                               </span>
-                              <span className="text-xs font-medium text-slate-700 truncate max-w-[90px]" title={lead.quotationFileName}>
-                                {lead.quotationFileName}
-                              </span>
                               <button
                                 onClick={() => handleDownloadQuotation(lead)}
                                 disabled={downloadingId === lead.id}
-                                title="Download Quotation"
-                                className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition"
+                                title={`Download ${lead.quotationFileName}`}
+                                className="p-1 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded transition cursor-pointer"
                               >
-                                <Download className="w-3.5 h-3.5" />
+                                <Download className="w-3 h-3" />
                               </button>
                               {isPdf && (
                                 <button
                                   onClick={() => handlePreviewQuotation(lead)}
                                   title="Open PDF Preview"
-                                  className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition"
+                                  className="p-1 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded transition cursor-pointer"
                                 >
-                                  <Eye className="w-3.5 h-3.5" />
+                                  <Eye className="w-3 h-3" />
                                 </button>
                               )}
                             </div>
@@ -2135,11 +2221,11 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                         </td>
 
                         {/* Pipeline Stage */}
-                        <td className="py-2.5 px-3 whitespace-nowrap">
+                        <td className="py-2 px-1.5">
                           <select
                             value={lead.leadStatus || 'OPEN'}
                             onChange={(e) => handleQuickUpdateLead(lead.id, { leadStatus: e.target.value })}
-                            className={`text-xs font-semibold rounded-md px-2 py-1 border focus:outline-none transition cursor-pointer ${currentStageMeta.color}`}
+                            className={`text-[11px] font-semibold rounded px-1.5 py-0.5 border focus:outline-none transition cursor-pointer w-full max-w-[110px] truncate ${currentStageMeta.color}`}
                           >
                             {LMS_LEAD_STAGES.map((stg) => (
                               <option key={stg.id} value={stg.id}>{stg.label}</option>
@@ -2148,7 +2234,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                         </td>
 
                         {/* Action */}
-                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                        <td className="py-2 px-2 text-center whitespace-nowrap">
                           <div className="flex items-center justify-center gap-1">
                             {/* Convert to Deal Button */}
                             <button
@@ -2164,9 +2250,9 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                                 }
                               }}
                               title="Convert Lead into Active Deal"
-                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-bold transition shadow-xs flex items-center gap-1"
+                              className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[11px] font-bold transition shadow-xs flex items-center gap-0.5 cursor-pointer"
                             >
-                              <ArrowRight className="w-3 h-3" />
+                              <ArrowRight className="w-2.5 h-2.5" />
                               <span>Deal</span>
                             </button>
 
@@ -2175,7 +2261,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                               <button
                                 onClick={() => handleDeleteLead(lead.id)}
                                 title="Delete Lead"
-                                className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition"
+                                className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition cursor-pointer"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -2540,6 +2626,57 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal }
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* IN-APP QUOTATION DOCUMENT PREVIEW MODAL */}
+      {previewQuotationDoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden">
+            {/* Modal Header */}
+            <div className="px-5 py-3.5 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <FileText className="w-5 h-5 text-indigo-400" />
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <span>Quotation Preview</span>
+                    <span className="text-xs text-slate-400 font-normal">({previewQuotationDoc.leadCompany})</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-mono truncate max-w-md">
+                    {previewQuotationDoc.fileName}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={previewQuotationDoc.url}
+                  download={previewQuotationDoc.fileName}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={handleClosePreview}
+                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                  title="Close preview"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body / iframe */}
+            <div className="flex-1 bg-slate-100 relative">
+              <iframe
+                src={previewQuotationDoc.url}
+                title={`Preview of ${previewQuotationDoc.fileName}`}
+                className="w-full h-full border-0"
+              />
+            </div>
           </div>
         </div>
       )}

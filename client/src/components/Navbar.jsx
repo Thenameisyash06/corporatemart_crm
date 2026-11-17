@@ -9,6 +9,7 @@ import {
   UserPlus,
 } from 'lucide-react';
 import api from '../lib/api';
+import MeetingNotificationDropdown from './MeetingNotificationDropdown';
 
 const QUICK_ROLES = [
   { label: 'BDM (Sales)', email: 'bdm@corporatemart.com', pass: 'bdm123', role: 'BDM' },
@@ -20,7 +21,13 @@ const QUICK_ROLES = [
   { label: 'Admin', email: 'admin@corporatemart.com', pass: 'admin123', role: 'ADMIN' },
 ];
 
-export default function Navbar({ currentUser, onUserChange, onRefresh }) {
+export default function Navbar({
+  currentUser,
+  onUserChange,
+  onRefresh,
+  todayMeetings = [],
+  onNavigateToLms,
+}) {
   const [switching, setSwitching] = React.useState(false);
 
   const handleQuickSwitch = async (roleObj) => {
@@ -128,7 +135,13 @@ export default function Navbar({ currentUser, onUserChange, onRefresh }) {
         )}
 
         {/* Right: Active Profile & Sign Out */}
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-2.5">
+          {/* Today's Meetings Notification Button with Indicator Dot & Detailed Overview */}
+          <MeetingNotificationDropdown
+            meetings={todayMeetings}
+            onNavigateToLms={onNavigateToLms}
+          />
+
           <button
             onClick={onRefresh}
             title="Refresh Data"

@@ -9,7 +9,11 @@ export function downloadCsv(filename, headers, rows) {
 
   const escapeCell = (val) => {
     if (val === null || val === undefined) return '""';
-    const str = String(val).replace(/"/g, '""');
+    let str = String(val).replace(/"/g, '""');
+    // Prevent CSV formula injection in Microsoft Excel / Google Sheets
+    if (/^[=+@\-\t\r]/.test(str)) {
+      str = "'" + str;
+    }
     return `"${str}"`;
   };
 
