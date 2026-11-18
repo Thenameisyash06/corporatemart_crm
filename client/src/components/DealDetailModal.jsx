@@ -282,31 +282,29 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
         </div>
 
         {/* 9-Stage Progress Timeline */}
-        <div className="bg-white px-6 py-4 border-b border-slate-200 overflow-x-auto no-scrollbar scroll-smooth">
-          <div className="flex items-center space-x-3 w-max">
+        <div className="bg-white px-6 py-4 border-b border-slate-200  overflow-x-auto overflow-y-hidden shrink-0 ">
+          <div className="flex items-center space-x-3 w-max py-1">
             {STAGES_LIST.map((st, idx) => {
               const isPast = currentStageIndex > idx;
               const isCurrent = currentStageIndex === idx;
               return (
                 <React.Fragment key={st.key}>
                   <div
-                    className={`flex items-center space-x-2 text-sm px-3.5 py-2 rounded-lg border transition whitespace-nowrap shadow-xs ${
-                      isCurrent
-                        ? 'bg-slate-900 text-white border-slate-900 font-bold shadow-sm ring-2 ring-slate-900/10'
-                        : isPast
+                    className={`flex items-center space-x-2 text-sm px-3.5 py-2 rounded-lg border transition whitespace-nowrap shadow-xs ${isCurrent
+                      ? 'bg-slate-900 text-white border-slate-900 font-bold shadow-sm ring-2 ring-slate-900/10'
+                      : isPast
                         ? 'bg-emerald-50 text-emerald-800 border-emerald-200 font-semibold'
                         : 'bg-slate-50 text-slate-400 border-slate-200 font-medium'
-                    }`}
+                      }`}
                   >
                     {isPast ? (
                       <Check className="w-4 h-4 text-emerald-700 flex-shrink-0" />
                     ) : (
                       <span
-                        className={`text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${
-                          isCurrent
-                            ? 'bg-white text-slate-900'
-                            : 'bg-slate-200 text-slate-600'
-                        }`}
+                        className={`text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${isCurrent
+                          ? 'bg-white text-slate-900'
+                          : 'bg-slate-200 text-slate-600'
+                          }`}
                       >
                         {idx + 1}
                       </span>
@@ -506,11 +504,10 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
             <button
               key={t.id}
               onClick={() => setActiveTab(t.id)}
-              className={`pb-3 border-b-2 text-sm transition ${
-                activeTab === t.id
-                  ? 'border-slate-900 text-slate-900 font-bold'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
+              className={`pb-3 border-b-2 text-sm transition ${activeTab === t.id
+                ? 'border-slate-900 text-slate-900 font-bold'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
             >
               {t.label}
             </button>
@@ -527,11 +524,10 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
                 <div className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center justify-between">
                   <span>Deal Financial Summary</span>
                   <span
-                    className={`inline-block text-[11px] px-2.5 py-0.5 rounded font-semibold border ${
-                      pendingAmount === 0
-                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                        : 'bg-amber-100/70 text-amber-900 border-amber-300'
-                    }`}
+                    className={`inline-block text-[11px] px-2.5 py-0.5 rounded font-semibold border ${pendingAmount === 0
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                      : 'bg-amber-100/70 text-amber-900 border-amber-300'
+                      }`}
                   >
                     {deal.paymentType.replace('_', ' ')}
                   </span>
@@ -722,9 +718,8 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
                     return (
                       <div
                         key={p.id}
-                        className={`p-4 rounded-lg border text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3.5 ${
-                          isPending ? 'bg-amber-50/80 border-amber-300' : 'bg-slate-50 border-slate-200'
-                        }`}
+                        className={`p-4 rounded-lg border text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3.5 ${isPending ? 'bg-amber-50/80 border-amber-300' : 'bg-slate-50 border-slate-200'
+                          }`}
                       >
                         <div>
                           <div className="flex items-center gap-2.5">
@@ -735,13 +730,12 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
                               {p.paymentMode}
                             </span>
                             <span
-                              className={`px-2.5 py-0.5 rounded text-xs font-semibold border ${
-                                p.status === 'VERIFIED'
-                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                  : p.status === 'REJECTED'
+                              className={`px-2.5 py-0.5 rounded text-xs font-semibold border ${p.status === 'VERIFIED'
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                : p.status === 'REJECTED'
                                   ? 'bg-rose-50 text-rose-800 border-rose-200'
                                   : 'bg-amber-100 text-amber-900 border-amber-300'
-                              }`}
+                                }`}
                             >
                               {p.status.replace('_', ' ')}
                             </span>
