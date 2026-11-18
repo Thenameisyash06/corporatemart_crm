@@ -111,13 +111,16 @@ router.get('/', authenticateToken, async (req, res) => {
   try {
     const { stage, roleFilter, search } = req.query;
     const conditions = [];
+    const conditions = [];
 
     if (stage) {
       conditions.push({ stage });
+      conditions.push({ stage });
     }
 
-    // Role-specific queues & RBAC
-    if (req.user.role === 'BDM' || roleFilter === 'BDM') {
+    // Role-specific quick queues & access control
+    if (req.user.role === 'BDM') {
+      // In CRM: if BDM (leader or regular team member), display ONLY their personal deals
       conditions.push({
         OR: [
           { bdmId: req.user.id },
@@ -135,19 +138,32 @@ router.get('/', authenticateToken, async (req, res) => {
       conditions.push({
         stage: { in: ['STAGE_05_LEGAL_VERIFICATION', 'STAGE_05_LEGAL_REJECTED'] },
       });
+      conditions.push({
+        stage: { in: ['STAGE_05_LEGAL_VERIFICATION', 'STAGE_05_LEGAL_REJECTED'] },
+      });
     } else if (roleFilter === 'OPERATIONS') {
+      conditions.push({
+        stage: { in: ['STAGE_06_OPERATIONS_PROCESSING', 'STAGE_07_SERVICE_COMPLETED'] },
+      });
       conditions.push({
         stage: { in: ['STAGE_06_OPERATIONS_PROCESSING', 'STAGE_07_SERVICE_COMPLETED'] },
       });
     } else if (roleFilter === 'RM') {
       // RM has full visibility across all deals from BDM form creation through operations to closure
-      if (stage) {
-        conditions.push({ stage });
-      }
     }
 
     // Search by client company name, contact, dealCode, BDM names
     if (search && search.trim()) {
+      conditions.push({
+        OR: [
+          { dealCode: { contains: search.trim(), mode: 'insensitive' } },
+          { client: { companyName: { contains: search.trim(), mode: 'insensitive' } } },
+          { client: { clientName: { contains: search.trim(), mode: 'insensitive' } } },
+          { client: { email: { contains: search.trim(), mode: 'insensitive' } } },
+          { bdm: { fullName: { contains: search.trim(), mode: 'insensitive' } } },
+          { coBdms: { some: { fullName: { contains: search.trim(), mode: 'insensitive' } } } },
+        ],
+      });
       conditions.push({
         OR: [
           { dealCode: { contains: search.trim(), mode: 'insensitive' } },
@@ -205,13 +221,15 @@ router.get('/', authenticateToken, async (req, res) => {
       }),
     ]);
 
-    const totalPages = isAll ? 1 : Math.max(1, Math.ceil(total / (limit || 20)));
+    const effectiveLimit = limit || defaultLimit || 20;
+    const totalPages = isAll ? 1 : Math.max(1, Math.ceil(total / effectiveLimit));
 
     return res.json({
       deals,
+      deals,
       pagination: {
         page: isAll ? 1 : page,
-        limit: isAll ? total : limit,
+        limit: isAll ? total : effectiveLimit,
         total,
         totalPages,
       },
