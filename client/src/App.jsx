@@ -143,11 +143,6 @@ export default function App() {
         params.search = searchQuery.trim();
       }
 
-      // If BDM, only load BDM-relevant deals
-      if (currentUser.role === 'BDM') {
-        params.roleFilter = 'BDM';
-      }
-
       const [statsRes, dealsRes] = await Promise.all([
         api.get('/dashboard/stats'),
         api.get('/deals', { params }),

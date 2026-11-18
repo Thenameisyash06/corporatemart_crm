@@ -654,9 +654,12 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     }
 
     let list = Object.entries(map).map(([name, data]) => {
-      const isLeaderRole = LMS_LEADERS.some(
-        (l) => l.toLowerCase().trim() === name.toLowerCase().trim()
-      ) || (teamLeader && name.toLowerCase().trim() === teamLeader.toLowerCase().trim());
+      const cleanName = name.replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+      const cleanTeamLeader = (teamLeader || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+      const isLeaderRole = LMS_LEADERS.some((l) => {
+        const cleanL = l.replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+        return cleanName === cleanL || cleanName.includes(cleanL) || cleanL.includes(cleanName);
+      }) || (cleanTeamLeader && (cleanName === cleanTeamLeader || cleanName.includes(cleanTeamLeader) || cleanTeamLeader.includes(cleanName)));
 
       return {
         bdmName: name,
@@ -669,14 +672,18 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     // - Leader: can see himself and all the team members (first leader then members)
     // - BDM member: should NOT see the leader in leaderboard; can only see other team members and himself
     if (!isAdmin) {
+      const cleanLeader = (teamLeader || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+      const cleanSelf = (loggedInBdmName || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+
       if (isLeader) {
         // Leader sees himself and all team members
         list = list.filter((item) => {
-          const isCurrentTeamLeader = teamLeader && item.bdmName.toLowerCase().trim() === teamLeader.toLowerCase().trim();
-          const isSelf = loggedInBdmName && item.bdmName.toLowerCase().trim() === loggedInBdmName.toLowerCase().trim();
+          const itemClean = item.bdmName.replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+          const isCurrentTeamLeader = cleanLeader && (itemClean === cleanLeader || itemClean.includes(cleanLeader) || cleanLeader.includes(itemClean));
+          const isSelf = cleanSelf && (itemClean === cleanSelf || itemClean.includes(cleanSelf) || cleanSelf.includes(itemClean));
 
           // Exclude any outside leaders
-          if (item.isLeader && !isCurrentTeamLeader) {
+          if (item.isLeader && !isCurrentTeamLeader && !isSelf) {
             return false;
           }
 
@@ -689,7 +696,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
           if (item.isLeader) {
             return false;
           }
-          const isSelf = loggedInBdmName && item.bdmName.toLowerCase().trim() === loggedInBdmName.toLowerCase().trim();
+          const itemClean = item.bdmName.replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+          const isSelf = cleanSelf && (itemClean === cleanSelf || itemClean.includes(cleanSelf) || cleanSelf.includes(itemClean));
           return isSelf || item.totalValue > 0 || item.count > 0;
         });
       }
