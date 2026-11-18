@@ -9,14 +9,6 @@ const { authenticateToken, requireRoles } = require('../middleware/auth');
  */
 router.get('/stats', authenticateToken, async (req, res) => {
   try {
-    const isBdm = req.user.role === 'BDM';
-    const bdmDealFilter = isBdm ? {
-      OR: [
-        { bdmId: req.user.id },
-        { coBdms: { some: { id: req.user.id } } },
-      ],
-    } : {};
-
     const [
       totalDeals,
       pendingBdmHandover,
@@ -31,25 +23,18 @@ router.get('/stats', authenticateToken, async (req, res) => {
       pendingBalanceVerifications,
       financialAggregates,
     ] = await Promise.all([
-      prisma.deal.count({ where: bdmDealFilter }),
-      prisma.deal.count({ where: { ...bdmDealFilter, stage: 'STAGE_03_BDM_HANDOVER_PENDING' } }),
-      prisma.deal.count({ where: { ...bdmDealFilter, stage: 'STAGE_04_ACCOUNTS_VERIFICATION' } }),
-      prisma.deal.count({ where: { ...bdmDealFilter, stage: 'STAGE_04_ACCOUNTS_REJECTED' } }),
-      prisma.deal.count({ where: { ...bdmDealFilter, stage: 'STAGE_05_LEGAL_VERIFICATION' } }),
-      prisma.deal.count({ where: { ...bdmDealFilter, stage: 'STAGE_05_LEGAL_REJECTED' } }),
-      prisma.deal.count({ where: { ...bdmDealFilter, stage: 'STAGE_06_OPERATIONS_PROCESSING' } }),
-      prisma.deal.count({ where: { ...bdmDealFilter, stage: 'STAGE_07_SERVICE_COMPLETED' } }),
-      prisma.deal.count({ where: { ...bdmDealFilter, stage: 'STAGE_08_FINAL_DOCS_DELIVERED' } }),
-      prisma.deal.count({ where: { ...bdmDealFilter, stage: 'CLOSED' } }),
-      prisma.payment.count({
-        where: {
-          status: 'PENDING_VERIFICATION',
-          trancheNumber: { gt: 1 },
-          ...(isBdm ? { deal: bdmDealFilter } : {}),
-        },
-      }),
+      prisma.deal.count(),
+      prisma.deal.count({ where: { stage: 'STAGE_03_BDM_HANDOVER_PENDING' } }),
+      prisma.deal.count({ where: { stage: 'STAGE_04_ACCOUNTS_VERIFICATION' } }),
+      prisma.deal.count({ where: { stage: 'STAGE_04_ACCOUNTS_REJECTED' } }),
+      prisma.deal.count({ where: { stage: 'STAGE_05_LEGAL_VERIFICATION' } }),
+      prisma.deal.count({ where: { stage: 'STAGE_05_LEGAL_REJECTED' } }),
+      prisma.deal.count({ where: { stage: 'STAGE_06_OPERATIONS_PROCESSING' } }),
+      prisma.deal.count({ where: { stage: 'STAGE_07_SERVICE_COMPLETED' } }),
+      prisma.deal.count({ where: { stage: 'STAGE_08_FINAL_DOCS_DELIVERED' } }),
+      prisma.deal.count({ where: { stage: 'CLOSED' } }),
+      prisma.payment.count({ where: { status: 'PENDING_VERIFICATION', trancheNumber: { gt: 1 } } }),
       prisma.deal.aggregate({
-        where: bdmDealFilter,
         _sum: {
           totalAmount: true,
           amountReceived: true,
