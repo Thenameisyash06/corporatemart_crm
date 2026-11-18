@@ -245,7 +245,7 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
         "bdmName1" ILIKE $${paramIndex} 
         OR "bdmName2" ILIKE $${paramIndex}
         OR ("createdById" = $${paramIndex + 1} AND ("bdmName1" ILIKE $${paramIndex} OR "bdmName1" = '' OR "bdmName1" IS NULL))
-        OR ("closerStatus" ILIKE '%Lead Sharing%' AND ("leaderName" ILIKE $${paramIndex} OR "leaderName" ILIKE $${paramIndex + 2}))
+        OR ("leaderName" ILIKE $${paramIndex + 2})
       )`);
       params.push(`%${targetBdm}%`, req.user.id, `%${targetLeader}%`);
       paramIndex += 3;

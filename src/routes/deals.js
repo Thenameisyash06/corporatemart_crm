@@ -110,22 +110,36 @@ async function recordAuditLog({ dealId, userId, action, fromStage, toStage, rema
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const { stage, roleFilter, search } = req.query;
-    const where = {};
+    const conditions = [];
 
     if (stage) {
-      where.stage = stage;
+      conditions.push({ stage });
     }
 
-    // Role-specific quick queues
-    if (roleFilter === 'ACCOUNTS') {
-      where.OR = [
-        { stage: { in: ['STAGE_04_ACCOUNTS_VERIFICATION', 'STAGE_04_ACCOUNTS_REJECTED'] } },
-        { payments: { some: { status: 'PENDING_VERIFICATION' } } },
-      ];
+    // Role-specific queues & RBAC
+    // In CRM: if BDM (leader or regular team member), display ONLY their personal deals
+    if (req.user.role === 'BDM' || roleFilter === 'BDM') {
+      conditions.push({
+        OR: [
+          { bdmId: req.user.id },
+          { coBdms: { some: { id: req.user.id } } },
+        ],
+      });
+    } else if (roleFilter === 'ACCOUNTS') {
+      conditions.push({
+        OR: [
+          { stage: { in: ['STAGE_04_ACCOUNTS_VERIFICATION', 'STAGE_04_ACCOUNTS_REJECTED'] } },
+          { payments: { some: { status: 'PENDING_VERIFICATION' } } },
+        ],
+      });
     } else if (roleFilter === 'LEGAL') {
-      where.stage = { in: ['STAGE_05_LEGAL_VERIFICATION', 'STAGE_05_LEGAL_REJECTED'] };
+      conditions.push({
+        stage: { in: ['STAGE_05_LEGAL_VERIFICATION', 'STAGE_05_LEGAL_REJECTED'] },
+      });
     } else if (roleFilter === 'OPERATIONS') {
-      where.stage = { in: ['STAGE_06_OPERATIONS_PROCESSING', 'STAGE_07_SERVICE_COMPLETED'] };
+      conditions.push({
+        stage: { in: ['STAGE_06_OPERATIONS_PROCESSING', 'STAGE_07_SERVICE_COMPLETED'] },
+      });
     } else if (roleFilter === 'RM') {
       // RM has full visibility across all deals from BDM form creation through operations to closure
       if (stage) {
@@ -134,16 +148,20 @@ router.get('/', authenticateToken, async (req, res) => {
     }
 
     // Search by client company name, contact, dealCode, BDM names
-    if (search) {
-      where.OR = [
-        { dealCode: { contains: search, mode: 'insensitive' } },
-        { client: { companyName: { contains: search, mode: 'insensitive' } } },
-        { client: { clientName: { contains: search, mode: 'insensitive' } } },
-        { client: { email: { contains: search, mode: 'insensitive' } } },
-        { bdm: { fullName: { contains: search, mode: 'insensitive' } } },
-        { coBdms: { some: { fullName: { contains: search, mode: 'insensitive' } } } },
-      ];
+    if (search && search.trim()) {
+      conditions.push({
+        OR: [
+          { dealCode: { contains: search.trim(), mode: 'insensitive' } },
+          { client: { companyName: { contains: search.trim(), mode: 'insensitive' } } },
+          { client: { clientName: { contains: search.trim(), mode: 'insensitive' } } },
+          { client: { email: { contains: search.trim(), mode: 'insensitive' } } },
+          { bdm: { fullName: { contains: search.trim(), mode: 'insensitive' } } },
+          { coBdms: { some: { fullName: { contains: search.trim(), mode: 'insensitive' } } } },
+        ],
+      });
     }
+
+    const where = conditions.length > 0 ? { AND: conditions } : {};
 
     const deals = await prisma.deal.findMany({
       where,
@@ -251,6 +269,14 @@ router.get('/:id', authenticateToken, async (req, res) => {
 
     if (!deal) {
       return res.status(404).json({ error: 'Deal not found.' });
+    }
+
+    // In CRM: if logged in as BDM (leader or team member), can only view personal deal details
+    if (req.user.role === 'BDM') {
+      const isPersonal = deal.bdmId === req.user.id || (deal.coBdms && deal.coBdms.some((b) => b.id === req.user.id));
+      if (!isPersonal) {
+        return res.status(403).json({ error: 'Access denied: You can only view your own personal deal details.' });
+      }
     }
 
     return res.json({ deal });
