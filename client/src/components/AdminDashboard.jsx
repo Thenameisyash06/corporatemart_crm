@@ -110,7 +110,7 @@ function buildOverviewFromDeals(deals = [], users = [], stats = null) {
         avgDealSize: 0,
         isActive: true,
       });
-    }
+    }//
     const b = bdmMap.get(bdmId);
     b.dealsCount += 1;
     b.totalRevenue += Number(d.totalAmount || 0);
