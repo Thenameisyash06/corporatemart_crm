@@ -127,7 +127,10 @@ router.get('/', authenticateToken, async (req, res) => {
     } else if (roleFilter === 'OPERATIONS') {
       where.stage = { in: ['STAGE_06_OPERATIONS_PROCESSING', 'STAGE_07_SERVICE_COMPLETED'] };
     } else if (roleFilter === 'RM') {
-      where.stage = { in: ['STAGE_08_FINAL_DOCS_DELIVERED', 'STAGE_09_RM_HANDOVER', 'CLOSED'] };
+      // RM has full visibility across all deals from BDM form creation through operations to closure
+      if (stage) {
+        conditions.push({ stage });
+      }
     }
 
     // Search by client company name, contact, dealCode, BDM names
@@ -142,37 +145,52 @@ router.get('/', authenticateToken, async (req, res) => {
       ];
     }
 
-    let deals = await prisma.deal.findMany({
-      where,
-      include: {
-        client: {
-          include: { directors: true },
-        },
-        bdm: {
-          select: { id: true, fullName: true, email: true },
-        },
-        coBdms: {
-          select: { id: true, fullName: true, email: true },
-        },
-        assignedAccountsUser: {
-          select: { id: true, fullName: true, email: true },
-        },
-        assignedLegalUser: {
-          select: { id: true, fullName: true, email: true },
-        },
-        assignedOpsUser: {
-          select: { id: true, fullName: true, email: true },
-        },
-        services: {
-          include: {
-            assignedOpsUser: { select: { id: true, fullName: true, email: true } },
+    const where = conditions.length > 0 ? { AND: conditions } : {};
+
+    const isAll = req.query.limit === 'all' || req.query.all === 'true';
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const defaultLimit = roleFilter && roleFilter !== 'BDM' ? 100 : 20;
+    const limit = isAll ? undefined : Math.max(1, parseInt(req.query.limit, 10) || defaultLimit);
+    const skip = isAll ? undefined : (page - 1) * limit;
+
+    const [total, deals] = await Promise.all([
+      prisma.deal.count({ where }),
+      prisma.deal.findMany({
+        where,
+        take: limit,
+        skip,
+        include: {
+          client: {
+            include: { directors: true },
           },
+          bdm: {
+            select: { id: true, fullName: true, email: true },
+          },
+          coBdms: {
+            select: { id: true, fullName: true, email: true },
+          },
+          assignedAccountsUser: {
+            select: { id: true, fullName: true, email: true },
+          },
+          assignedLegalUser: {
+            select: { id: true, fullName: true, email: true },
+          },
+          assignedOpsUser: {
+            select: { id: true, fullName: true, email: true },
+          },
+          services: {
+            include: {
+              assignedOpsUser: { select: { id: true, fullName: true, email: true } },
+            },
+          },
+          payments: true,
+          documents: true,
         },
-        payments: true,
-        documents: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    const totalPages = isAll ? 1 : Math.max(1, Math.ceil(total / (limit || 20)));
 
     // In CRM: if BDM (leader or regular team member), display ONLY their personal deals
     if (req.user.role === 'BDM') {
