@@ -141,9 +141,10 @@ router.get('/', authenticateToken, async (req, res) => {
         stage: { in: ['STAGE_06_OPERATIONS_PROCESSING', 'STAGE_07_SERVICE_COMPLETED'] },
       });
     } else if (roleFilter === 'RM') {
-      conditions.push({
-        stage: { in: ['STAGE_08_FINAL_DOCS_DELIVERED', 'STAGE_09_RM_HANDOVER', 'CLOSED'] },
-      });
+      // RM has full visibility across all deals from BDM form creation through operations to closure
+      if (stage) {
+        where.stage = stage;
+      }
     }
 
     // Search by client company name, contact, dealCode, BDM names
@@ -1291,11 +1292,19 @@ router.post('/:id/service-complete', authenticateToken, requireRoles('OPERATIONS
 
     const deal = await prisma.deal.findUnique({
       where: { id: req.params.id },
-      include: { documents: true },
+      include: { documents: true, services: true },
     });
 
     if (!deal) {
       return res.status(404).json({ error: 'Deal not found.' });
+    }
+
+    // Check if ALL individual services are COMPLETED
+    const incompleteServices = (deal.services || []).filter((s) => s.status !== 'COMPLETED');
+    if (incompleteServices.length > 0) {
+      return res.status(400).json({
+        error: `Cannot complete deal. All ${deal.services.length} services must be completed by operations first (${incompleteServices.length} still in progress).`,
+      });
     }
 
     // Check if deliverable certificate is uploaded
@@ -1385,10 +1394,19 @@ router.post('/:id/rm-handover', authenticateToken, requireRoles('RM', 'ADMIN'), 
 
     const deal = await prisma.deal.findUnique({
       where: { id: req.params.id },
+      include: { services: true },
     });
 
     if (!deal) {
       return res.status(404).json({ error: 'Deal not found.' });
+    }
+
+    // Verify all individual services are completed before closing deal
+    const incompleteServices = (deal.services || []).filter((s) => s.status !== 'COMPLETED');
+    if (incompleteServices.length > 0) {
+      return res.status(400).json({
+        error: `Cannot close deal workflow. All individual services must be completed by operations first (${incompleteServices.length} still in progress).`,
+      });
     }
 
     await prisma.$transaction(async (tx) => {
@@ -1433,6 +1451,48 @@ router.post('/:id/rm-handover', authenticateToken, requireRoles('RM', 'ADMIN'), 
   } catch (error) {
     console.error('RM handover error:', error);
     return res.status(500).json({ error: 'Failed to complete RM handover.' });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// POST /api/deals/:id/rm-communication - RM Client Communication for Services
+// -----------------------------------------------------------------------------
+router.post('/:id/rm-communication', authenticateToken, requireRoles('RM', 'ADMIN'), async (req, res) => {
+  try {
+    const { serviceId, channel, notes, communicationType } = req.body;
+    const deal = await prisma.deal.findUnique({
+      where: { id: req.params.id },
+      include: { services: true },
+    });
+
+    if (!deal) {
+      return res.status(404).json({ error: 'Deal not found.' });
+    }
+
+    let serviceName = 'General Service';
+    let serviceStatus = '';
+    if (serviceId) {
+      const svc = deal.services.find((s) => s.id === serviceId);
+      if (!svc) {
+        return res.status(404).json({ error: 'Service not found in this deal.' });
+      }
+      serviceName = svc.serviceName;
+      serviceStatus = svc.status;
+    }
+
+    const typeDesc = communicationType || (serviceStatus === 'COMPLETED' ? 'Completion & Delivery' : 'Detail Acquisition / Status Update');
+
+    await recordAuditLog({
+      dealId: deal.id,
+      userId: req.user.id,
+      action: 'RM_CLIENT_COMMUNICATION',
+      remarks: `RM ${req.user.fullName} communicated with client via ${channel || 'WhatsApp / Direct'} regarding service "${serviceName}" [Type: ${typeDesc}]. Notes: ${notes || 'Client communication recorded.'}`,
+    });
+
+    return res.json({ message: 'Client communication recorded in CRM.' });
+  } catch (error) {
+    console.error('RM communication error:', error);
+    return res.status(500).json({ error: 'Failed to record communication.' });
   }
 });
 
