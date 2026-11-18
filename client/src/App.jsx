@@ -504,12 +504,14 @@ export default function App() {
               </div>
 
               <div className="text-sm text-slate-500">
-                Showing <strong className="text-slate-900">{dealsPagination.total || deals.length}</strong> active deals
+                Showing <strong className="text-slate-900">{deals.length}</strong> {currentUser?.role === 'BDM' ? 'personal deals' : 'active deals'}
               </div>
             </div>
 
             <DealsTable
-              deals={deals}
+              deals={currentUser?.role === 'BDM'
+                ? deals.filter((d) => d.bdmId === currentUser.id || d.coBdms?.some((b) => b.id === currentUser.id))
+                : deals}
               loading={loading}
               currentUser={currentUser}
               onSelectDeal={(id) => setSelectedDealId(id)}
