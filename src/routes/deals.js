@@ -207,8 +207,25 @@ router.get('/', authenticateToken, async (req, res) => {
 
     const totalPages = isAll ? 1 : Math.max(1, Math.ceil(total / (limit || 20)));
 
+    // In CRM: if BDM (leader or regular team member), display ONLY their personal deals
+    if (req.user.role === 'BDM') {
+      deals = deals.filter(
+        (d) => d.bdmId === req.user.id || (d.coBdms && d.coBdms.some((b) => b.id === req.user.id))
+      );
+    }
+
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const isAll = req.query.limit === 'all';
+    const limit = isAll ? deals.length : (parseInt(req.query.limit, 10) || 20);
+    const total = deals.length;
+    const totalPages = isAll || limit >= total ? 1 : Math.max(1, Math.ceil(total / limit));
+
+    const paginatedDeals = (req.query.page || req.query.limit) && !isAll
+      ? deals.slice((page - 1) * limit, page * limit)
+      : deals;
+
     return res.json({
-      deals,
+      deals: paginatedDeals,
       pagination: {
         page: isAll ? 1 : page,
         limit: isAll ? total : limit,
