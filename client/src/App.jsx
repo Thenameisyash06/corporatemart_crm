@@ -173,9 +173,9 @@ export default function App() {
     }
   };
 
-  // Fetch today's meetings for BDM users (leaders & members only - removed for admin)
+  // Fetch today's meetings for BDM and Admin users
   const fetchTodayMeetings = async () => {
-    if (!currentUser || currentUser.role !== 'BDM') {
+    if (!currentUser || (currentUser.role !== 'BDM' && currentUser.role !== 'ADMIN')) {
       setTodayMeetings([]);
       setShowMeetingPopup(false);
       return;
@@ -392,8 +392,8 @@ export default function App() {
         onNavigateToLms={handleNavigateToLms}
       />
 
-      {/* TODAY'S MEETING ALERT POPUP (3-4 SECONDS ON LOGIN / REFRESH) - ONLY FOR BDM (LEADERS & MEMBERS) */}
-      {currentUser?.role === 'BDM' && showMeetingPopup && todayMeetings.length > 0 && (
+      {/* TODAY'S MEETING ALERT POPUP (3-4 SECONDS ON LOGIN / REFRESH) */}
+      {showMeetingPopup && todayMeetings.length > 0 && (
         <MeetingTodayPopup
           meetings={todayMeetings}
           onClose={() => setShowMeetingPopup(false)}
