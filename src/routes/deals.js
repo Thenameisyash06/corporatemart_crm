@@ -110,22 +110,35 @@ async function recordAuditLog({ dealId, userId, action, fromStage, toStage, rema
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const { stage, roleFilter, search } = req.query;
-    const where = {};
+    const conditions = [];
 
     if (stage) {
-      where.stage = stage;
+      conditions.push({ stage });
     }
 
-    // Role-specific quick queues
-    if (roleFilter === 'ACCOUNTS') {
-      where.OR = [
-        { stage: { in: ['STAGE_04_ACCOUNTS_VERIFICATION', 'STAGE_04_ACCOUNTS_REJECTED'] } },
-        { payments: { some: { status: 'PENDING_VERIFICATION' } } },
-      ];
+    // Role-specific queues & RBAC
+    if (req.user.role === 'BDM' || roleFilter === 'BDM') {
+      conditions.push({
+        OR: [
+          { bdmId: req.user.id },
+          { coBdms: { some: { id: req.user.id } } },
+        ],
+      });
+    } else if (roleFilter === 'ACCOUNTS') {
+      conditions.push({
+        OR: [
+          { stage: { in: ['STAGE_04_ACCOUNTS_VERIFICATION', 'STAGE_04_ACCOUNTS_REJECTED'] } },
+          { payments: { some: { status: 'PENDING_VERIFICATION' } } },
+        ],
+      });
     } else if (roleFilter === 'LEGAL') {
-      where.stage = { in: ['STAGE_05_LEGAL_VERIFICATION', 'STAGE_05_LEGAL_REJECTED'] };
+      conditions.push({
+        stage: { in: ['STAGE_05_LEGAL_VERIFICATION', 'STAGE_05_LEGAL_REJECTED'] },
+      });
     } else if (roleFilter === 'OPERATIONS') {
-      where.stage = { in: ['STAGE_06_OPERATIONS_PROCESSING', 'STAGE_07_SERVICE_COMPLETED'] };
+      conditions.push({
+        stage: { in: ['STAGE_06_OPERATIONS_PROCESSING', 'STAGE_07_SERVICE_COMPLETED'] },
+      });
     } else if (roleFilter === 'RM') {
       // RM has full visibility across all deals from BDM form creation through operations to closure
       if (stage) {
@@ -135,14 +148,16 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Search by client company name, contact, dealCode, BDM names
     if (search && search.trim()) {
-      where.OR = [
-        { dealCode: { contains: search.trim(), mode: 'insensitive' } },
-        { client: { companyName: { contains: search.trim(), mode: 'insensitive' } } },
-        { client: { clientName: { contains: search.trim(), mode: 'insensitive' } } },
-        { client: { email: { contains: search.trim(), mode: 'insensitive' } } },
-        { bdm: { fullName: { contains: search.trim(), mode: 'insensitive' } } },
-        { coBdms: { some: { fullName: { contains: search.trim(), mode: 'insensitive' } } } },
-      ];
+      conditions.push({
+        OR: [
+          { dealCode: { contains: search.trim(), mode: 'insensitive' } },
+          { client: { companyName: { contains: search.trim(), mode: 'insensitive' } } },
+          { client: { clientName: { contains: search.trim(), mode: 'insensitive' } } },
+          { client: { email: { contains: search.trim(), mode: 'insensitive' } } },
+          { bdm: { fullName: { contains: search.trim(), mode: 'insensitive' } } },
+          { coBdms: { some: { fullName: { contains: search.trim(), mode: 'insensitive' } } } },
+        ],
+      });
     }
 
     const where = conditions.length > 0 ? { AND: conditions } : {};
