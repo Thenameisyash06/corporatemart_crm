@@ -27,11 +27,25 @@ app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Health Check
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
+  let dbStatus = 'disconnected';
+  let dbError = null;
+  try {
+    const prisma = require('./lib/prisma');
+    await prisma.$queryRaw`SELECT 1`;
+    dbStatus = 'connected';
+  } catch (err) {
+    dbStatus = 'error';
+    dbError = err.message;
+  }
+
   res.json({
-    status: 'ok',
+    status: dbStatus === 'connected' ? 'ok' : 'degraded',
+    database: dbStatus,
+    dbError: dbError,
     timestamp: new Date().toISOString(),
     service: 'CorporateMart CRM Backend API',
+    hasDatabaseUrl: Boolean(process.env.DATABASE_URL),
   });
 });
 
