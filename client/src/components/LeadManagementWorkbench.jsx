@@ -317,6 +317,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
   const [selectedSourcingFilter, setSelectedSourcingFilter] = useState('ALL');
   const [selectedMeetingFilter, setSelectedMeetingFilter] = useState('ALL');
   const [selectedStageFilter, setSelectedStageFilter] = useState('ALL');
+  const [selectedTeamMemberFilter, setSelectedTeamMemberFilter] = useState('ALL');
 
   // Active Leader associated with this user:
   // - If current user is a Leader: matchedLeaderName
@@ -482,9 +483,6 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       .filter((l) => (l.clientStatus || 'warm').toLowerCase() === 'warm')
       .reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
   }, [ownDirectLeads]);
-
-  // Filter for Team Member selection (used to filter the leads table by a specific team member)
-  const [selectedTeamMemberFilter, setSelectedTeamMemberFilter] = useState('ALL');
 
   // Compute team members overview cards (strictly team members, leader card removed)
   const teamMembersCards = useMemo(() => {
