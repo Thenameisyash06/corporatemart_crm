@@ -43,7 +43,6 @@ const COMMON_LEGAL_DEFICIENCIES = [
 
 export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDossier }) {
   const [deals, setDeals] = useState([]);
-  const [legalTeam, setLegalTeam] = useState([]);
   const [selectedDeal, setSelectedDeal] = useState(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -59,12 +58,8 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
   const fetchLegalQueue = async () => {
     try {
       setLoading(true);
-      const [dealsRes, teamRes] = await Promise.all([
-        api.get('/deals', { params: { roleFilter: 'LEGAL' } }),
-        api.get('/users', { params: { role: 'LEGAL' } }),
-      ]);
+      const dealsRes = await api.get('/deals', { params: { roleFilter: 'LEGAL' } });
       setDeals(dealsRes.data.deals);
-      setLegalTeam(teamRes.data.users);
 
       if (dealsRes.data.deals.length > 0) {
         const targetDeal = selectedDeal
@@ -109,24 +104,7 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
     }
   };
 
-  const handleAssignDeal = async (targetUserId) => {
-    if (!selectedDeal) return;
-    try {
-      setActionLoading(true);
-      setFeedback(null);
-      const res = await api.patch(`/deals/${selectedDeal.id}/assign`, {
-        department: 'LEGAL',
-        userId: targetUserId || null,
-      });
-      setFeedback({ type: 'success', message: res.data.message });
-      await fetchLegalQueue();
-      onRefreshParent();
-    } catch (err) {
-      setFeedback({ type: 'error', message: err.response?.data?.error || 'Assignment failed.' });
-    } finally {
-      setActionLoading(false);
-    }
-  };
+
 
   const handleUploadAgreement = async (e) => {
     if (e) e.preventDefault();
@@ -406,50 +384,7 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
                 </button>
               </div>
 
-              {/* EXECUTIVE ASSIGNMENT */}
-              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                <div className="flex items-center space-x-3">
-                  <span className="p-2 rounded-lg bg-white border border-slate-200 text-slate-700 shadow-xs">
-                    <UserCheck className="w-4 h-4" />
-                  </span>
-                  <div>
-                    <span className="text-xs text-slate-500 block font-medium">Assigned Legal Associate</span>
-                    <span className="text-sm font-semibold text-slate-900">
-                      {selectedDeal.assignedLegalUser ? selectedDeal.assignedLegalUser.fullName : 'Unassigned (Open in Pool)'}
-                    </span>
-                  </div>
-                </div>
 
-                <div className="flex items-center space-x-2">
-                  {currentUser?.role === 'LEGAL' && selectedDeal.assignedLegalUserId !== currentUser?.id && (
-                    <button
-                      onClick={() => handleAssignDeal(currentUser?.id)}
-                      disabled={actionLoading}
-                      className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 shadow-sm transition disabled:opacity-50"
-                      title="Take ownership of this scrutiny"
-                    >
-                      <User className="w-3.5 h-3.5" />
-                      <span>Claim Deal</span>
-                    </button>
-                  )}
-
-                  <div className="flex items-center space-x-1">
-                    <select
-                      value={selectedDeal.assignedLegalUserId || ''}
-                      onChange={(e) => handleAssignDeal(e.target.value || null)}
-                      disabled={actionLoading}
-                      className="bg-white border border-slate-300 text-slate-800 text-xs font-medium rounded-md px-2.5 py-1.5 focus:outline-none focus:border-slate-800"
-                    >
-                      <option value="">-- Assign Associate --</option>
-                      {legalTeam.map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {u.fullName}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
 
               {/* 1. COMPLETE CLIENT & ENTITY PROFILE (FILLED BY BDM) */}
               <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-4.5 space-y-3.5">

@@ -137,6 +137,9 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
   const [leads, setLeads] = useState([]);
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
+  const [pagination, setPagination] = useState({ page: 1, limit: 25, total: 0, totalPages: 1 });
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState(null);
   const [formErrors, setFormErrors] = useState({});
@@ -314,12 +317,16 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
   const [selectedSourcingFilter, setSelectedSourcingFilter] = useState('ALL');
   const [selectedMeetingFilter, setSelectedMeetingFilter] = useState('ALL');
   const [selectedStageFilter, setSelectedStageFilter] = useState('ALL');
+  const [selectedTeamMemberFilter, setSelectedTeamMemberFilter] = useState('ALL');
 
   // Fetch Leads
-  const fetchLeads = async () => {
+  const fetchLeads = async (targetPage = page, targetLimit = limit) => {
     try {
       setLoading(true);
-      const params = {};
+      const params = {
+        page: targetPage,
+        limit: targetLimit,
+      };
       if (!isAdmin) {
         params.scope = 'my';
         params.myBdmName = loggedInBdmName;
@@ -335,11 +342,24 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       if (selectedSourcingFilter !== 'ALL') params.sourcingStatus = selectedSourcingFilter;
       if (selectedMeetingFilter !== 'ALL') params.meetingStatus = selectedMeetingFilter;
       if (selectedStageFilter !== 'ALL') params.leadStatus = selectedStageFilter;
+      if (selectedTeamMemberFilter && selectedTeamMemberFilter !== 'ALL') {
+        params.teamMember = selectedTeamMemberFilter;
+      }
       if (searchQuery.trim()) params.search = searchQuery.trim();
 
       const res = await api.get('/leads', { params });
       setLeads(res.data.leads || []);
       setAnalytics(res.data.analytics || null);
+      if (res.data.pagination) {
+        setPagination(res.data.pagination);
+      } else {
+        setPagination({
+          page: targetPage,
+          limit: targetLimit,
+          total: res.data.leads?.length || 0,
+          totalPages: 1,
+        });
+      }
     } catch (err) {
       console.error('Failed to fetch leads:', err);
       setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to load leads.' });
@@ -349,7 +369,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
   };
 
   useEffect(() => {
-    fetchLeads();
+    setPage(1);
+    fetchLeads(1, limit);
   }, [
     selectedLeaderFilter,
     selectedBdmFilter,
@@ -358,12 +379,14 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     selectedSourcingFilter,
     selectedMeetingFilter,
     selectedStageFilter,
+    selectedTeamMemberFilter,
   ]);
 
   // Handle Search on Enter
   const handleSearchSubmit = (e) => {
     e.preventDefault();
-    fetchLeads();
+    setPage(1);
+    fetchLeads(1, limit);
   };
 
   // Separate Own Direct Leads vs Shared Team Leads
@@ -426,26 +449,29 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
 
   // BDM's Personal Deal Funnel Value (calculated STRICTLY on own direct leads, excluding team member leads)
   const bdmPersonalFunnel = useMemo(() => {
+    if (analytics?.myDirectFunnel !== undefined) return analytics.myDirectFunnel;
     return ownDirectLeads.reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
-  }, [ownDirectLeads]);
+  }, [analytics, ownDirectLeads]);
 
   const bdmHotFunnel = useMemo(() => {
+    if (analytics?.myDirectHot !== undefined) return analytics.myDirectHot;
     return ownDirectLeads
       .filter((l) => (l.clientStatus || '').toLowerCase() === 'hot')
       .reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
-  }, [ownDirectLeads]);
+  }, [analytics, ownDirectLeads]);
 
   const bdmWarmFunnel = useMemo(() => {
+    if (analytics?.myDirectWarm !== undefined) return analytics.myDirectWarm;
     return ownDirectLeads
       .filter((l) => (l.clientStatus || 'warm').toLowerCase() === 'warm')
       .reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
-  }, [ownDirectLeads]);
-
-  // Filter for Team Member selection (used to filter the leads table by a specific team member)
-  const [selectedTeamMemberFilter, setSelectedTeamMemberFilter] = useState('ALL');
+  }, [analytics, ownDirectLeads]);
 
   // Compute team members overview cards for Leader BDM dashboard
   const teamMembersCards = useMemo(() => {
+    if (analytics?.teamMembersOverview && analytics.teamMembersOverview.length > 0) {
+      return analytics.teamMembersOverview;
+    }
     if (!isLeader || !sharedTeamLeads || sharedTeamLeads.length === 0) return [];
 
     const membersMap = {};
@@ -544,7 +570,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         totalFunnel,
       };
     });
-  }, [isLeader, sharedTeamLeads]);
+  }, [analytics, isLeader, sharedTeamLeads]);
 
   // Leads actually displayed in the table below (supports filtering to a selected team member)
   const displayedLeads = useMemo(() => {
@@ -854,6 +880,39 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     };
   };
 
+  const [exportingCsv, setExportingCsv] = useState(false);
+
+  const handleExportCsv = async () => {
+    try {
+      setExportingCsv(true);
+      const params = { limit: 'all' };
+      if (!isAdmin) {
+        params.scope = 'my';
+        params.myBdmName = loggedInBdmName;
+        if (matchedLeaderName) params.myLeaderName = matchedLeaderName;
+      } else {
+        if (selectedBdmFilter !== 'ALL') params.bdmName = selectedBdmFilter;
+      }
+      if (selectedLeaderFilter !== 'ALL') params.leaderName = selectedLeaderFilter;
+      if (selectedCloserFilter !== 'ALL') params.closerStatus = selectedCloserFilter;
+      if (selectedClientStatusFilter !== 'ALL') params.clientStatus = selectedClientStatusFilter;
+      if (selectedSourcingFilter !== 'ALL') params.sourcingStatus = selectedSourcingFilter;
+      if (selectedMeetingFilter !== 'ALL') params.meetingStatus = selectedMeetingFilter;
+      if (selectedStageFilter !== 'ALL') params.leadStatus = selectedStageFilter;
+      if (selectedTeamMemberFilter && selectedTeamMemberFilter !== 'ALL') params.teamMember = selectedTeamMemberFilter;
+      if (searchQuery.trim()) params.search = searchQuery.trim();
+
+      const res = await api.get('/leads', { params });
+      const exportList = res.data.leads || displayedLeads;
+      exportLeadsToCsv(exportList, isAdmin ? 'All_Company_LMS_Leads.csv' : `${loggedInBdmName}_LMS_Leads.csv`);
+    } catch (err) {
+      console.error('Export CSV error:', err);
+      exportLeadsToCsv(displayedLeads, isAdmin ? 'All_Company_LMS_Leads.csv' : `${loggedInBdmName}_LMS_Leads.csv`);
+    } finally {
+      setExportingCsv(false);
+    }
+  };
+
   return (
     <div className="space-y-5">
       {/* 1. TOP HEADER & KPI SUMMARY */}
@@ -897,12 +956,12 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
           </button>
 
           <button
-            onClick={() => exportLeadsToCsv(displayedLeads, isAdmin ? 'All_Company_LMS_Leads.csv' : `${loggedInBdmName}_LMS_Leads.csv`)}
-            disabled={displayedLeads.length === 0}
+            onClick={handleExportCsv}
+            disabled={pagination.total === 0 || exportingCsv}
             className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-50"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>Export CSV ({displayedLeads.length})</span>
+            <span>{exportingCsv ? 'Exporting...' : `Export CSV (${pagination.total || displayedLeads.length})`}</span>
           </button>
 
           {/* LOG NEW LEAD BUTTON (BDM ONLY - REMOVED FOR ADMIN) */}
@@ -2003,12 +2062,12 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
           <div className="flex items-center gap-2 flex-wrap">
             <span>
               {isAdmin
-                ? `Showing all company leads across all BDMs (${displayedLeads.length})`
+                ? `Showing company leads across all BDMs (${pagination.total} total)`
                 : sharedTeamLeads.length > 0
                 ? selectedTeamMemberFilter !== 'ALL'
-                  ? `Filtered to ${selectedTeamMemberFilter}'s leads (${displayedLeads.length} leads)`
-                  : `Showing ${ownDirectLeads.length} own direct leads + ${sharedTeamLeads.length} team shared leads (${displayedLeads.length} total in table)`
-                : `Showing your personal leads only (${displayedLeads.length})`}
+                  ? `Filtered to ${selectedTeamMemberFilter}'s leads (${pagination.total} leads)`
+                  : `Showing leads (${pagination.total} total)`
+                : `Showing your personal leads only (${pagination.total} leads)`}
             </span>
             {selectedTeamMemberFilter !== 'ALL' && (
               <button
@@ -2463,6 +2522,102 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
             </tbody>
           </table>
         </div>
+
+        {/* 5B. TABLE PAGINATION CONTROLS */}
+        {pagination && pagination.total > 0 && (
+          <div className="bg-white border-t border-slate-200 px-5 py-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-600">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span>
+                Showing{' '}
+                <strong className="text-slate-900">
+                  {(pagination.page - 1) * pagination.limit + 1}
+                </strong>{' '}
+                to{' '}
+                <strong className="text-slate-900">
+                  {Math.min(pagination.page * pagination.limit, pagination.total)}
+                </strong>{' '}
+                of <strong className="text-slate-900">{pagination.total}</strong> leads
+              </span>
+              <span className="text-slate-300">|</span>
+              <div className="flex items-center gap-1.5">
+                <label htmlFor="leads-limit-select" className="text-slate-500">Per page:</label>
+                <select
+                  id="leads-limit-select"
+                  value={pagination.limit}
+                  onChange={(e) => {
+                    const newLimit = Number(e.target.value);
+                    setLimit(newLimit);
+                    setPage(1);
+                    fetchLeads(1, newLimit);
+                  }}
+                  className="border border-slate-200 rounded px-2 py-1 bg-slate-50 font-medium text-slate-800 focus:outline-none focus:border-slate-800"
+                >
+                  <option value={15}>15</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  const newPage = pagination.page - 1;
+                  setPage(newPage);
+                  fetchLeads(newPage, limit);
+                }}
+                disabled={pagination.page <= 1}
+                className="px-2.5 py-1.5 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium transition cursor-pointer"
+              >
+                Previous
+              </button>
+
+              {Array.from({ length: pagination.totalPages }, (_, i) => i + 1)
+                .filter((p) => {
+                  return p === 1 || p === pagination.totalPages || Math.abs(p - pagination.page) <= 1;
+                })
+                .map((p, idx, arr) => {
+                  const prev = arr[idx - 1];
+                  return (
+                    <React.Fragment key={p}>
+                      {prev && p - prev > 1 && (
+                        <span className="px-1 text-slate-400">...</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPage(p);
+                          fetchLeads(p, limit);
+                        }}
+                        className={`w-7 h-7 rounded-lg font-semibold transition cursor-pointer ${
+                          p === pagination.page
+                            ? 'bg-slate-900 text-white shadow-xs'
+                            : 'text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    </React.Fragment>
+                  );
+                })}
+
+              <button
+                type="button"
+                onClick={() => {
+                  const newPage = pagination.page + 1;
+                  setPage(newPage);
+                  fetchLeads(newPage, limit);
+                }}
+                disabled={pagination.page >= pagination.totalPages}
+                className="px-2.5 py-1.5 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium transition cursor-pointer"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 6. RECORD FOLLOW-UP STATUS MODAL (FROZEN AUDIT TRAIL) */}

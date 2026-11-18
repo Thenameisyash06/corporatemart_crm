@@ -49,6 +49,9 @@ export default function App() {
   const [activeFilterId, setActiveFilterId] = useState('ALL');
   const [activeStageKey, setActiveStageKey] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [dealsPage, setDealsPage] = useState(1);
+  const [dealsLimit, setDealsLimit] = useState(20);
+  const [dealsPagination, setDealsPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 1 });
   const [previousCrmTab, setPreviousCrmTab] = useState('pipeline');
   const currentMode = activeTab === 'lms' ? 'LMS' : 'CRM';
 
@@ -130,12 +133,15 @@ export default function App() {
     }
   };
 
-  const fetchData = async () => {
+  const fetchData = async (page = dealsPage, limit = dealsLimit) => {
     if (!currentUser) return;
     try {
       setLoading(true);
 
-      const params = {};
+      const params = {
+        page,
+        limit,
+      };
       if (activeStageKey) {
         params.stage = activeStageKey;
       }
@@ -154,7 +160,17 @@ export default function App() {
       ]);
 
       setStats(statsRes.data);
-      setDeals(dealsRes.data.deals);
+      setDeals(dealsRes.data.deals || []);
+      if (dealsRes.data.pagination) {
+        setDealsPagination(dealsRes.data.pagination);
+      } else {
+        setDealsPagination({
+          page,
+          limit,
+          total: dealsRes.data.deals?.length || 0,
+          totalPages: 1,
+        });
+      }
     } catch (err) {
       console.error('Fetch data error:', err);
     } finally {
@@ -170,7 +186,7 @@ export default function App() {
       return;
     }
     try {
-      const res = await api.get('/leads');
+      const res = await api.get('/leads', { params: { todayMeetings: 'true', limit: 100 } });
       const leads = res.data?.leads || [];
       const meetingsToday = filterTodayMeetings(leads);
       setTodayMeetings(meetingsToday);
@@ -186,7 +202,7 @@ export default function App() {
 
   useEffect(() => {
     if (currentUser) {
-      fetchData();
+      fetchData(dealsPage, dealsLimit);
       fetchTodayMeetings();
     }
 
@@ -200,6 +216,14 @@ export default function App() {
     };
   }, [currentUser]);
 
+  // Re-fetch deals when stage filter or search changes
+  useEffect(() => {
+    if (currentUser) {
+      setDealsPage(1);
+      fetchData(1, dealsLimit);
+    }
+  }, [activeStageKey, searchQuery]);
+
   const handleNavigateToLms = (lead) => {
     setActiveTab('lms');
     if (lead?.id) {
@@ -210,6 +234,7 @@ export default function App() {
   const handleFilterSelect = (filterId, stageKey) => {
     setActiveFilterId(filterId);
     setActiveStageKey(stageKey || null);
+    setDealsPage(1);
   };
 
   // ---------------------------------------------------------------------------
@@ -479,7 +504,7 @@ export default function App() {
               </div>
 
               <div className="text-sm text-slate-500">
-                Showing <strong className="text-slate-900">{deals.length}</strong> active deals
+                Showing <strong className="text-slate-900">{dealsPagination.total || deals.length}</strong> active deals
               </div>
             </div>
 
@@ -489,6 +514,16 @@ export default function App() {
               currentUser={currentUser}
               onSelectDeal={(id) => setSelectedDealId(id)}
               onCollectBalance={(deal) => setBalanceModalDeal(deal)}
+              pagination={dealsPagination}
+              onPageChange={(p) => {
+                setDealsPage(p);
+                fetchData(p, dealsLimit);
+              }}
+              onLimitChange={(l) => {
+                setDealsLimit(l);
+                setDealsPage(1);
+                fetchData(1, l);
+              }}
             />
           </div>
         )}

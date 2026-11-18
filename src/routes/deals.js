@@ -145,39 +145,60 @@ router.get('/', authenticateToken, async (req, res) => {
       ];
     }
 
-    const deals = await prisma.deal.findMany({
-      where,
-      include: {
-        client: {
-          include: { directors: true },
-        },
-        bdm: {
-          select: { id: true, fullName: true, email: true },
-        },
-        coBdms: {
-          select: { id: true, fullName: true, email: true },
-        },
-        assignedAccountsUser: {
-          select: { id: true, fullName: true, email: true },
-        },
-        assignedLegalUser: {
-          select: { id: true, fullName: true, email: true },
-        },
-        assignedOpsUser: {
-          select: { id: true, fullName: true, email: true },
-        },
-        services: {
-          include: {
-            assignedOpsUser: { select: { id: true, fullName: true, email: true } },
-          },
-        },
-        payments: true,
-        documents: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    const isAll = req.query.limit === 'all' || req.query.all === 'true';
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const defaultLimit = roleFilter ? 100 : 20;
+    const limit = isAll ? undefined : Math.max(1, parseInt(req.query.limit, 10) || defaultLimit);
+    const skip = isAll ? undefined : (page - 1) * limit;
 
-    return res.json({ deals });
+    const [total, deals] = await Promise.all([
+      prisma.deal.count({ where }),
+      prisma.deal.findMany({
+        where,
+        take: limit,
+        skip,
+        include: {
+          client: {
+            include: { directors: true },
+          },
+          bdm: {
+            select: { id: true, fullName: true, email: true },
+          },
+          coBdms: {
+            select: { id: true, fullName: true, email: true },
+          },
+          assignedAccountsUser: {
+            select: { id: true, fullName: true, email: true },
+          },
+          assignedLegalUser: {
+            select: { id: true, fullName: true, email: true },
+          },
+          assignedOpsUser: {
+            select: { id: true, fullName: true, email: true },
+          },
+          services: {
+            include: {
+              assignedOpsUser: { select: { id: true, fullName: true, email: true } },
+            },
+          },
+          payments: true,
+          documents: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    const totalPages = isAll ? 1 : Math.max(1, Math.ceil(total / (limit || 20)));
+
+    return res.json({
+      deals,
+      pagination: {
+        page: isAll ? 1 : page,
+        limit: isAll ? total : limit,
+        total,
+        totalPages,
+      },
+    });
   } catch (error) {
     console.error('Fetch deals error:', error);
     return res.status(500).json({ error: 'Failed to retrieve deals.' });
@@ -387,12 +408,18 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, re
         ? coBdmIds.filter((id) => id && typeof id === 'string' && id !== req.user.id)
         : [];
 
+      // Accounts and Legal have one dedicated member each (no assignment needed)
+      const soleAccountsUser = await tx.user.findFirst({ where: { role: 'ACCOUNTS' } });
+      const soleLegalUser = await tx.user.findFirst({ where: { role: 'LEGAL' } });
+
       const deal = await tx.deal.create({
         data: {
           dealCode,
           clientId: client.id,
           bdmId: req.user.id,
           stage: 'STAGE_04_ACCOUNTS_VERIFICATION',
+          assignedAccountsUserId: soleAccountsUser?.id || null,
+          assignedLegalUserId: soleLegalUser?.id || null,
           standardAmount: standardVal,
           totalAmount: totalVal,
           amountReceived: receivedVal,
@@ -982,8 +1009,12 @@ router.patch('/:id/assign', authenticateToken, async (req, res) => {
     const { department, userId } = req.body; // department: 'ACCOUNTS' | 'LEGAL' | 'OPERATIONS'
     const targetUserId = userId || req.user.id; // If not provided, user claims for themselves
 
-    if (!['ACCOUNTS', 'LEGAL', 'OPERATIONS'].includes(department)) {
-      return res.status(400).json({ error: 'Valid department (ACCOUNTS, LEGAL, OPERATIONS) is required.' });
+    if (department === 'ACCOUNTS' || department === 'LEGAL') {
+      return res.status(400).json({ error: `${department} has a single dedicated member and does not require assignment to other members.` });
+    }
+
+    if (department !== 'OPERATIONS') {
+      return res.status(400).json({ error: 'Assignment is only applicable for Operations department.' });
     }
 
     // Role permission check:

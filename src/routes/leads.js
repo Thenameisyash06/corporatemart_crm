@@ -219,6 +219,8 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       meetingStatus,
       leadStatus,
       search,
+      teamMember,
+      todayMeetings,
     } = req.query;
 
     const isAdmin = req.user.role === 'ADMIN';
@@ -291,6 +293,16 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       paramIndex++;
     }
 
+    if (teamMember && teamMember !== 'ALL') {
+      conditions.push(`("bdmName1" ILIKE $${paramIndex} OR "bdmName2" ILIKE $${paramIndex})`);
+      params.push(`%${teamMember.trim()}%`);
+      paramIndex++;
+    }
+
+    if (todayMeetings === 'true') {
+      conditions.push(`"meetingDate" IS NOT NULL AND "leadStatus" != 'CLOSED_LOST'`);
+    }
+
     if (search && search.trim()) {
       const q = `%${search.trim()}%`;
       conditions.push(`("companyName" ILIKE $${paramIndex} OR "directorName" ILIKE $${paramIndex} OR "mobileNo" ILIKE $${paramIndex} OR "emailId" ILIKE $${paramIndex} OR "remarks" ILIKE $${paramIndex})`);
@@ -299,14 +311,42 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const sql = `SELECT * FROM "leads" ${whereClause} ORDER BY "createdAt" DESC`;
+    
+    // 1. Fetch lightweight summary rows for 100% accurate full-dataset analytics and total count
+    const summarySql = `
+      SELECT 
+        "id", "companyName", "bdmName1", "bdmName2", "leaderName", "createdById",
+        "closerStatus", "sourcingStatus", "meetingStatus", "meetingDate", 
+        "clientStatus", "leadStatus", "dealValue", "expectedDateOfCloser",
+        "followUps", "createdAt"
+      FROM "leads" ${whereClause}
+    `;
+    const summaryRows = await prisma.$queryRawUnsafe(summarySql, ...params);
 
-    const leads = await prisma.$queryRawUnsafe(sql, ...params);
+    // 2. Fetch paginated lead slice
+    const total = summaryRows.length;
+    const isAll = req.query.limit === 'all' || req.query.all === 'true';
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = isAll ? null : Math.max(1, parseInt(req.query.limit, 10) || 25);
+    const offset = isAll ? 0 : (page - 1) * limit;
 
-    // Compute Analytics on the fetched dataset
+    let paginatedSql;
+    let paginatedParams = [...params];
+
+    if (isAll) {
+      paginatedSql = `SELECT * FROM "leads" ${whereClause} ORDER BY "createdAt" DESC`;
+    } else {
+      paginatedSql = `SELECT * FROM "leads" ${whereClause} ORDER BY "createdAt" DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+      paginatedParams.push(limit, offset);
+    }
+
+    const leads = await prisma.$queryRawUnsafe(paginatedSql, ...paginatedParams);
+    const totalPages = isAll ? 1 : Math.max(1, Math.ceil(total / limit));
+
+    // Compute Analytics on the full summary dataset
     const now = new Date();
     const analytics = {
-      totalLeads: leads.length,
+      totalLeads: summaryRows.length,
       byMeetingStatus: {},
       bySourcingStatus: {},
       byCloserStatus: {},
@@ -334,7 +374,17 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       analytics.bdmFunnel[b] = { count: 0, totalValue: 0, hotValue: 0, warmValue: 0, lostValue: 0 };
     });
 
-    leads.forEach((l) => {
+    const userFullNameClean = (req.user.fullName || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+    const targetLeaderClean = (req.query.myLeaderName || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+    const leaderKey = targetLeaderClean || userFullNameClean;
+
+    let myDirectCount = 0;
+    let myDirectFunnel = 0;
+    let myDirectHot = 0;
+    let myDirectWarm = 0;
+    const teamMembersMap = {};
+
+    summaryRows.forEach((l) => {
       // Client status
       const rawCs = (l.clientStatus || 'Warm').toLowerCase();
       if (l.clientStatus) {
@@ -403,10 +453,116 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
           analytics.upcomingEdcCount++;
         }
       }
+
+      // Personal direct leads vs leader shared team leads metrics
+      const bdm1Lower = (l.bdmName1 || '').toLowerCase().trim();
+      const bdm2Lower = (l.bdmName2 || '').toLowerCase().trim();
+      const leadLeaderLower = (l.leaderName || '').toLowerCase().trim();
+
+      const isOwnLead = isAdmin
+        ? true
+        : (
+            bdm1Lower.includes(userFullNameClean) ||
+            userFullNameClean.includes(bdm1Lower) ||
+            bdm2Lower.includes(userFullNameClean) ||
+            (l.createdById === req.user.id && (!l.bdmName1 || bdm1Lower.includes(userFullNameClean) || userFullNameClean.includes(bdm1Lower)))
+          );
+
+      if (isOwnLead) {
+        myDirectCount++;
+        myDirectFunnel += val;
+        if (rawCs === 'hot') myDirectHot += val;
+        else if (rawCs === 'warm') myDirectWarm += val;
+      }
+
+      const isSharedWithMeAsLeader = !isOwnLead &&
+        l.closerStatus === 'Lead Sharing' &&
+        leaderKey &&
+        (leadLeaderLower.includes(leaderKey) || leaderKey.includes(leadLeaderLower));
+
+      if (isSharedWithMeAsLeader) {
+        const memberName = (l.bdmName1 || 'Unknown Team Member').trim();
+        if (!teamMembersMap[memberName]) {
+          teamMembersMap[memberName] = {
+            name: memberName,
+            leads: [],
+          };
+        }
+        teamMembersMap[memberName].leads.push(l);
+      }
     });
+
+    // Compute team member pipeline cards for Leader BDM
+    const teamMembersOverview = Object.values(teamMembersMap).map((member) => {
+      const mLeads = member.leads;
+      const activeLeads = mLeads.filter((l) => l.leadStatus !== 'CLOSED_WON' && l.leadStatus !== 'CLOSED_LOST').length;
+      const hotCount = mLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'hot').length;
+      const warmCount = mLeads.filter((l) => (l.clientStatus || 'warm').toLowerCase() === 'warm').length;
+      const lostCount = mLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'lost' || l.leadStatus === 'CLOSED_LOST').length;
+      const closedCount = mLeads.filter((l) => l.leadStatus === 'CLOSED_WON' || (l.clientStatus || '').toLowerCase() === 'closed').length;
+      const meetingLeads = mLeads.filter((l) => l.meetingDate || (l.meetingStatus && l.meetingStatus !== 'None'));
+      const sortedMeetings = [...meetingLeads].sort((a, b) => {
+        const da = a.meetingDate ? new Date(a.meetingDate).getTime() : 0;
+        const db = b.meetingDate ? new Date(b.meetingDate).getTime() : 0;
+        return db - da;
+      });
+      const nextMeetingLead = sortedMeetings[0] || null;
+
+      const allFollowUps = [];
+      mLeads.forEach((l) => {
+        let fus = [];
+        if (Array.isArray(l.followUps)) fus = l.followUps;
+        else if (typeof l.followUps === 'string') {
+          try { fus = JSON.parse(l.followUps); } catch {}
+        }
+        if (Array.isArray(fus)) {
+          fus.forEach((fu) => {
+            allFollowUps.push({
+              ...fu,
+              companyName: l.companyName,
+              leadId: l.id,
+            });
+          });
+        }
+      });
+      allFollowUps.sort((a, b) => new Date(b.addedAt || b.date).getTime() - new Date(a.addedAt || a.date).getTime());
+      const lastFollowUp = allFollowUps[0] || null;
+
+      const activeLeadsWithEdc = mLeads.filter((l) => l.expectedDateOfCloser && l.leadStatus !== 'CLOSED_WON' && l.leadStatus !== 'CLOSED_LOST');
+      activeLeadsWithEdc.sort((a, b) => new Date(a.expectedDateOfCloser) - new Date(b.expectedDateOfCloser));
+      const nearestEdcLead = activeLeadsWithEdc[0] || mLeads.find((l) => l.expectedDateOfCloser) || null;
+      const totalFunnel = mLeads.reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
+
+      return {
+        name: member.name,
+        totalLeads: mLeads.length,
+        activeLeads,
+        hotCount,
+        warmCount,
+        lostCount,
+        closedCount,
+        meetingCount: meetingLeads.length,
+        nextMeetingLead,
+        lastFollowUp,
+        nearestEdcLead,
+        totalFunnel,
+      };
+    });
+
+    analytics.myDirectFunnel = myDirectFunnel;
+    analytics.myDirectHot = myDirectHot;
+    analytics.myDirectWarm = myDirectWarm;
+    analytics.myDirectCount = myDirectCount;
+    analytics.teamMembersOverview = teamMembersOverview;
 
     return res.json({
       leads,
+      pagination: {
+        page: isAll ? 1 : page,
+        limit: isAll ? total : limit,
+        total,
+        totalPages,
+      },
       analytics,
       userRole: req.user.role,
       userName: req.user.fullName,

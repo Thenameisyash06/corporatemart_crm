@@ -24,7 +24,16 @@ export const STAGE_CONFIG = {
   CLOSED: { label: 'Closed (Success)', color: 'bg-slate-100 text-slate-700 border-slate-200 font-medium' },
 };
 
-export default function DealsTable({ deals, onSelectDeal, onCollectBalance, currentUser, loading }) {
+export default function DealsTable({
+  deals,
+  onSelectDeal,
+  onCollectBalance,
+  currentUser,
+  loading,
+  pagination,
+  onPageChange,
+  onLimitChange,
+}) {
   if (loading) {
     return (
       <div className="bg-white border border-slate-200 rounded-xl p-12 text-center text-slate-500 shadow-sm">
@@ -208,6 +217,83 @@ export default function DealsTable({ deals, onSelectDeal, onCollectBalance, curr
           </tbody>
         </table>
       </div>
+
+      {/* Pagination Controls */}
+      {pagination && pagination.total > 0 && (
+        <div className="bg-white border-t border-slate-200 px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-600">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span>
+              Showing{' '}
+              <strong className="text-slate-900">
+                {(pagination.page - 1) * pagination.limit + 1}
+              </strong>{' '}
+              to{' '}
+              <strong className="text-slate-900">
+                {Math.min(pagination.page * pagination.limit, pagination.total)}
+              </strong>{' '}
+              of <strong className="text-slate-900">{pagination.total}</strong> deals
+            </span>
+            <span className="text-slate-300">|</span>
+            <div className="flex items-center gap-1.5">
+              <label htmlFor="deals-limit-select" className="text-slate-500">Per page:</label>
+              <select
+                id="deals-limit-select"
+                value={pagination.limit}
+                onChange={(e) => onLimitChange && onLimitChange(Number(e.target.value))}
+                className="border border-slate-200 rounded px-2 py-1 bg-slate-50 font-medium text-slate-800 focus:outline-none focus:border-slate-800"
+              >
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => onPageChange && onPageChange(pagination.page - 1)}
+              disabled={pagination.page <= 1}
+              className="px-2.5 py-1.5 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium transition"
+            >
+              Previous
+            </button>
+
+            {Array.from({ length: pagination.totalPages }, (_, i) => i + 1)
+              .filter((p) => {
+                return p === 1 || p === pagination.totalPages || Math.abs(p - pagination.page) <= 1;
+              })
+              .map((p, idx, arr) => {
+                const prev = arr[idx - 1];
+                return (
+                  <React.Fragment key={p}>
+                    {prev && p - prev > 1 && (
+                      <span className="px-1 text-slate-400">...</span>
+                    )}
+                    <button
+                      onClick={() => onPageChange && onPageChange(p)}
+                      className={`w-7 h-7 rounded-lg font-semibold transition ${
+                        p === pagination.page
+                          ? 'bg-slate-900 text-white shadow-xs'
+                          : 'text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  </React.Fragment>
+                );
+              })}
+
+            <button
+              onClick={() => onPageChange && onPageChange(pagination.page + 1)}
+              disabled={pagination.page >= pagination.totalPages}
+              className="px-2.5 py-1.5 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium transition"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
