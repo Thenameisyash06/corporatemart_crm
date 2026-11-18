@@ -484,51 +484,15 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       .reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
   }, [ownDirectLeads]);
 
-  // Hot, Warm and Active Leads counts (Active = Sum of Hot + Warm clients)
-  const hotClientsCount = useMemo(() => {
-    return isAdmin
-      ? (analytics?.byClientStatus?.Hot ?? 0)
-      : ownDirectLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'hot').length;
-  }, [isAdmin, analytics, ownDirectLeads]);
-
-  const warmClientsCount = useMemo(() => {
-    return isAdmin
-      ? (analytics?.byClientStatus?.Warm ?? 0)
-      : ownDirectLeads.filter((l) => (l.clientStatus || 'warm').toLowerCase() === 'warm').length;
-  }, [isAdmin, analytics, ownDirectLeads]);
-
-  const activeLeadsCount = hotClientsCount + warmClientsCount;
-
-  // Compute team members overview cards (strictly team members under this leader, leader card excluded) - ONLY FOR LEADER
+  // Compute team members overview cards (strictly team members, leader card removed)
   const teamMembersCards = useMemo(() => {
-    // Only Team Leaders can see this section (not admin, not regular members)
-    if (!isLeader) return [];
+    if (isAdmin) return [];
 
-    const leaderKey = (matchedLeaderName || loggedInBdmName || '').toLowerCase().trim();
     const membersMap = {};
 
-    // Group leads belonging to team members under this leader
-    const sourceLeads = (leads && leads.length > 0)
-      ? leads.filter((l) => {
-          const ldr = (l.leaderName || '').toLowerCase().trim();
-          const bdm1 = (l.bdmName1 || '').toLowerCase().trim();
-          const isUnderLeader = ldr && (ldr.includes(leaderKey) || leaderKey.includes(ldr));
-          const isLeaderSelf = bdm1 && (bdm1.includes(leaderKey) || leaderKey.includes(bdm1));
-          return isUnderLeader && !isLeaderSelf;
-        })
-      : (sharedTeamLeads || []);
-
-    sourceLeads.forEach((lead) => {
-      let memberName = (lead.bdmName1 || '').trim();
-      if (!memberName || memberName.toLowerCase() === leaderKey || memberName === '-- None (Single BDM) --') {
-        memberName = (lead.bdmName2 || '').trim();
-      }
-      if (!memberName || memberName.toLowerCase() === leaderKey || memberName === '-- None (Single BDM) --') return;
-
-      // Exclude other leaders
-      const isOtherLeader = LMS_LEADERS.some((l) => l.toLowerCase().trim() === memberName.toLowerCase().trim());
-      if (isOtherLeader) return;
-
+    // 1. Group shared team leads
+    (sharedTeamLeads || []).forEach((lead) => {
+      const memberName = (lead.bdmName1 || 'Unknown Team Member').trim();
       if (!membersMap[memberName]) {
         membersMap[memberName] = {
           name: memberName,
@@ -537,6 +501,24 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       }
       membersMap[memberName].leads.push(lead);
     });
+
+    // 2. Include own direct leads ONLY if logged-in user is a team member (not leader)
+    const myName = (loggedInBdmName || 'You').trim();
+    const isSelfLeader = isLeader || LMS_LEADERS.some(
+      (ldr) => ldr.toLowerCase().trim() === myName.toLowerCase().trim()
+    );
+
+    if (myName && !isSelfLeader) {
+      if (!membersMap[myName]) {
+        membersMap[myName] = {
+          name: myName,
+          leads: [],
+        };
+      }
+      if (ownDirectLeads && ownDirectLeads.length > 0) {
+        membersMap[myName].leads.push(...ownDirectLeads);
+      }
+    }
 
     const cards = Object.values(membersMap).map((member) => {
       const mLeads = member.leads;
@@ -603,13 +585,17 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       activeLeadsWithEdc.sort((a, b) => new Date(a.expectedDateOfCloser) - new Date(b.expectedDateOfCloser));
       const nearestEdcLead = activeLeadsWithEdc[0] || mLeads.find((l) => l.expectedDateOfCloser) || null;
 
-      // Total Deal Funnel value for this member's leads
+      // Total Deal Funnel value for this member's shared leads
       const totalFunnel = mLeads.reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
+
+      const isLeaderMember = LMS_LEADERS.some(
+        (ldr) => ldr.toLowerCase().trim() === member.name.toLowerCase().trim()
+      );
 
       return {
         name: member.name,
-        isLeaderMember: false,
-        isSelf: false,
+        isLeaderMember,
+        isSelf: member.name.toLowerCase().trim() === myName.toLowerCase().trim(),
         totalLeads: mLeads.length,
         activeLeads,
         hotCount,
@@ -624,8 +610,9 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       };
     });
 
-    return cards;
-  }, [isLeader, matchedLeaderName, loggedInBdmName, leads, sharedTeamLeads]);
+    // Remove any leader card from team members cards
+    return cards.filter((c) => !c.isLeaderMember);
+  }, [isAdmin, isLeader, sharedTeamLeads, ownDirectLeads, loggedInBdmName]);
 
   // Leads actually displayed in the table below (supports filtering to a selected team member)
   const displayedLeads = useMemo(() => {
@@ -1103,7 +1090,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
               : 'bg-rose-50 border-rose-200 text-rose-800'
           }`}
         >
-          <span>{typeof feedback.message === 'object' ? feedback.message?.message || JSON.stringify(feedback.message) : String(feedback.message || '')}</span>
+          <span>{feedback.message}</span>
           <button onClick={() => setFeedback(null)} className="font-bold ml-2">✕</button>
         </div>
       )}
@@ -1115,11 +1102,11 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
               <TrendingUp className="w-3.5 h-3.5 text-indigo-400" />
-              {isAdmin ? 'Total Funnel' : 'Funnel'}
+              {isAdmin ? 'Total Pipeline Deal Funnel' : 'My Personal Deal Funnel'}
             </span>
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-200 border border-indigo-400/30">
-                {activeLeadsCount} Leads
+                {isAdmin ? (analytics?.totalLeads ?? leads.length) : ownDirectLeads.length} Leads
               </span>
               {!isAdmin && sharedTeamLeads.length > 0 && (
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-200 border border-purple-400/30" title="Team member leads shared with you for collaboration">
@@ -1148,13 +1135,17 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
           </div>
         </div>
 
-        {/* Active Leads (Sum of Hot + Warm Clients) */}
+        {/* Total Leads */}
         <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
           <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-            Active Leads
+            {isAdmin ? 'Total Leads' : 'My Personal Leads'}
           </span>
           <div className="text-xl font-extrabold text-slate-900 mt-0.5">
-            {activeLeadsCount}
+            {isAdmin ? (analytics?.totalLeads ?? leads.length) : ownDirectLeads.length}
+          </div>
+          <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1 truncate">
+            <TrendingUp className="w-3 h-3 text-emerald-600" />
+            {sharedTeamLeads.length > 0 ? `+${sharedTeamLeads.length} team shared` : 'Active Leads'}
           </div>
         </div>
 
@@ -1164,7 +1155,9 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
             <span>🔥</span> Hot Clients
           </span>
           <div className="text-xl font-extrabold text-rose-700 mt-0.5">
-            {hotClientsCount}
+            {isAdmin
+              ? (analytics?.byClientStatus?.Hot ?? 0)
+              : ownDirectLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'hot').length}
           </div>
           <div className="text-[11px] text-rose-600 mt-1 font-semibold truncate">
             Val: ₹{Number(isAdmin ? (analytics?.hotFunnelValue || 0) : bdmHotFunnel).toLocaleString('en-IN')}
@@ -1177,7 +1170,9 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
             <span>☀️</span> Warm Clients
           </span>
           <div className="text-xl font-extrabold text-amber-700 mt-0.5">
-            {warmClientsCount}
+            {isAdmin
+              ? (analytics?.byClientStatus?.Warm ?? 0)
+              : ownDirectLeads.filter((l) => (l.clientStatus || 'warm').toLowerCase() === 'warm').length}
           </div>
           <div className="text-[11px] text-amber-600 mt-1 font-semibold truncate">
             Val: ₹{Number(isAdmin ? (analytics?.warmFunnelValue || 0) : bdmWarmFunnel).toLocaleString('en-IN')}
@@ -1890,8 +1885,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         </button>
       </div>
 
-      {/* 4B. TEAM MEMBERS PIPELINE & PERFORMANCE CARDS - STRICTLY FOR TEAM LEADERS ONLY */}
-      {isLeader && (
+      {/* 4B. TEAM MEMBERS PIPELINE & PERFORMANCE CARDS */}
+      {!isAdmin && (
         <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3.5">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
             <div>
@@ -1905,7 +1900,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Real-time tracking of active leads, client status distribution, upcoming meetings, last follow-ups, and EDC targets for your team members
+                Real-time tracking of active leads, client status distribution, upcoming meetings, last follow-ups, and EDC targets for team members
               </p>
             </div>
 

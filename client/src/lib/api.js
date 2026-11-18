@@ -22,22 +22,6 @@ api.interceptors.response.use(
       localStorage.removeItem('cm_crm_user');
       window.dispatchEvent(new Event('auth_changed'));
     }
-
-    // Normalize error data so error.response.data.error is always a string and never crashes React rendering
-    if (error.response && error.response.data) {
-      if (typeof error.response.data.error === 'object' && error.response.data.error !== null) {
-        error.response.data.error =
-          error.response.data.error.message ||
-          error.response.data.error.code ||
-          JSON.stringify(error.response.data.error);
-      } else if (!error.response.data.error && error.response.data.message) {
-        error.response.data.error =
-          typeof error.response.data.message === 'object'
-            ? JSON.stringify(error.response.data.message)
-            : error.response.data.message;
-      }
-    }
-
     return Promise.reject(error);
   }
 );
