@@ -174,14 +174,15 @@ router.get('/', authenticateToken, async (req, res) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    // In CRM: if BDM (leader or regular team member), display ONLY their personal deals
-    if (req.user.role === 'BDM') {
-      deals = deals.filter(
-        (d) => d.bdmId === req.user.id || (d.coBdms && d.coBdms.some((b) => b.id === req.user.id))
-      );
-    }
-
-    return res.json({ deals });
+    return res.json({
+      deals,
+      pagination: {
+        page: isAll ? 1 : page,
+        limit: isAll ? total : limit,
+        total,
+        totalPages,
+      },
+    });
   } catch (error) {
     console.error('Fetch deals error:', error);
     return res.status(500).json({ error: error.message || 'Failed to retrieve deals.' });
@@ -399,12 +400,18 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, re
         ? coBdmIds.filter((id) => id && typeof id === 'string' && id !== req.user.id)
         : [];
 
+      // Accounts and Legal have one dedicated member each (no assignment needed)
+      const soleAccountsUser = await tx.user.findFirst({ where: { role: 'ACCOUNTS' } });
+      const soleLegalUser = await tx.user.findFirst({ where: { role: 'LEGAL' } });
+
       const deal = await tx.deal.create({
         data: {
           dealCode,
           clientId: client.id,
           bdmId: req.user.id,
           stage: 'STAGE_04_ACCOUNTS_VERIFICATION',
+          assignedAccountsUserId: soleAccountsUser?.id || null,
+          assignedLegalUserId: soleLegalUser?.id || null,
           standardAmount: standardVal,
           totalAmount: totalVal,
           amountReceived: receivedVal,
@@ -994,8 +1001,12 @@ router.patch('/:id/assign', authenticateToken, async (req, res) => {
     const { department, userId } = req.body; // department: 'ACCOUNTS' | 'LEGAL' | 'OPERATIONS'
     const targetUserId = userId || req.user.id; // If not provided, user claims for themselves
 
-    if (!['ACCOUNTS', 'LEGAL', 'OPERATIONS'].includes(department)) {
-      return res.status(400).json({ error: 'Valid department (ACCOUNTS, LEGAL, OPERATIONS) is required.' });
+    if (department === 'ACCOUNTS' || department === 'LEGAL') {
+      return res.status(400).json({ error: `${department} has a single dedicated member and does not require assignment to other members.` });
+    }
+
+    if (department !== 'OPERATIONS') {
+      return res.status(400).json({ error: 'Assignment is only applicable for Operations department.' });
     }
 
     // Role permission check:

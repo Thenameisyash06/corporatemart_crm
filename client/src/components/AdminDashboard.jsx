@@ -1201,7 +1201,7 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, onConve
                     <th className="py-2 px-3">Deal Code</th>
                     <th className="py-2 px-3">Client Company</th>
                     <th className="py-2 px-3">BDM</th>
-                    <th className="py-2 px-3">Assigned Legal Exec</th>
+                    <th className="py-2 px-3">Legal Counsel</th>
                     <th className="py-2 px-3 text-right">Amount</th>
                     <th className="py-2 px-3 text-center">Action</th>
                   </tr>
@@ -1214,7 +1214,7 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, onConve
                         <td className="py-2.5 px-3 font-mono font-bold text-slate-900">{deal.dealCode}</td>
                         <td className="py-2.5 px-3 font-semibold text-slate-800">{deal.client?.companyName}</td>
                         <td className="py-2.5 px-3 text-slate-600">{deal.bdm?.fullName}</td>
-                        <td className="py-2.5 px-3 text-slate-600">{deal.assignedLegalUser?.fullName || 'Unassigned'}</td>
+                        <td className="py-2.5 px-3 text-slate-600">{deal.assignedLegalUser?.fullName || 'Adv. Ananya Roy (Legal)'}</td>
                         <td className="py-2.5 px-3 text-right font-bold text-slate-900">
                           ₹{Number(deal.totalAmount || 0).toLocaleString('en-IN')}
                         </td>

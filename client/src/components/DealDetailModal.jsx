@@ -541,16 +541,16 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
                 />
               </div>
 
-              {/* Departmental Executive Assignments */}
+              {/* Departmental Workflow & Desks */}
               <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-3.5">
                 <div className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-2">
-                  <UserCheck className="w-4 h-4 text-slate-500" /> Departmental Executive Assignments
+                  <UserCheck className="w-4 h-4 text-slate-500" /> Departmental Workflow & Desks
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
                   <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
                     <span className="text-xs text-slate-500 font-medium block">Accounts Desk</span>
                     <span className="font-bold text-sm text-slate-900 block mt-1">
-                      {deal.assignedAccountsUser ? deal.assignedAccountsUser.fullName : 'Unassigned (Open in Pool)'}
+                      {deal.assignedAccountsUser?.fullName || 'Pooja Verma (Accounts)'}
                     </span>
                     <span className="text-xs text-slate-600 font-medium mt-1.5 block">
                       {deal.isAccountsVerified ? '✓ Verified by Accounts' : 'Pending Verification'}
@@ -560,7 +560,7 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
                   <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
                     <span className="text-xs text-slate-500 font-medium block">Legal Scrutiny</span>
                     <span className="font-bold text-sm text-slate-900 block mt-1">
-                      {deal.assignedLegalUser ? deal.assignedLegalUser.fullName : 'Unassigned (Open in Pool)'}
+                      {deal.assignedLegalUser?.fullName || 'Adv. Ananya Roy (Legal)'}
                     </span>
                     <span className="text-xs text-slate-600 font-medium mt-1.5 block">
                       {deal.isLegalVerified ? '✓ Scrutiny Passed' : 'Pending Scrutiny'}
