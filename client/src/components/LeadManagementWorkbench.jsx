@@ -3381,6 +3381,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                   const currentClientStatus = lead.clientStatus || 'Warm';
                   const leadMonthBadge = getLeadMonthBadge(lead);
                   const isOverdue = isLeadFollowUpExceeded(lead);
+                  const edcBadge = getEdcBadge(lead.expectedDateOfCloser, lead.leadStatus);
+                  const leadFollowUps = getFollowUpsList(lead);
 
                   return (
                     <React.Fragment key={lead.id}>
