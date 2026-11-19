@@ -711,6 +711,199 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
     analytics.myDirectCount = myDirectCount;
     analytics.teamMembersOverview = teamMembersOverview;
 
+    // Compute comprehensive BDM & Leader performance cards for Admin and Executive Tracking
+    const LMS_LEADERS_LIST = [
+      'Jayesh Rohit',
+      'Neel Boda',
+      'Shashank Singhal',
+      'Yash Rathod',
+      'Vishishtta Dixit',
+      'Management',
+    ];
+
+    const LMS_BDMS_LIST = [
+      'Sarika Jayesh',
+      'Jayesh Rohit',
+      'Neel Boda',
+      'Shashank Singhal',
+      'Krishna Parmar',
+      'Akash Chauhan',
+      'Bhavin Manghani',
+      'Mauli Koshti',
+      'Vishishta Dixit',
+      'Mitali Shah',
+      'Akash Rawal',
+      'Darshak Fichadiya',
+      'Manish Chauhan',
+      'Vairagi Shah',
+      'Pandya Parimal',
+      'Rathod Mehul',
+      'Neeraj Trivedi',
+      'Parikh Kirtikumar Bhogilal',
+      'Panchal Kunal',
+      'Yash Rathod',
+      'Pankaj Solanki',
+      'Rahul Sharma',
+    ];
+
+    const allBdmMap = {};
+
+    // 1. Initialize all known leaders and BDMs
+    LMS_LEADERS_LIST.forEach((ldr) => {
+      if (!allBdmMap[ldr]) {
+        allBdmMap[ldr] = { name: ldr, isLeader: true, leads: [], leaderName: null };
+      }
+    });
+
+    LMS_BDMS_LIST.forEach((bdm) => {
+      const isLdr = LMS_LEADERS_LIST.some((l) => l.toLowerCase() === bdm.toLowerCase());
+      if (!allBdmMap[bdm]) {
+        allBdmMap[bdm] = { name: bdm, isLeader: isLdr, leads: [], leaderName: null };
+      }
+    });
+
+    // 2. Distribute activeSummaryRows leads to BDMs and Leaders
+    activeSummaryRows.forEach((l) => {
+      const bdm1 = (l.bdmName1 || '').trim();
+      const bdm2 = (l.bdmName2 || '').trim();
+      const ldr = (l.leaderName || '').trim();
+
+      const namesToAssign = new Set();
+      if (bdm1 && bdm1 !== '-- None (Single BDM) --') namesToAssign.add(bdm1);
+      if (bdm2 && bdm2 !== '-- None (Single BDM) --' && bdm2.toLowerCase() !== bdm1.toLowerCase()) namesToAssign.add(bdm2);
+
+      namesToAssign.forEach((name) => {
+        const isLdr = LMS_LEADERS_LIST.some((l) => l.toLowerCase() === name.toLowerCase());
+        if (!allBdmMap[name]) {
+          allBdmMap[name] = { name, isLeader: isLdr, leads: [], leaderName: ldr || null };
+        }
+        allBdmMap[name].leads.push(l);
+        if (ldr && !allBdmMap[name].leaderName && !allBdmMap[name].isLeader) {
+          allBdmMap[name].leaderName = ldr;
+        }
+      });
+
+      // If leader is also in allBdmMap and not already having this lead directly
+      if (ldr && allBdmMap[ldr] && !namesToAssign.has(ldr)) {
+        if (!allBdmMap[ldr].teamLeads) allBdmMap[ldr].teamLeads = [];
+        allBdmMap[ldr].teamLeads.push(l);
+      }
+    });
+
+    // 3. Transform into rich card objects
+    const todayStr = new Date().toISOString().split('T')[0];
+    const allBdmPerformance = Object.values(allBdmMap).map((entry) => {
+      const mLeads = entry.leads.length > 0 ? entry.leads : (entry.teamLeads || []);
+      const activeLeads = mLeads.filter((l) => l.leadStatus !== 'CLOSED_WON' && l.leadStatus !== 'CLOSED_LOST').length;
+      const hotCount = mLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'hot').length;
+      const warmCount = mLeads.filter((l) => (l.clientStatus || 'warm').toLowerCase() === 'warm').length;
+      const lostCount = mLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'lost' || l.leadStatus === 'CLOSED_LOST').length;
+      const closedCount = mLeads.filter((l) => l.leadStatus === 'CLOSED_WON' || (l.clientStatus || '').toLowerCase() === 'closed').length;
+
+      const hotValue = mLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'hot')
+        .reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
+      const warmValue = mLeads.filter((l) => (l.clientStatus || 'warm').toLowerCase() === 'warm')
+        .reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
+      const closedValue = mLeads.filter((l) => l.leadStatus === 'CLOSED_WON' || (l.clientStatus || '').toLowerCase() === 'closed')
+        .reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
+      const totalFunnel = mLeads.filter((l) => l.leadStatus !== 'CLOSED_WON' && l.leadStatus !== 'CLOSED_LOST')
+        .reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
+
+      const meetingLeads = mLeads.filter((l) => l.meetingDate || (l.meetingStatus && l.meetingStatus !== 'None'));
+      const sortedMeetings = [...meetingLeads].sort((a, b) => {
+        const da = a.meetingDate ? new Date(a.meetingDate).getTime() : 0;
+        const db = b.meetingDate ? new Date(b.meetingDate).getTime() : 0;
+        return db - da;
+      });
+      const nextMeetingLead = sortedMeetings[0] || null;
+
+      const allFollowUps = [];
+      mLeads.forEach((l) => {
+        let fus = [];
+        if (Array.isArray(l.followUps)) fus = l.followUps;
+        else if (typeof l.followUps === 'string') {
+          try { fus = JSON.parse(l.followUps); } catch {}
+        }
+        if (Array.isArray(fus)) {
+          fus.forEach((fu) => {
+            allFollowUps.push({
+              ...fu,
+              companyName: l.companyName,
+              leadId: l.id,
+            });
+          });
+        }
+      });
+      allFollowUps.sort((a, b) => new Date(b.addedAt || b.date).getTime() - new Date(a.addedAt || a.date).getTime());
+      const lastFollowUp = allFollowUps[0] || null;
+
+      const activeLeadsWithEdc = mLeads.filter((l) => l.expectedDateOfCloser && l.leadStatus !== 'CLOSED_WON' && l.leadStatus !== 'CLOSED_LOST');
+      activeLeadsWithEdc.sort((a, b) => new Date(a.expectedDateOfCloser) - new Date(b.expectedDateOfCloser));
+      const nearestEdcLead = activeLeadsWithEdc[0] || mLeads.find((l) => l.expectedDateOfCloser) || null;
+
+      const pendingFollowupsCount = mLeads.filter((l) => {
+        if (l.leadStatus === 'CLOSED_WON' || l.leadStatus === 'CLOSED_LOST') return false;
+        let fus = [];
+        if (Array.isArray(l.followUps)) fus = l.followUps;
+        else if (typeof l.followUps === 'string') {
+          try { fus = JSON.parse(l.followUps); } catch {}
+        }
+        if (!Array.isArray(fus) || fus.length === 0) return false;
+        const latest = [...fus].sort((a, b) => new Date(b.addedAt || b.date).getTime() - new Date(a.addedAt || a.date).getTime())[0];
+        if (!latest || !latest.date) return false;
+        const fuDateStr = latest.date.includes('T') ? latest.date.split('T')[0] : latest.date;
+        return fuDateStr < todayStr;
+      }).length;
+
+      const modalLeads = mLeads.map((l) => ({
+        id: l.id,
+        companyName: l.companyName,
+        directorName: l.directorName,
+        mobileNo: l.mobileNo,
+        closerStatus: l.closerStatus,
+        sourcingStatus: l.sourcingStatus,
+        meetingStatus: l.meetingStatus,
+        meetingDate: l.meetingDate,
+        clientStatus: l.clientStatus,
+        leadStatus: l.leadStatus,
+        dealValue: l.dealValue,
+        expectedDateOfCloser: l.expectedDateOfCloser,
+        nextFollowUpDate: l.nextFollowUpDate,
+        followUps: l.followUps,
+        createdAt: l.createdAt,
+      }));
+
+      return {
+        name: entry.name,
+        isLeader: Boolean(entry.isLeader),
+        leaderName: entry.leaderName,
+        totalLeads: mLeads.length,
+        activeLeads,
+        hotCount,
+        hotValue,
+        warmCount,
+        warmValue,
+        lostCount,
+        closedCount,
+        closedValue,
+        meetingCount: meetingLeads.length,
+        nextMeetingLead,
+        lastFollowUp,
+        nearestEdcLead,
+        totalFunnel,
+        pendingFollowupsCount,
+        leads: modalLeads,
+      };
+    });
+
+    allBdmPerformance.sort((a, b) => {
+      if (a.isLeader && !b.isLeader) return -1;
+      if (!a.isLeader && b.isLeader) return 1;
+      return (b.totalFunnel || 0) - (a.totalFunnel || 0) || (b.totalLeads || 0) - (a.totalLeads || 0);
+    });
+
+    analytics.allBdmPerformance = allBdmPerformance;
+
     return res.json({
       leads,
       pagination: {
