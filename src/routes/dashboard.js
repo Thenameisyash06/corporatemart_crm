@@ -21,6 +21,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
       closedDeals,
       pendingBalanceVerifications,
       financialAggregates,
+      verifiedPaymentsAgg,
     ] = await Promise.all([
       prisma.deal.count(),
       prisma.deal.count({ where: { stage: 'STAGE_04_ACCOUNTS_VERIFICATION' } }),
@@ -39,7 +40,15 @@ router.get('/stats', authenticateToken, async (req, res) => {
           pendingAmount: true,
         },
       }),
+      prisma.payment.aggregate({
+        where: { status: 'VERIFIED' },
+        _sum: { amount: true },
+      }),
     ]);
+
+    const totalCollected = Number(verifiedPaymentsAgg._sum.amount || 0);
+    const totalDealValue = Number(financialAggregates._sum.totalAmount || 0);
+    const totalPending = Math.max(0, totalDealValue - totalCollected);
 
     return res.json({
       counts: {
@@ -56,15 +65,31 @@ router.get('/stats', authenticateToken, async (req, res) => {
         pendingBalanceVerifications,
       },
       financials: {
-        totalDealValue: financialAggregates._sum.totalAmount || 0,
-        totalCollected: financialAggregates._sum.amountReceived || 0,
-        totalPending: financialAggregates._sum.pendingAmount || 0,
+        totalDealValue,
+        totalCollected,
+        totalPending,
       },
       bdmMetrics: await (async () => {
         if (req.user.role === 'BDM') {
           const bdmUser = await prisma.user.findUnique({
             where: { id: req.user.id },
             select: { id: true, fullName: true, salesTarget: true },
+          });
+
+          // Only accounts-verified payments (initial payment after accounts verify and balance payments after accounts verify) count towards achievement
+          const bdmVerifiedPaymentsAgg = await prisma.payment.aggregate({
+            where: {
+              status: 'VERIFIED',
+              deal: {
+                OR: [
+                  { bdmId: req.user.id },
+                  { coBdms: { some: { id: req.user.id } } },
+                ],
+              },
+            },
+            _sum: {
+              amount: true,
+            },
           });
 
           const bdmDealsAgg = await prisma.deal.aggregate({
@@ -85,8 +110,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
           });
 
           const target = parseFloat(bdmUser?.salesTarget) || 500000;
-          const achievement = parseFloat(bdmDealsAgg._sum.totalAmount) || 0;
-          const received = parseFloat(bdmDealsAgg._sum.amountReceived) || 0;
+          const achievement = parseFloat(bdmVerifiedPaymentsAgg._sum.amount) || 0;
           const pending = Math.max(0, target - achievement);
           const progressPercent = target > 0 ? Math.min(100, Math.round((achievement / target) * 100)) : 0;
 
@@ -94,7 +118,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
             target,
             achievement,
             pending,
-            received,
+            received: achievement,
             progressPercent,
             totalDeals: bdmDealsAgg._count.id || 0,
           };
@@ -133,6 +157,7 @@ router.get('/admin-overview', authenticateToken, requireRoles('ADMIN'), async (r
       rmUsers,
       allDealsForStage,
       recentDeals,
+      verifiedPaymentsAgg,
     ] = await Promise.all([
       prisma.deal.count(),
       prisma.client.count(),
@@ -166,6 +191,15 @@ router.get('/admin-overview', authenticateToken, requireRoles('ADMIN'), async (r
               totalAmount: true,
               amountReceived: true,
               pendingAmount: true,
+              isAccountsVerified: true,
+              payments: {
+                select: {
+                  id: true,
+                  amount: true,
+                  status: true,
+                  trancheNumber: true,
+                },
+              },
               createdAt: true,
             },
           },
@@ -283,16 +317,29 @@ router.get('/admin-overview', authenticateToken, requireRoles('ADMIN'), async (r
           bdm: { select: { fullName: true } },
         },
       }),
+      prisma.payment.aggregate({
+        where: { status: 'VERIFIED' },
+        _sum: { amount: true },
+      }),
     ]);
 
     // 1. Format BDM Performance
     const bdmPerformance = bdms.map((b) => {
       const deals = b.dealsCreated || [];
-      const totalRevenue = deals.reduce((sum, d) => sum + Number(d.totalAmount || 0), 0);
-      const totalCollected = deals.reduce((sum, d) => sum + Number(d.amountReceived || 0), 0);
-      const totalPending = deals.reduce((sum, d) => sum + Number(d.pendingAmount || 0), 0);
+      // Achievement / Collected: only payments verified by Accounts (initial tranche after accounts verify and balance payments after accounts verify)
+      const totalCollected = deals.reduce((sum, d) => {
+        const verifiedPayments = (d.payments || [])
+          .filter((p) => p.status === 'VERIFIED')
+          .reduce((pSum, p) => pSum + Number(p.amount || 0), 0);
+        return sum + verifiedPayments;
+      }, 0);
+
+      // Booked Revenue: only deals verified by accounts (or past accounts verification)
+      const verifiedDeals = deals.filter((d) => d.isAccountsVerified || !['STAGE_04_ACCOUNTS_VERIFICATION', 'STAGE_04_ACCOUNTS_REJECTED'].includes(d.stage));
+      const totalRevenue = verifiedDeals.reduce((sum, d) => sum + Number(d.totalAmount || 0), 0);
+      const totalPending = Math.max(0, totalRevenue - totalCollected);
       const target = Number(b.salesTarget || 500000);
-      const achievementPercent = target > 0 ? Math.round((totalRevenue / target) * 100) : 0;
+      const achievementPercent = target > 0 ? Math.round((totalCollected / target) * 100) : 0;
       const closedDeals = deals.filter((d) => d.stage === 'CLOSED');
       const activeDeals = deals.filter((d) => d.stage !== 'CLOSED');
 
@@ -309,7 +356,7 @@ router.get('/admin-overview', authenticateToken, requireRoles('ADMIN'), async (r
         achievementPercent,
         closedDealsCount: closedDeals.length,
         activeDealsCount: activeDeals.length,
-        avgDealSize: deals.length > 0 ? Math.round(totalRevenue / deals.length) : 0,
+        avgDealSize: verifiedDeals.length > 0 ? Math.round(totalRevenue / verifiedDeals.length) : 0,
         isActive: b.isActive,
       };
     });
@@ -389,8 +436,8 @@ router.get('/admin-overview', authenticateToken, requireRoles('ADMIN'), async (r
     });
 
     const totalRevenue = Number(dealAggregates._sum.totalAmount || 0);
-    const totalCollected = Number(dealAggregates._sum.amountReceived || 0);
-    const totalPending = Number(dealAggregates._sum.pendingAmount || 0);
+    const totalCollected = Number(verifiedPaymentsAgg._sum.amount || 0);
+    const totalPending = Math.max(0, totalRevenue - totalCollected);
 
     return res.json({
       summary: {
