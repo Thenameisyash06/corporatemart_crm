@@ -125,21 +125,21 @@ export default function DashboardStats({
                   <Target className="w-3.5 h-3.5 text-slate-600" />
                   Target
                 </div>
-                {currentUser?.id && !isEditingTarget && (
+                {currentUser?.role === 'ADMIN' && !isEditingTarget && (
                   <button
                     onClick={() => {
                       setTargetInput(String(bdmMetrics.target));
                       setIsEditingTarget(true);
                     }}
                     className="p-1 text-slate-400 hover:text-slate-700 rounded-md transition-colors"
-                    title="Edit Sales Target"
+                    title="Edit Sales Target (Admin Only)"
                   >
                     <Edit2 className="w-3 h-3" />
                   </button>
                 )}
               </div>
 
-              {isEditingTarget ? (
+              {currentUser?.role === 'ADMIN' && isEditingTarget ? (
                 <div className="flex items-center gap-1.5 mt-2">
                   <span className="text-xs font-bold text-slate-500">₹</span>
                   <input

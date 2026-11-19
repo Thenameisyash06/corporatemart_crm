@@ -68,9 +68,9 @@ router.patch('/:id/sales-target', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Valid positive sales target amount is required.' });
     }
 
-    // Permission check: Admin or the user themselves
-    if (req.user.role !== 'ADMIN' && req.user.id !== id) {
-      return res.status(403).json({ error: 'Not authorized to modify this user target.' });
+    // Permission check: ONLY Admin can modify sales targets (BDM leaders & members cannot edit their target)
+    if (req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'Only administrators are authorized to modify sales targets.' });
     }
 
     const updated = await prisma.user.update({

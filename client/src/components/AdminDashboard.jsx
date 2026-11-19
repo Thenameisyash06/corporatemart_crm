@@ -817,10 +817,12 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, onConve
                             <div className="font-bold text-slate-900">{deal.client?.companyName}</div>
                             <div className="text-[11px] text-slate-500">{deal.client?.clientName} • {deal.client?.phone}</div>
                           </td>
-                          <td className="py-3 px-4">
-                            <span className="font-semibold text-slate-900">{deal.bdm?.fullName}</span>
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            <span className="font-semibold text-slate-900 text-xs block">
+                              {(deal.bdm?.fullName || 'N/A').replace(/\s*\(BDM\)/gi, '')}
+                            </span>
                             {deal.coBdms?.length > 0 && (
-                              <div className="text-[10px] text-slate-500">
+                              <div className="text-[10px] text-slate-500 truncate max-w-[150px]" title={deal.coBdms.map((cb) => cb.fullName).join(', ')}>
                                 + {deal.coBdms.map((cb) => cb.fullName).join(', ')}
                               </div>
                             )}
