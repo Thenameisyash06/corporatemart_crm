@@ -218,10 +218,19 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     });
   };
 
+  // Helper to get local date string YYYY-MM-DD
+  const getTodayDateStr = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   // Follow-up status recording modal state
   const [followUpModalLead, setFollowUpModalLead] = useState(null);
   const [followUpForm, setFollowUpForm] = useState({
-    date: new Date().toISOString().split('T')[0],
+    date: getTodayDateStr(),
     status: 'Hot',
     remarks: '',
   });
@@ -287,6 +296,11 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       alert('Please select a follow-up date.');
       return;
     }
+    const currentToday = getTodayDateStr();
+    if (followUpForm.date < currentToday) {
+      alert('Follow-up date cannot be in the past. Please select today or an upcoming date.');
+      return;
+    }
     try {
       setSavingFollowUp(true);
       await api.post(`/leads/${followUpModalLead.id}/follow-up`, {
@@ -300,7 +314,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       });
       setFollowUpModalLead(null);
       setFollowUpForm({
-        date: new Date().toISOString().split('T')[0],
+        date: getTodayDateStr(),
         status: 'Hot',
         remarks: '',
       });
@@ -970,6 +984,22 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       return;
     }
 
+    const currentToday = getTodayDateStr();
+    if (form.meetingDate && form.meetingDate < currentToday) {
+      setFeedback({
+        type: 'error',
+        message: 'Meeting date cannot be in the past. Please select today or an upcoming date.',
+      });
+      return;
+    }
+    if (form.expectedDateOfCloser && form.expectedDateOfCloser < currentToday) {
+      setFeedback({
+        type: 'error',
+        message: 'Expected Date of Closer (EDC) cannot be in the past. Please select today or an upcoming date.',
+      });
+      return;
+    }
+
     try {
       setSubmitting(true);
       setFeedback(null);
@@ -1103,6 +1133,21 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
   // Quick Update Lead Fields (Client Status, Meeting Status, EDC, Stage)
   const handleQuickUpdateLead = async (leadId, updates) => {
     try {
+      const currentToday = getTodayDateStr();
+      if (updates.meetingDate && updates.meetingDate < currentToday) {
+        setFeedback({
+          type: 'error',
+          message: 'Meeting date cannot be in the past. Please select today or an upcoming date.',
+        });
+        return;
+      }
+      if (updates.expectedDateOfCloser && updates.expectedDateOfCloser < currentToday) {
+        setFeedback({
+          type: 'error',
+          message: 'Expected Date of Closer (EDC) cannot be in the past. Please select today or an upcoming date.',
+        });
+        return;
+      }
       await api.patch(`/leads/${leadId}`, updates);
       setFeedback({ type: 'success', message: 'Lead updated successfully.' });
       fetchLeads();
@@ -1746,6 +1791,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                   <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="date"
+                    min={getTodayDateStr()}
                     value={form.meetingDate}
                     onChange={(e) => setForm({ ...form, meetingDate: e.target.value })}
                     className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-900 focus:bg-white focus:border-slate-800 focus:outline-none"
@@ -1761,6 +1807,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                   <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="date"
+                    min={getTodayDateStr()}
                     value={form.expectedDateOfCloser}
                     onChange={(e) => setForm({ ...form, expectedDateOfCloser: e.target.value })}
                     className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-900 focus:bg-white focus:border-slate-800 focus:outline-none"
@@ -2812,8 +2859,17 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                                   <div className="mt-1">
                                     <input
                                       type="date"
+                                      min={getTodayDateStr()}
                                       value={lead.meetingDate ? new Date(lead.meetingDate).toISOString().split('T')[0] : ''}
-                                      onChange={(e) => handleQuickUpdateLead(lead.id, { meetingDate: e.target.value || null })}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        const currentToday = getTodayDateStr();
+                                        if (val && val < currentToday) {
+                                          alert('Meeting date cannot be in the past. Please select today or an upcoming date.');
+                                          return;
+                                        }
+                                        handleQuickUpdateLead(lead.id, { meetingDate: val || null });
+                                      }}
                                       className="bg-white border border-slate-200 rounded px-2 py-1 text-xs font-semibold text-slate-800 focus:outline-none focus:border-indigo-400 cursor-pointer w-full shadow-2xs"
                                       title="Click to set or change Meeting Date"
                                     />
@@ -2847,7 +2903,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                                     onClick={() => {
                                       setFollowUpModalLead(lead);
                                       setFollowUpForm({
-                                        date: new Date().toISOString().split('T')[0],
+                                        date: getTodayDateStr(),
                                         status: 'Hot',
                                         remarks: '',
                                       });
@@ -3050,6 +3106,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                   <input
                     type="date"
                     required
+                    min={getTodayDateStr()}
                     value={followUpForm.date}
                     onChange={(e) => setFollowUpForm({ ...followUpForm, date: e.target.value })}
                     className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-900 font-semibold focus:bg-white focus:border-slate-900 focus:outline-none cursor-pointer"
