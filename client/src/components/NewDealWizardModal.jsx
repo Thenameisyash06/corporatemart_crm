@@ -445,8 +445,11 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
       onSuccess(dealId);
       onClose();
     } catch (err) {
-      console.error(err);
-      setError(err.response?.data?.error || err.message || 'Failed to submit deal.');
+      console.error('Submit deal error:', err);
+      const errMsg = typeof err.response?.data?.error === 'string'
+        ? err.response.data.error
+        : (err.response?.data?.message || err.message || 'Failed to submit deal.');
+      setError(String(errMsg));
     } finally {
       setSubmitting(false);
     }

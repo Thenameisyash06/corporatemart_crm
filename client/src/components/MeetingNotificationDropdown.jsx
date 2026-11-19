@@ -160,7 +160,7 @@ export default function MeetingNotificationDropdown({
                       {/* Closer Status Badge */}
                       <span
                         className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-semibold border shrink-0 ${
-                          lead.closerStatus === 'Lead Sharing'
+                          (lead.closerStatus || '').toUpperCase().includes('LEAD SHARING')
                             ? 'bg-purple-50 text-purple-700 border-purple-200'
                             : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                         }`}

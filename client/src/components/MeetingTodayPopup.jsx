@@ -166,7 +166,7 @@ export default function MeetingTodayPopup({
               </span>
               <span
                 className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold border mt-0.5 ${
-                  activeMeeting.closerStatus === 'Lead Sharing'
+                  (activeMeeting.closerStatus || '').toUpperCase().includes('LEAD SHARING')
                     ? 'bg-purple-50 text-purple-700 border-purple-200'
                     : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                 }`}

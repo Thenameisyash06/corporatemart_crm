@@ -3163,7 +3163,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                           <div className="text-xs font-semibold text-slate-800 truncate" title={lead.bdmName1}>
                             {lead.bdmName1}
                           </div>
-                          {lead.closerStatus === 'Lead Sharing' ? (
+                          {(lead.closerStatus || '').toUpperCase().includes('LEAD SHARING') ? (
                             <span
                               className="inline-block text-[9px] font-bold px-1 py-0.2 bg-purple-50 text-purple-700 border border-purple-200 rounded mt-0.5"
                               title={`Shared with Leader: ${lead.leaderName}`}
@@ -3330,7 +3330,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                                   <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
                                     Expanded Info
                                   </span>
-                                  {lead.closerStatus === 'Lead Sharing' && (
+                                  {(lead.closerStatus || '').toUpperCase().includes('LEAD SHARING') && (
                                     <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
                                       🤝 Shared with Leader: {lead.leaderName}
                                     </span>
