@@ -232,21 +232,6 @@ export default function DealsTable({
               </strong>{' '}
               of <strong className="text-slate-900">{pagination.total}</strong> deals
             </span>
-            <span className="text-slate-300">|</span>
-            <div className="flex items-center gap-1.5">
-              <label htmlFor="deals-limit-select" className="text-slate-500">Per page:</label>
-              <select
-                id="deals-limit-select"
-                value={pagination.limit}
-                onChange={(e) => onLimitChange && onLimitChange(Number(e.target.value))}
-                className="border border-slate-200 rounded px-2 py-1 bg-slate-50 font-medium text-slate-800 focus:outline-none focus:border-slate-800"
-              >
-                <option value={10}>10</option>
-                <option value={20}>20</option>
-                <option value={50}>50</option>
-                <option value={100}>100</option>
-              </select>
-            </div>
           </div>
 
           <div className="flex items-center gap-1">

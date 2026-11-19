@@ -50,8 +50,8 @@ export default function App() {
   const [activeStageKey, setActiveStageKey] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [dealsPage, setDealsPage] = useState(1);
-  const [dealsLimit, setDealsLimit] = useState(20);
-  const [dealsPagination, setDealsPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 1 });
+  const [dealsLimit, setDealsLimit] = useState(10);
+  const [dealsPagination, setDealsPagination] = useState({ page: 1, limit: 10, total: 0, totalPages: 1 });
   const [previousCrmTab, setPreviousCrmTab] = useState('pipeline');
   const currentMode = activeTab === 'lms' ? 'LMS' : 'CRM';
 

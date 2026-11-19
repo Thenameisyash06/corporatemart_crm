@@ -368,6 +368,10 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
         return false;
       }
     }
+    if (!paymentProofFile) {
+      setError('Payment proof / screenshot is mandatory. Please attach the payment screenshot.');
+      return false;
+    }
     setError(null);
     return true;
   };
@@ -414,12 +418,12 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
         });
       }
 
-      // 2. Upload Payment Proof (only if not CASH)
-      if (form.paymentMode !== 'CASH' && paymentProofFile) {
+      // 2. Upload Payment Proof
+      if (paymentProofFile) {
         const formData = new FormData();
         formData.append('dealId', dealId);
         formData.append('documentType', 'PAYMENT_PROOF');
-        formData.append('title', `Payment Proof - ${form.transactionReference || 'UTR'}`);
+        formData.append('title', `Payment Proof - ${form.transactionReference || form.paymentMode || 'Proof'}`);
         formData.append('file', paymentProofFile);
         await api.post('/documents/upload', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
@@ -1089,12 +1093,12 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
                     />
                   </div>
 
-                  {/* Cash Mode: Takes name of person who collected payment, NO screenshot required */}
-                  {form.paymentMode === 'CASH' ? (
+                  {/* Cash Mode: Takes name of person who collected payment */}
+                  {form.paymentMode === 'CASH' && (
                     <div className="md:col-span-3 p-3 bg-amber-50 border border-amber-200 rounded-lg space-y-2">
                       <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
                         <IndianRupee className="w-4 h-4 text-amber-700" />
-                        <span>Cash Payment Selected: Screenshot upload not required</span>
+                        <span>Cash Payment Mode</span>
                       </div>
                       <p className="text-[11px] text-amber-800">
                         Enter the full name of the representative / executive who received this physical cash payment.
@@ -1113,25 +1117,26 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
                         />
                       </div>
                     </div>
-                  ) : (
-                    <div className="md:col-span-3">
-                      <label className="text-xs text-slate-700 font-semibold block mb-1">
-                        Payment Proof / Screenshot <span className="text-slate-400 font-normal">(Optional)</span>
-                      </label>
-                      <input
-                        type="file"
-                        accept="image/*,application/pdf"
-                        onChange={(e) => setPaymentProofFile(e.target.files?.[0] || null)}
-                        className="text-xs text-slate-600 file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-slate-900 file:text-white hover:file:bg-slate-800 w-full"
-                      />
-                      {paymentProofFile && (
-                        <div className="text-[11px] text-emerald-700 flex items-center gap-1 mt-1 truncate">
-                          <Check className="w-3.5 h-3.5 flex-shrink-0" />
-                          <span className="truncate">{paymentProofFile.name} ({(paymentProofFile.size / 1024).toFixed(1)} KB)</span>
-                        </div>
-                      )}
-                    </div>
                   )}
+
+                  <div className="md:col-span-3">
+                    <label className="text-xs text-slate-800 font-bold block mb-1">
+                      Payment Proof / Screenshot <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="file"
+                      required
+                      accept="image/*,application/pdf"
+                      onChange={(e) => setPaymentProofFile(e.target.files?.[0] || null)}
+                      className="text-xs text-slate-600 file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-slate-900 file:text-white hover:file:bg-slate-800 w-full"
+                    />
+                    {paymentProofFile && (
+                      <div className="text-[11px] text-emerald-700 flex items-center gap-1 mt-1 truncate">
+                        <Check className="w-3.5 h-3.5 flex-shrink-0" />
+                        <span className="truncate">{paymentProofFile.name} ({(paymentProofFile.size / 1024).toFixed(1)} KB)</span>
+                      </div>
+                    )}
+                  </div>
 
                   <div className="md:col-span-3">
                     <label className="text-xs text-slate-700 font-semibold block mb-1">

@@ -20,6 +20,7 @@ export default function DealFinancialMetrics({
   receivingAccount = null,
   compact = false,
   className = '',
+  onEditDealAmount = null,
 }) {
   const numStandard = parseFloat(standardAmount) || 0;
   const numDeal = parseFloat(dealAmount) || 0;
@@ -60,8 +61,20 @@ export default function DealFinancialMetrics({
 
         {/* 2. Deal Amount */}
         <div className="p-3.5 bg-white border border-slate-200 rounded-xl shadow-xs">
-          <div className="text-slate-500 font-semibold text-[11px] uppercase tracking-wider">
-            Deal Amount
+          <div className="flex items-center justify-between">
+            <div className="text-slate-500 font-semibold text-[11px] uppercase tracking-wider">
+              Deal Amount
+            </div>
+            {onEditDealAmount && (
+              <button
+                type="button"
+                onClick={onEditDealAmount}
+                className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold underline cursor-pointer"
+                title="Edit deal amount"
+              >
+                Edit
+              </button>
+            )}
           </div>
           <div className={`${compact ? 'text-base' : 'text-lg'} font-bold text-slate-900 mt-1`}>
             ₹{numDeal.toLocaleString('en-IN')}

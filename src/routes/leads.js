@@ -631,7 +631,7 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
     const total = activeSummaryRows.length;
     const isAll = req.query.limit === 'all' || req.query.all === 'true';
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = isAll ? null : Math.max(1, parseInt(req.query.limit, 10) || 25);
+    const limit = isAll ? null : Math.max(1, parseInt(req.query.limit, 10) || 10);
     const offset = isAll ? 0 : (page - 1) * limit;
 
     let leads = [];
