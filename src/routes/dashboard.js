@@ -11,7 +11,6 @@ router.get('/stats', authenticateToken, async (req, res) => {
   try {
     const [
       totalDeals,
-      pendingBdmHandover,
       pendingAccounts,
       accountsRejected,
       pendingLegal,
@@ -24,7 +23,6 @@ router.get('/stats', authenticateToken, async (req, res) => {
       financialAggregates,
     ] = await Promise.all([
       prisma.deal.count(),
-      prisma.deal.count({ where: { stage: 'STAGE_03_BDM_HANDOVER_PENDING' } }),
       prisma.deal.count({ where: { stage: 'STAGE_04_ACCOUNTS_VERIFICATION' } }),
       prisma.deal.count({ where: { stage: 'STAGE_04_ACCOUNTS_REJECTED' } }),
       prisma.deal.count({ where: { stage: 'STAGE_05_LEGAL_VERIFICATION' } }),
@@ -46,7 +44,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
     return res.json({
       counts: {
         totalDeals,
-        pendingBdmHandover,
+        pendingBdmHandover: 0,
         pendingAccounts,
         accountsRejected,
         pendingLegal,

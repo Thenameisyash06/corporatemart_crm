@@ -473,7 +473,7 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
           {[
             { num: 1, label: '1. Client & Directors' },
             { num: 2, label: '2. Services & Commercials' },
-            { num: 3, label: '3. Documents Checklist & Handover' },
+            { num: 3, label: '3. Documents Checklist' },
           ].map((s) => (
             <button
               key={s.num}
@@ -1150,15 +1150,15 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
             </div>
           )}
 
-          {/* STEP 3: Documents Checklist & Handover */}
+          {/* STEP 3: Documents Checklist */}
           {step === 3 && (
             <div className="space-y-4">
               <div>
                 <h3 className="text-xs font-bold text-slate-600 uppercase tracking-wider">
-                  Required Client Documents Checklist & Handover
+                  Required Client Documents Checklist
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Attach Director PAN, Aadhaar, Electricity Bill, MOA/AOA, and DSC documents before handover to Accounts.
+                  Attach Director PAN, Aadhaar, Electricity Bill, MOA/AOA, and DSC documents for verification.
                 </p>
               </div>
 
@@ -1261,7 +1261,7 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
               )}
 
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 leading-relaxed">
-                <strong>Stage 03 Control Enforcement:</strong> Once created, this deal file will be saved under the designated account (<em>{form.accountName}</em>). You can review all required fields and handover to Accounts Desk for verification.
+                <strong>Accounts Queue Forwarding:</strong> Once created, this deal file will be saved under the designated account (<em>{form.accountName}</em>) and forwarded directly to the Accounts Desk for verification.
               </div>
             </div>
           )}

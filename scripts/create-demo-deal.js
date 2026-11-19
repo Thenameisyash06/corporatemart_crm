@@ -102,12 +102,6 @@ async function seedDemoDeal() {
   });
   console.log('KYC doc uploaded to Supabase Object Storage!');
 
-  // 5. Handover file to Accounts (Stage 03 Gate)
-  console.log('5. Triggering Stage 03 Gate: BDM Handover to Accounts...');
-  const handoverRes = await axios.post(`${API_BASE}/deals/${dealId}/handover`, {}, {
-    headers: authHeaders,
-  });
-  console.log('Handover complete! Deal stage is now:', handoverRes.data.deal.stage);
   console.log('ALL DEMO DATA PREPARED AND VERIFIED SUCCESSFULLY!');
 }
 

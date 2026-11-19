@@ -29,7 +29,7 @@ You can switch between any department with one click using the **"Test as" bar**
 
 | Department | Email | Default Password | Key Responsibilities |
 | :--- | :--- | :--- | :--- |
-| **BDM (Sales)** | `bdm@corporatemart.com` | `bdm123` | Create deal, attach clients & directors, upload KYC & payment proof, trigger handover. |
+| **BDM (Sales)** | `bdm@corporatemart.com` | `bdm123` | Create deal, attach clients & directors, upload KYC & payment proof, submit to Accounts. |
 | **Accounts** | `accounts@corporatemart.com` | `accounts123` | Match bank credit, verify total vs received amount, approve or reject back to BDM. |
 | **Legal** | `legal@corporatemart.com` | `legal123` | Scrutinize documents, check name consistency, clear compliance or raise deficiencies. |
 | **Operations** | `ops@corporatemart.com` | `ops123` | Process filings (MCA/GST), track SRN/Govt reference numbers, upload final certificates. |
@@ -38,12 +38,10 @@ You can switch between any department with one click using the **"Test as" bar**
 
 ---
 
-## 🔄 The 9-Stage Operational Workflow
+## 🔄 Deal & Service Operational Workflow
 
-1. **01. Payment Received:** BDM confirms payment, records UTR, full vs part payment, uploads receipt.
-2. **02. Documents Collected:** BDM collects mandatory documents for client & directors.
-3. **03. BDM CRM Entry & Handover:** Hard gate check: BDM must complete all client, director, and service details before clicking *"Handover File to Accounts"*.
-4. **04. Accounts Verification:** Accounts verifies the bank receipt. If approved, file moves to Legal. If discrepancy found, file returns to BDM with a mandatory note.
+1. **01. Deal Creation & Documents:** BDM enters client, directors, services, payments, and KYC documents, directly routing file to Accounts verification.
+2. **04. Accounts Verification:** Accounts verifies the bank receipt. If approved, file moves to Legal. If discrepancy found, file returns to BDM with a mandatory note.
 5. **05. Legal Verification:** Legal verifies KYC and corporate documentation. Cleared files move to Operations; deficiencies return to BDM/Client.
 6. **06. Operations Processing:** Operations initiates filing on government portals, tracks application/SRN numbers, and logs milestone status.
 7. **07. Service Completed:** Operations confirms service outcome and uploads the final deliverable certificate.

@@ -67,14 +67,6 @@ export default function DashboardStats({
       icon: FileText,
     },
     {
-      id: 'BDM_PENDING',
-      stageKey: 'STAGE_03_BDM_HANDOVER_PENDING',
-      title: 'BDM Handover',
-      count: counts.pendingBdmHandover,
-      subtext: 'Pending submission',
-      icon: Clock,
-    },
-    {
       id: 'ACCOUNTS_QUEUE',
       stageKey: 'STAGE_04_ACCOUNTS_VERIFICATION',
       title: 'Accounts Queue',

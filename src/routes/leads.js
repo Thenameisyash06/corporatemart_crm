@@ -356,6 +356,7 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       byStage: {},
       upcomingEdcCount: 0,
       overdueEdcCount: 0,
+      pendingFollowupsCount: 0,
       totalEstimatedValue: 0,
       activeFunnelValue: 0,
       hotFunnelValue: 0,
@@ -451,6 +452,30 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
           analytics.overdueEdcCount++;
         } else if (diffDays >= 0 && diffDays <= 7 && l.leadStatus !== 'CLOSED_WON') {
           analytics.upcomingEdcCount++;
+        }
+      }
+
+      // Pending Follow-ups: active leads whose follow-up date exceeded current date
+      if (stage !== 'CLOSED_WON' && stage !== 'CLOSED_LOST' && rawCs !== 'lost' && rawCs !== 'closed') {
+        let fus = [];
+        if (Array.isArray(l.followUps)) fus = l.followUps;
+        else if (typeof l.followUps === 'string') {
+          try { fus = JSON.parse(l.followUps); } catch {}
+        }
+        if (fus && fus.length > 0) {
+          const sorted = [...fus].sort((a, b) => {
+            const da = a.date ? new Date(a.date).getTime() : (a.addedAt ? new Date(a.addedAt).getTime() : 0);
+            const db = b.date ? new Date(b.date).getTime() : (b.addedAt ? new Date(b.addedAt).getTime() : 0);
+            return db - da;
+          });
+          const latestFu = sorted[0];
+          if (latestFu && latestFu.date && (latestFu.status || '').toLowerCase() !== 'closed' && (latestFu.status || '').toLowerCase() !== 'lost') {
+            const todayStr = now.toISOString().split('T')[0];
+            const fuDateStr = latestFu.date.includes('T') ? latestFu.date.split('T')[0] : latestFu.date;
+            if (fuDateStr < todayStr) {
+              analytics.pendingFollowupsCount++;
+            }
+          }
         }
       }
 
