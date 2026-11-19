@@ -120,6 +120,23 @@ function userCanAccessLead(lead, user) {
   return false;
 }
 
+/**
+ * Date Validation Helper: Validates that a date is not strictly in the past (before today in IST)
+ */
+function isBeforeToday(dateInput) {
+  if (!dateInput) return false;
+  let dateStr = '';
+  if (typeof dateInput === 'string') {
+    dateStr = dateInput.includes('T') ? dateInput.split('T')[0] : dateInput.trim();
+  } else if (dateInput instanceof Date) {
+    dateStr = dateInput.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  }
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}/.test(dateStr)) return false;
+  const targetDateOnly = dateStr.substring(0, 10);
+  const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  return targetDateOnly < todayStr;
+}
+
 // -----------------------------------------------------------------------------
 // AUTOMATIC TABLE INITIALIZATION (PostgreSQL)
 // -----------------------------------------------------------------------------
@@ -788,6 +805,18 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
       });
     }
 
+    if (meetingDate && isBeforeToday(meetingDate)) {
+      return res.status(400).json({
+        error: 'Meeting date cannot be in the past. Please select today or an upcoming date.',
+      });
+    }
+
+    if (expectedDateOfCloser && isBeforeToday(expectedDateOfCloser)) {
+      return res.status(400).json({
+        error: 'Expected Date of Closer (EDC) cannot be in the past. Please select today or an upcoming date.',
+      });
+    }
+
     const ext = path.extname(file.originalname).toLowerCase();
     const validExtensions = ['.pdf', '.doc', '.docx'];
     if (!validExtensions.includes(ext)) {
@@ -1047,10 +1076,20 @@ router.patch('/:id', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req
       params.push(meetingStatus);
     }
     if (meetingDate !== undefined) {
+      if (meetingDate && isBeforeToday(meetingDate)) {
+        return res.status(400).json({
+          error: 'Meeting date cannot be in the past. Please select today or an upcoming date.',
+        });
+      }
       updates.push(`"meetingDate" = $${pIdx++}`);
       params.push(meetingDate ? new Date(meetingDate) : null);
     }
     if (expectedDateOfCloser !== undefined) {
+      if (expectedDateOfCloser && isBeforeToday(expectedDateOfCloser)) {
+        return res.status(400).json({
+          error: 'Expected Date of Closer (EDC) cannot be in the past. Please select today or an upcoming date.',
+        });
+      }
       updates.push(`"expectedDateOfCloser" = $${pIdx++}`);
       params.push(expectedDateOfCloser ? new Date(expectedDateOfCloser) : null);
     }
@@ -1098,6 +1137,11 @@ router.post('/:id/follow-up', authenticateToken, requireRoles('BDM', 'ADMIN'), a
 
     if (!date) {
       return res.status(400).json({ error: 'Follow-up date is mandatory.' });
+    }
+    if (isBeforeToday(date)) {
+      return res.status(400).json({
+        error: 'Follow-up date cannot be in the past. Please select today or an upcoming date.',
+      });
     }
     if (!status) {
       return res.status(400).json({ error: 'Follow-up status is mandatory.' });
