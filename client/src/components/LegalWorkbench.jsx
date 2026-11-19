@@ -309,10 +309,10 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
                   <div
                     key={d.id}
                     onClick={() => handleSelectDeal(d)}
-                    className={`p-3.5 rounded-lg cursor-pointer transition border text-left ${
+                    className={`p-3.5 rounded-xl cursor-pointer transition-all border text-left ${
                       isSelected
-                        ? 'bg-slate-50 border-slate-800 shadow-sm ring-1 ring-slate-800/20'
-                        : 'bg-white border-slate-200/70 hover:bg-slate-50 hover:border-slate-300'
+                        ? 'bg-slate-50 border-slate-900 shadow-xs ring-1 ring-slate-900'
+                        : 'bg-white border-slate-200/90 hover:bg-slate-50/80 hover:border-slate-300'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -320,23 +320,23 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
                         {d.dealCode}
                       </span>
                       <span
-                        className={`text-xs font-medium px-2 py-0.5 rounded border ${
+                        className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${
                           isRejected
-                            ? 'bg-rose-50 text-rose-700 border-rose-200 font-semibold'
-                            : 'bg-indigo-50 text-indigo-700 border-indigo-200 font-semibold'
+                            ? 'bg-rose-50 text-rose-700 border-rose-200'
+                            : 'bg-indigo-50 text-indigo-700 border-indigo-200'
                         }`}
                       >
                         {isRejected ? 'Deficiency' : 'Verified by Accts'}
                       </span>
                     </div>
 
-                    <div className="font-semibold text-sm text-slate-900 mt-2 truncate">
+                    <div className="font-bold text-sm text-slate-900 mt-2 truncate">
                       {d.client.companyName}
                     </div>
 
-                    <div className="text-xs text-slate-500 flex items-center justify-between mt-2 pt-1.5 border-t border-slate-100">
-                      <span>Services: <strong className="text-slate-800">{d.services?.length || 0}</strong></span>
-                      <span className="text-slate-600 font-medium">Docs: <strong className="text-slate-800">{d.documents?.length || 0}</strong></span>
+                    <div className="text-xs text-slate-500 flex items-center justify-between mt-2 pt-1.5 border-t border-slate-100 font-medium">
+                      <span>Services: <strong className="text-slate-800 font-mono tabular-nums">{d.services?.length || 0}</strong></span>
+                      <span className="text-slate-600">Docs: <strong className="text-slate-800 font-mono tabular-nums">{d.documents?.length || 0}</strong></span>
                     </div>
                   </div>
                 );
@@ -493,14 +493,14 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
                 </div>
 
                 {/* Services Table */}
-                <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-xs">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+                <div className="bg-white border border-slate-200 rounded-lg overflow-x-auto shadow-xs">
+                  <table className="w-full text-left text-xs min-w-[500px]">
+                    <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider text-[11px] border-b border-slate-200">
                       <tr>
-                        <th className="py-2 px-3 font-semibold">Service Name</th>
-                        <th className="py-2 px-3 font-semibold text-right">Professional Fee</th>
-                        <th className="py-2 px-3 font-semibold text-right">Govt Fee</th>
-                        <th className="py-2 px-3 font-semibold text-right">Subtotal</th>
+                        <th className="py-2.5 px-3 font-bold">Service Name</th>
+                        <th className="py-2.5 px-3 font-bold text-right">Professional Fee</th>
+                        <th className="py-2.5 px-3 font-bold text-right">Govt Fee</th>
+                        <th className="py-2.5 px-3 font-bold text-right">Subtotal</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -677,15 +677,15 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
                 </div>
 
                 {selectedDeal.client.directors?.length > 0 ? (
-                  <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-xs">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+                  <div className="bg-white border border-slate-200 rounded-lg overflow-x-auto shadow-xs">
+                    <table className="w-full text-left text-xs min-w-[500px]">
+                      <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider text-[11px] border-b border-slate-200">
                         <tr>
-                          <th className="py-2.5 px-3.5 font-semibold">Director Name</th>
-                          <th className="py-2.5 px-3.5 font-semibold">DIN</th>
-                          <th className="py-2.5 px-3.5 font-semibold">PAN</th>
-                          <th className="py-2.5 px-3.5 font-semibold">Email</th>
-                          <th className="py-2.5 px-3.5 font-semibold">Phone</th>
+                          <th className="py-2.5 px-3.5 font-bold">Director Name</th>
+                          <th className="py-2.5 px-3.5 font-bold">DIN</th>
+                          <th className="py-2.5 px-3.5 font-bold">PAN</th>
+                          <th className="py-2.5 px-3.5 font-bold">Email</th>
+                          <th className="py-2.5 px-3.5 font-bold">Phone</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">

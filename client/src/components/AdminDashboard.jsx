@@ -620,10 +620,10 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, onConve
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5 mt-6 pt-5 border-t border-white/10">
           <div className="bg-white/5 rounded-xl p-3.5 border border-white/10">
             <span className="text-[11px] font-medium text-slate-300 uppercase tracking-wider block">Closed Pipeline Value</span>
-            <div className="text-xl font-extrabold text-white mt-1">
+            <div className="text-xl font-extrabold text-white mt-1 font-mono tabular-nums">
               ₹{Number(summary.totalRevenue || 0).toLocaleString('en-IN')}
             </div>
-            <div className="text-[11px] text-slate-300 mt-1 flex items-center gap-1">
+            <div className="text-[11px] text-slate-300 mt-1 flex items-center gap-1 font-mono tabular-nums">
               <span>Avg Deal: ₹{Number(summary.avgDealSize || 0).toLocaleString('en-IN')}</span>
             </div>
           </div>
@@ -631,28 +631,28 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, onConve
             <span className="text-[11px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1">
               <TrendingUp className="w-3.5 h-3.5 text-indigo-400" /> LMS Lead Funnel
             </span>
-            <div className="text-xl font-extrabold text-amber-300 mt-1">
+            <div className="text-xl font-extrabold text-amber-300 mt-1 font-mono tabular-nums">
               ₹{Number(lmsAnalytics?.totalEstimatedValue || 0).toLocaleString('en-IN')}
             </div>
             <div className="text-[11px] text-indigo-200 mt-1">
-              {lmsCount} prospective leads in funnel
+              <span className="font-mono tabular-nums font-bold">{lmsCount}</span> prospective leads in funnel
             </div>
           </div>
 
           <div className="bg-white/5 rounded-xl p-3.5 border border-white/10">
             <span className="text-[11px] font-medium text-slate-300 uppercase tracking-wider block">Collected / Realized</span>
-            <div className="text-xl font-extrabold text-emerald-400 mt-1">
+            <div className="text-xl font-extrabold text-emerald-400 mt-1 font-mono tabular-nums">
               ₹{Number(summary.totalCollected || 0).toLocaleString('en-IN')}
             </div>
             <div className="text-[11px] text-emerald-300/80 mt-1 flex items-center gap-1">
               <Percent className="w-3 h-3" />
-              <span>{summary.collectionRate}% Collection Rate</span>
+              <span className="font-mono tabular-nums font-bold">{summary.collectionRate}%</span> Collection Rate
             </div>
           </div>
 
           <div className="bg-white/5 rounded-xl p-3.5 border border-white/10">
             <span className="text-[11px] font-medium text-slate-300 uppercase tracking-wider block">Outstanding Balance</span>
-            <div className="text-xl font-extrabold text-amber-400 mt-1">
+            <div className="text-xl font-extrabold text-amber-400 mt-1 font-mono tabular-nums">
               ₹{Number(summary.totalPending || 0).toLocaleString('en-IN')}
             </div>
             <div className="text-[11px] text-amber-300/80 mt-1">
@@ -663,10 +663,10 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, onConve
           <div className="bg-white/5 rounded-xl p-3.5 border border-white/10">
             <span className="text-[11px] font-medium text-slate-300 uppercase tracking-wider block">Deals & Clients Volume</span>
             <div className="text-xl font-extrabold text-indigo-300 mt-1">
-              {allDeals.length} Deals <span className="text-xs text-slate-300 font-normal">/ {clients.length || summary.totalClients} Clients</span>
+              <span className="font-mono tabular-nums">{allDeals.length}</span> Deals <span className="text-xs text-slate-300 font-normal">/ <span className="font-mono tabular-nums">{clients.length || summary.totalClients}</span> Clients</span>
             </div>
             <div className="text-[11px] text-slate-300 mt-1">
-              {bdmPerformance.length} BDMs active
+              <span className="font-mono tabular-nums font-bold">{bdmPerformance.length}</span> BDMs active
             </div>
           </div>
         </div>
@@ -781,9 +781,9 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, onConve
           {/* Deals Table */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
+              <table className="w-full text-left text-xs border-collapse min-w-[1050px]">
                 <thead>
-                  <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
+                  <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[11px]">
                     <th className="py-3 px-4">Deal Code</th>
                     <th className="py-3 px-4">Client / Company</th>
                     <th className="py-3 px-4">BDM</th>
@@ -1119,9 +1119,9 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, onConve
               <span>Deals Currently in Accounts Queue ({allDeals.filter((d) => d.stage === 'STAGE_04_ACCOUNTS_VERIFICATION').length})</span>
             </h3>
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
+              <table className="w-full text-left text-xs min-w-[700px]">
                 <thead>
-                  <tr className="border-b border-slate-200 text-slate-500 font-semibold">
+                  <tr className="border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[11px] bg-slate-50/60">
                     <th className="py-2 px-3">Deal Code</th>
                     <th className="py-2 px-3">Client Company</th>
                     <th className="py-2 px-3">BDM</th>
@@ -1213,9 +1213,9 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, onConve
               <span>Deals Currently in Legal Scrutiny ({allDeals.filter((d) => d.stage === 'STAGE_05_LEGAL_VERIFICATION').length})</span>
             </h3>
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
+              <table className="w-full text-left text-xs min-w-[700px]">
                 <thead>
-                  <tr className="border-b border-slate-200 text-slate-500 font-semibold">
+                  <tr className="border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[11px] bg-slate-50/60">
                     <th className="py-2 px-3">Deal Code</th>
                     <th className="py-2 px-3">Client Company</th>
                     <th className="py-2 px-3">BDM</th>
@@ -1392,9 +1392,9 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, onConve
 
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
+              <table className="w-full text-left text-xs border-collapse min-w-[950px]">
                 <thead>
-                  <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
+                  <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[11px]">
                     <th className="py-3 px-4">Company Name</th>
                     <th className="py-3 px-4">Contact Person</th>
                     <th className="py-3 px-4">Location</th>

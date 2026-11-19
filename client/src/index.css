@@ -4,8 +4,12 @@
 
 @layer base {
   html {
-    font-size: 16px; /* Standard full desktop base size (1rem = 16px) for effortless readability */
-    letter-spacing: -0.01em;
+    font-size: 16px;
+    letter-spacing: -0.011em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    scroll-behavior: smooth;
   }
   body {
     @apply bg-slate-50 text-slate-900 font-sans antialiased text-sm;
@@ -13,26 +17,35 @@
     padding: 0;
     line-height: 1.5;
   }
+  input, select, textarea, button {
+    font-family: inherit;
+    letter-spacing: inherit;
+  }
 }
 
-/* Auto-hiding / minimal modern scrollbars */
+/* Micro-interaction polish for buttons & interactive elements */
+button, a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Clean, modern minimalist custom scrollbars */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: transparent;
+  background: #cbd5e1;
   border-radius: 9999px;
-  transition: background-color 0.2s ease;
+  transition: background-color 0.15s ease;
 }
 *:hover::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #94a3b8;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8 !important;
+  background: #64748b !important;
 }
 
 /* Hide scrollbar utility (still scrollable) */
@@ -42,4 +55,18 @@
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* Data & Financial Numbers legibility */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Standardized focus styles for inputs and selects */
+.input-base {
+  @apply bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-900 placeholder-slate-400 transition-colors focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800;
+}
+
+.select-base {
+  @apply bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 font-medium transition-colors focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800;
 }

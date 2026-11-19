@@ -414,10 +414,10 @@ export default function App() {
       )}
 
       {/* Main Container */}
-      <main className="flex-1 p-6 max-w-7xl mx-auto w-full space-y-5">
+      <main className="flex-1 px-4 sm:px-6 py-5 max-w-7xl mx-auto w-full space-y-5">
         {/* WORKBENCH SEGMENTED CONTROL BAR */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-slate-200 pb-3 gap-3">
-          <div className="flex flex-wrap items-center gap-1.5 bg-white p-1.5 rounded-xl border border-slate-200 shadow-sm">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between border-b border-slate-200 pb-3 gap-3">
+          <div className="flex flex-wrap items-center gap-1 bg-white p-1 rounded-xl border border-slate-200/90 shadow-xs">
             {visibleTabs.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -425,17 +425,17 @@ export default function App() {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition ${
+                  className={`flex items-center space-x-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg text-xs sm:text-sm transition-all ${
                     isActive
-                      ? 'bg-slate-900 text-white shadow-sm font-semibold'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                      ? 'bg-slate-900 text-white shadow-xs font-bold'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium'
                   }`}
                 >
-                  <Icon className="w-4 h-4" />
+                  <Icon className="w-4 h-4 shrink-0" />
                   <span>{tab.label}</span>
                   {tab.badge !== undefined && tab.badge > 0 && (
                     <span
-                      className={`text-xs px-2 py-0.5 rounded-full font-bold ${
+                      className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold ${
                         isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
                       }`}
                     >
@@ -451,7 +451,7 @@ export default function App() {
           {canCreateDeals && (
             <button
               onClick={() => setIsNewDealOpen(true)}
-              className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-sm font-semibold flex items-center gap-2 shadow-sm transition self-stretch sm:self-auto justify-center"
+              className="h-10 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 shadow-xs transition-all self-stretch sm:self-auto justify-center"
             >
               <Plus className="w-4 h-4" />
               <span>+ New Deal Entry (BDM Stage 01-03)</span>
@@ -497,20 +497,20 @@ export default function App() {
               onRefreshStats={fetchData}
             />
 
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-xl border border-slate-200 shadow-xs">
               <div className="relative w-full sm:w-96">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="text"
                   placeholder="Search company, client name, or deal code..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-800"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800 transition-colors"
                 />
               </div>
 
-              <div className="text-sm text-slate-500">
-                Showing <strong className="text-slate-900">{deals.length}</strong> {currentUser?.role === 'BDM' ? 'personal deals' : 'active deals'}
+              <div className="text-xs sm:text-sm text-slate-500 font-medium self-end sm:self-auto">
+                Showing <strong className="text-slate-900 font-bold font-mono tabular-nums">{deals.length}</strong> {currentUser?.role === 'BDM' ? 'personal deals' : 'active deals'}
               </div>
             </div>
 

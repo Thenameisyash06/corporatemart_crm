@@ -866,15 +866,15 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
           </div>
 
           {/* Unified Controls: Search, Filters & View Mode Switcher */}
-          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
+          <div className="bg-white p-3.5 rounded-xl border border-slate-200/90 shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
             <div className="relative flex-1 w-full">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
                 placeholder="Search assigned tasks by deal code, company, or service..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-800"
+                className="w-full h-9 bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800 transition-colors"
               />
             </div>
 
@@ -882,7 +882,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
               <select
                 value={selectedStatusFilter}
                 onChange={(e) => setSelectedStatusFilter(e.target.value)}
-                className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 font-medium focus:outline-none focus:border-slate-800"
+                className="h-9 bg-slate-50 border border-slate-200 rounded-lg px-2.5 text-xs text-slate-700 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800 transition-colors"
               >
                 <option value="ACTIVE">Active Tasks (In Workspace)</option>
                 <option value="IN_PROGRESS">In Progress</option>
@@ -896,7 +896,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
               <select
                 value={selectedUrgencyFilter}
                 onChange={(e) => setSelectedUrgencyFilter(e.target.value)}
-                className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 font-medium focus:outline-none focus:border-slate-800"
+                className="h-9 bg-slate-50 border border-slate-200 rounded-lg px-2.5 text-xs text-slate-700 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800 transition-colors"
               >
                 <option value="ALL">All Deadlines</option>
                 <option value="OVERDUE">Overdue Only</option>
@@ -1236,9 +1236,9 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                           <span className="text-[11px] font-bold text-slate-700 block mb-2">
                             Directors ({activeDeal.client.directors.length}):
                           </span>
-                          <div className="border border-slate-200 rounded-lg overflow-hidden">
-                            <table className="w-full text-left text-xs">
-                              <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 text-[10px] uppercase font-bold">
+                          <div className="border border-slate-200 rounded-lg overflow-x-auto">
+                            <table className="w-full text-left text-xs min-w-[450px]">
+                              <thead className="bg-slate-50 text-slate-500 border-b border-slate-200 text-[10px] uppercase font-bold tracking-wider">
                                 <tr>
                                   <th className="py-2 px-3">Name</th>
                                   <th className="py-2 px-3">DIN</th>
@@ -1421,9 +1421,9 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
           {viewMode === 'table' && (
             <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
+                <table className="w-full text-left text-xs border-collapse min-w-[900px]">
                   <thead>
-                    <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
+                    <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[11px]">
                       <th className="py-3 px-4">Deal / Company</th>
                       <th className="py-3 px-4">Service Task & Sector</th>
                       <th className="py-3 px-4">My Milestone Status</th>
@@ -1757,9 +1757,9 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
           <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
+              <table className="w-full text-left text-xs border-collapse min-w-[850px]">
                 <thead>
-                  <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
+                  <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[11px]">
                     <th className="py-3 px-4">Deal / Company</th>
                     <th className="py-3 px-4">Service Task & Sector</th>
                     <th className="py-3 px-4">Service Fee</th>
@@ -1979,9 +1979,9 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
           {/* Services Allocation Matrix Table */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
+              <table className="w-full text-left text-xs border-collapse min-w-[850px]">
                 <thead>
-                  <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
+                  <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[11px]">
                     <th className="py-3 px-4">Deal / Client</th>
                     <th className="py-3 px-4">Service Task & Sector</th>
                     <th className="py-3 px-4">Assigned Specialist</th>
