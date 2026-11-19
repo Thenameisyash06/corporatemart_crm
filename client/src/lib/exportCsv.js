@@ -242,7 +242,6 @@ function formatStageName(stage) {
   const stageMap = {
     STAGE_01_PAYMENT_RECEIVED: 'Stage 01: Payment Received',
     STAGE_02_DOCUMENTS_COLLECTED: 'Stage 02: Docs Collected',
-    STAGE_03_BDM_HANDOVER_PENDING: 'Stage 03: BDM Handover Pending',
     STAGE_04_ACCOUNTS_VERIFICATION: 'Stage 04: Accounts Verification Queue',
     STAGE_04_ACCOUNTS_REJECTED: 'Stage 04: Accounts Discrepancy (Rejected)',
     STAGE_05_LEGAL_VERIFICATION: 'Stage 05: Legal Scrutiny Queue',

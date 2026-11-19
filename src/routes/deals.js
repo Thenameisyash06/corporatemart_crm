@@ -515,9 +515,9 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, re
 });
 
 // -----------------------------------------------------------------------------
-// POST /api/deals/:id/handover - Stage 03: BDM Handover Gate to Accounts
+// POST /api/deals/:id/resubmit (and legacy /:id/handover) - Resubmit Rejected Deal to Accounts
 // -----------------------------------------------------------------------------
-router.post('/:id/handover', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res) => {
+const handleDealResubmit = async (req, res) => {
   try {
     const deal = await prisma.deal.findUnique({
       where: { id: req.params.id },
@@ -528,23 +528,23 @@ router.post('/:id/handover', authenticateToken, requireRoles('BDM', 'ADMIN'), as
       return res.status(404).json({ error: 'Deal not found.' });
     }
 
-    // Hard Gate Enforcements:
+    // Validation Enforcements:
     if (!deal.client.companyName || !deal.client.clientName || !deal.client.phone) {
       return res.status(400).json({ error: 'Incomplete client details. Company, Contact Name, and Phone are required.' });
     }
 
     if (!deal.services || deal.services.length === 0) {
-      return res.status(400).json({ error: 'At least one service must be attached before handover.' });
+      return res.status(400).json({ error: 'At least one service must be attached before submission.' });
     }
 
     if (!deal.client.panNumber) {
-      return res.status(400).json({ error: 'Company PAN number is mandatory before handover.' });
+      return res.status(400).json({ error: 'Company PAN number is mandatory before submission.' });
     }
 
     // Gate Enforcement: Only Company PAN photo/document is strictly mandatory
     const hasCompanyPanDoc = deal.documents.some((d) => d.documentType === 'COMPANY_PAN' || d.documentType === 'KYC_PAN') || Boolean(deal.client.companyPanUrl);
     if (!hasCompanyPanDoc) {
-      return res.status(400).json({ error: 'Company PAN card image/document must be uploaded before handover.' });
+      return res.status(400).json({ error: 'Company PAN card image/document must be uploaded before submission.' });
     }
 
     const updated = await prisma.deal.update({
@@ -560,18 +560,21 @@ router.post('/:id/handover', authenticateToken, requireRoles('BDM', 'ADMIN'), as
     await recordAuditLog({
       dealId: deal.id,
       userId: req.user.id,
-      action: 'HANDOVER_TO_ACCOUNTS',
+      action: 'RESUBMIT_TO_ACCOUNTS',
       fromStage: deal.stage,
       toStage: 'STAGE_04_ACCOUNTS_VERIFICATION',
-      remarks: `BDM ${req.user.fullName} completed CRM entry and handed over file to Accounts.`,
+      remarks: `BDM ${req.user.fullName} resubmitted file to Accounts for verification.`,
     });
 
-    return res.json({ message: 'File successfully handed over to Accounts for verification.', deal: updated });
+    return res.json({ message: 'File successfully forwarded to Accounts for verification.', deal: updated });
   } catch (error) {
-    console.error('Handover error:', error);
-    return res.status(500).json({ error: 'Failed to complete handover.' });
+    console.error('Submission error:', error);
+    return res.status(500).json({ error: 'Failed to complete submission.' });
   }
-});
+};
+
+router.post('/:id/resubmit', authenticateToken, requireRoles('BDM', 'ADMIN'), handleDealResubmit);
+router.post('/:id/handover', authenticateToken, requireRoles('BDM', 'ADMIN'), handleDealResubmit);
 
 // -----------------------------------------------------------------------------
 // -----------------------------------------------------------------------------

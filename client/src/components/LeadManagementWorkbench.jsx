@@ -239,6 +239,47 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     }
   };
 
+  const getLeadLatestFollowUp = (lead) => {
+    const fus = getFollowUpsList(lead);
+    if (!fus || fus.length === 0) return null;
+    const sorted = [...fus].sort((a, b) => {
+      const da = a.date ? new Date(a.date).getTime() : (a.addedAt ? new Date(a.addedAt).getTime() : 0);
+      const db = b.date ? new Date(b.date).getTime() : (b.addedAt ? new Date(b.addedAt).getTime() : 0);
+      return db - da;
+    });
+    return sorted[0] || null;
+  };
+
+  const isLeadFollowUpExceeded = (lead) => {
+    if (!lead) return false;
+    const lStatus = (lead.leadStatus || '').toUpperCase();
+    if (lStatus === 'CLOSED_WON' || lStatus === 'CLOSED_LOST') return false;
+    const cStatus = (lead.clientStatus || '').toLowerCase();
+    if (cStatus === 'lost' || cStatus === 'closed') return false;
+
+    const latestFu = getLeadLatestFollowUp(lead);
+    if (!latestFu || !latestFu.date) return false;
+
+    const fuStatus = (latestFu.status || '').toLowerCase();
+    if (fuStatus === 'closed' || fuStatus === 'lost') return false;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    let fuDate;
+    if (typeof latestFu.date === 'string') {
+      const datePart = latestFu.date.includes('T') ? latestFu.date.split('T')[0] : latestFu.date;
+      const [y, m, d] = datePart.split('-').map(Number);
+      if (!y || !m || !d) return false;
+      fuDate = new Date(y, m - 1, d);
+    } else {
+      fuDate = new Date(latestFu.date);
+    }
+    fuDate.setHours(0, 0, 0, 0);
+
+    return fuDate.getTime() < today.getTime();
+  };
+
   const handleSaveFollowUp = async (e) => {
     if (e) e.preventDefault();
     if (!followUpModalLead) return;
@@ -318,6 +359,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
   const [selectedMeetingFilter, setSelectedMeetingFilter] = useState('ALL');
   const [selectedStageFilter, setSelectedStageFilter] = useState('ALL');
   const [selectedTeamMemberFilter, setSelectedTeamMemberFilter] = useState('ALL');
+  const [pendingFollowUpFilter, setPendingFollowUpFilter] = useState(false);
   const [selectedMonthFilter, setSelectedMonthFilter] = useState('THIS_MONTH'); // 'THIS_MONTH' | 'NEXT_MONTH'
 
   // Month Meta and Labels for This Month vs Next Month
@@ -706,7 +748,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     return cards;
   }, [isLeader, matchedLeaderName, loggedInBdmName, leads, sharedTeamLeads]);
 
-  // Leads actually displayed in the table below (supports filtering to a selected team member and selected month)
+  // Leads actually displayed in the table below (supports filtering to a selected team member, selected month, and pending follow-ups)
   const displayedLeads = useMemo(() => {
     let list = visibleLeads;
     if (selectedTeamMemberFilter && selectedTeamMemberFilter !== 'ALL') {
@@ -726,8 +768,19 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         return badge?.icon === '📅';
       });
     }
+    if (pendingFollowUpFilter) {
+      list = list.filter((l) => isLeadFollowUpExceeded(l));
+    }
     return list;
-  }, [visibleLeads, selectedTeamMemberFilter, selectedMonthFilter, getLeadMonthBadge]);
+  }, [visibleLeads, selectedTeamMemberFilter, selectedMonthFilter, getLeadMonthBadge, pendingFollowUpFilter]);
+
+  // Count of leads whose follow-up date exceeded the current date
+  const calculatedPendingFollowups = useMemo(() => {
+    const targetLeads = isAdmin ? visibleLeads : ownDirectLeads;
+    return targetLeads.filter((l) => isLeadFollowUpExceeded(l)).length;
+  }, [isAdmin, visibleLeads, ownDirectLeads]);
+
+  const displayPendingFollowupsCount = analytics?.pendingFollowupsCount ?? calculatedPendingFollowups;
 
   // Memoized BDM Funnel Ranking (for Leaderboard - Leaders first, then members)
   const bdmFunnelList = useMemo(() => {
@@ -1313,16 +1366,29 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
           </div>
         </div>
 
-        {/* Overdue EDC */}
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
-          <span className="text-[10px] font-bold text-purple-700 uppercase tracking-wider block">
-            Overdue EDC
-          </span>
-          <div className="text-xl font-extrabold text-purple-700 mt-0.5">
-            {analytics?.overdueEdcCount ?? 0}
+        {/* Pending Follow-ups */}
+        <div
+          onClick={() => setPendingFollowUpFilter((prev) => !prev)}
+          className={`p-3.5 rounded-xl border shadow-xs transition cursor-pointer ${
+            pendingFollowUpFilter
+              ? 'bg-rose-100/80 border-rose-400 ring-2 ring-rose-400'
+              : 'bg-white hover:bg-rose-50/50 border-slate-200 hover:border-rose-300'
+          }`}
+          title="Click to view leads whose follow-up date exceeded current date"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold text-rose-700 uppercase tracking-wider block">
+              Pending Follow-ups
+            </span>
+            {pendingFollowUpFilter && (
+              <span className="text-[9px] bg-rose-600 text-white px-1.5 py-0.2 rounded font-extrabold">Active</span>
+            )}
           </div>
-          <div className="text-[11px] text-purple-600/80 mt-1">
-            Urgent Action
+          <div className="text-xl font-extrabold text-red-600 mt-0.5">
+            {displayPendingFollowupsCount}
+          </div>
+          <div className="text-[11px] text-rose-600/80 mt-1">
+            Follow-up Exceeded
           </div>
         </div>
       </div>
@@ -1995,6 +2061,22 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         </button>
       </div>
 
+      {/* Active Pending Follow-ups Filter Alert Pill */}
+      {pendingFollowUpFilter && (
+        <div className="flex items-center justify-between bg-rose-50 border border-rose-200 px-4 py-2.5 rounded-xl text-xs font-semibold text-rose-800 shadow-2xs">
+          <span className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+            <span>Filter Active: Showing {displayedLeads.length} lead{displayedLeads.length === 1 ? '' : 's'} whose follow-up date exceeded the current date.</span>
+          </span>
+          <button
+            onClick={() => setPendingFollowUpFilter(false)}
+            className="text-rose-700 hover:text-rose-950 font-bold underline cursor-pointer text-xs ml-2"
+          >
+            Clear Filter (Show All)
+          </button>
+        </div>
+      )}
+
       {/* 4B. TEAM MEMBERS PIPELINE & PERFORMANCE CARDS - STRICTLY FOR TEAM LEADERS ONLY */}
       {isLeader && (
         <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3.5">
@@ -2450,6 +2532,15 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                                     title={`Pipeline scheduled for next month (${monthLabels.nextMonth})`}
                                   >
                                     🚀 Next Month
+                                  </span>
+                                )}
+                                {isLeadFollowUpExceeded(lead) && (
+                                  <span
+                                    className="inline-flex items-center gap-1 text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-rose-50 text-rose-700 border border-rose-200"
+                                    title={`Follow-up date exceeded: ${getLeadLatestFollowUp(lead)?.date || ''}`}
+                                  >
+                                    <Clock className="w-2.5 h-2.5 text-rose-600" />
+                                    <span>Pending Follow-up ({getLeadLatestFollowUp(lead)?.date ? new Date(getLeadLatestFollowUp(lead).date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : 'Overdue'})</span>
                                   </span>
                                 )}
                               </div>

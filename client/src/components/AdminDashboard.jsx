@@ -41,7 +41,6 @@ import {
 const STAGE_LABELS = {
   STAGE_01_PAYMENT_RECEIVED: { label: '01. Payment Rcvd', color: 'bg-blue-50 text-blue-700 border-blue-200' },
   STAGE_02_DOCUMENTS_COLLECTED: { label: '02. Docs Collected', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
-  STAGE_03_BDM_HANDOVER_PENDING: { label: '03. Handover Pending', color: 'bg-amber-50 text-amber-700 border-amber-200' },
   STAGE_04_ACCOUNTS_VERIFICATION: { label: '04. Accounts Queue', color: 'bg-amber-50 text-amber-800 border-amber-300' },
   STAGE_04_ACCOUNTS_REJECTED: { label: '04. Accounts Rejected', color: 'bg-rose-50 text-rose-700 border-rose-300' },
   STAGE_05_LEGAL_VERIFICATION: { label: '05. Legal Scrutiny', color: 'bg-purple-50 text-purple-700 border-purple-200' },

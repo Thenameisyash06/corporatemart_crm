@@ -28,7 +28,6 @@ import DealFinancialMetrics from './DealFinancialMetrics';
 const STAGES_LIST = [
   { key: 'STAGE_01_PAYMENT_RECEIVED', label: '01. Payment' },
   { key: 'STAGE_02_DOCUMENTS_COLLECTED', label: '02. Docs' },
-  { key: 'STAGE_03_BDM_HANDOVER_PENDING', label: '03. Handover' },
   { key: 'STAGE_04_ACCOUNTS_VERIFICATION', label: '04. Accounts' },
   { key: 'STAGE_05_LEGAL_VERIFICATION', label: '05. Legal' },
   { key: 'STAGE_06_OPERATIONS_PROCESSING', label: '06. Ops' },
@@ -73,16 +72,16 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
     fetchDeal();
   }, [dealId]);
 
-  const handleBdmHandover = async () => {
+  const handleResubmit = async () => {
     try {
       setActionLoading(true);
       setErrorMsg(null);
-      await api.post(`/deals/${deal.id}/handover`);
-      setSuccessMsg('File successfully handed over to Accounts!');
+      await api.post(`/deals/${deal.id}/resubmit`);
+      setSuccessMsg('File successfully resubmitted to Accounts for verification!');
       await fetchDeal();
       onRefreshParent();
     } catch (err) {
-      setErrorMsg(err.response?.data?.error || 'Handover failed.');
+      setErrorMsg(err.response?.data?.error || 'Resubmission failed.');
     } finally {
       setActionLoading(false);
     }
@@ -359,20 +358,20 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
 
             {/* ACTION BUTTONS */}
             <div className="flex items-center space-x-2.5">
-              {/* STAGE 03 BDM HANDOVER */}
-              {(deal.stage === 'STAGE_03_BDM_HANDOVER_PENDING' || deal.stage.includes('REJECTED')) && (currentUser?.role === 'BDM' || currentUser?.role === 'ADMIN') && (
+              {/* RESUBMISSION FOR REJECTED / DISCREPANCY DEALS */}
+              {deal.stage.includes('REJECTED') && (currentUser?.role === 'BDM' || currentUser?.role === 'ADMIN') && (
                 <button
-                  onClick={handleBdmHandover}
+                  onClick={handleResubmit}
                   disabled={actionLoading}
                   className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition"
                 >
                   <Send className="w-4 h-4" />
-                  <span>Handover File to Accounts (Stage 03 Gate)</span>
+                  <span>Resubmit File to Accounts</span>
                 </button>
               )}
 
               {/* STAGE 04 ACCOUNTS GATE */}
-              {(!deal.isAccountsVerified && (deal.stage === 'STAGE_04_ACCOUNTS_VERIFICATION' || deal.stage === 'STAGE_03_BDM_HANDOVER_PENDING' || deal.stage === 'STAGE_04_ACCOUNTS_REJECTED')) && (
+              {(!deal.isAccountsVerified && (deal.stage === 'STAGE_04_ACCOUNTS_VERIFICATION' || deal.stage === 'STAGE_04_ACCOUNTS_REJECTED')) && (
                 currentUser?.role === 'ACCOUNTS' || currentUser?.role === 'ADMIN' ? (
                   <>
                     <button

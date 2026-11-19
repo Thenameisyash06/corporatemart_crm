@@ -325,22 +325,15 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
                         {d.dealCode}
                       </span>
                       <span
-                        className={`text-xs font-medium px-2 py-0.5 rounded border ${isRejected
+                        className={`text-xs font-medium px-2 py-0.5 rounded border ${
+                          isRejected
                             ? 'bg-rose-50 text-rose-700 border-rose-200 font-semibold'
                             : hasBalancePending
                               ? 'bg-amber-100 text-amber-900 border-amber-300 font-bold'
-                              : d.stage === 'STAGE_03_BDM_HANDOVER_PENDING'
-                                ? 'bg-blue-50 text-blue-700 border-blue-200 font-medium'
-                                : 'bg-amber-50 text-amber-700 border-amber-200'
-                          ? 'bg-rose-50 text-rose-700 border-rose-200 font-semibold'
-                          : hasBalancePending
-                            ? 'bg-amber-100 text-amber-900 border-amber-300 font-bold'
-                            : d.stage === 'STAGE_03_BDM_HANDOVER_PENDING'
-                              ? 'bg-blue-50 text-blue-700 border-blue-200 font-medium'
                               : 'bg-amber-50 text-amber-700 border-amber-200'
-                          }`}
+                        }`}
                       >
-                        {isRejected ? 'Discrepancy' : hasBalancePending ? 'Balance Pending' : d.stage === 'STAGE_03_BDM_HANDOVER_PENDING' ? 'New Deal Entry' : 'Stage 04 Entry'}
+                        {isRejected ? 'Discrepancy' : hasBalancePending ? 'Balance Pending' : 'Stage 04 Entry'}
                       </span>
                     </div>
 
@@ -840,7 +833,6 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
 
               {/* 4. ACCOUNTS VERIFICATION & HANDOVER DECISION (Visible for all deals requiring Accounts verification or discrepancy action) */}
               {(!selectedDeal.isAccountsVerified ||
-                selectedDeal.stage === 'STAGE_03_BDM_HANDOVER_PENDING' ||
                 selectedDeal.stage === 'STAGE_04_ACCOUNTS_VERIFICATION' ||
                 selectedDeal.stage === 'STAGE_04_ACCOUNTS_REJECTED' ||
                 selectedDeal.payments?.some((p) => p.status === 'PENDING_VERIFICATION' && p.trancheNumber === 1)) && (

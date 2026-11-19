@@ -627,7 +627,7 @@ export default function RmWorkbench({ currentUser, onRefreshParent, onOpenDossie
                   </div>
                 )}
 
-                {/* Remarks / BDM Handover Note */}
+                {/* Remarks / BDM Note */}
                 {selectedDeal.remarks && (
                   <div className="p-2.5 bg-amber-50/70 border border-amber-200 rounded-lg text-[11px] text-amber-900">
                     <strong>BDM Notes:</strong> {selectedDeal.remarks}

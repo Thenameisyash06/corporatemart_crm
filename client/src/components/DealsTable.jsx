@@ -12,7 +12,6 @@ import {
 export const STAGE_CONFIG = {
   STAGE_01_PAYMENT_RECEIVED: { label: '01. Payment Recv', color: 'bg-slate-100 text-slate-700 border-slate-200' },
   STAGE_02_DOCUMENTS_COLLECTED: { label: '02. Docs Collected', color: 'bg-slate-100 text-slate-700 border-slate-200' },
-  STAGE_03_BDM_HANDOVER_PENDING: { label: '03. BDM Handover', color: 'bg-slate-100 text-slate-700 border-slate-200' },
   STAGE_04_ACCOUNTS_VERIFICATION: { label: '04. Accounts Queue', color: 'bg-amber-50 text-amber-800 border-amber-200 font-medium' },
   STAGE_04_ACCOUNTS_REJECTED: { label: '04. Accounts Discrepancy', color: 'bg-rose-50 text-rose-800 border-rose-200 font-medium' },
   STAGE_05_LEGAL_VERIFICATION: { label: '05. Legal Scrutiny', color: 'bg-indigo-50 text-indigo-800 border-indigo-200 font-medium' },
