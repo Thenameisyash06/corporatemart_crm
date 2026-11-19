@@ -1483,9 +1483,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
                 <TrendingUp className="w-3.5 h-3.5 text-indigo-400" />
-                {selectedMonthFilter === 'NEXT_MONTH'
-                  ? `🚀 Next Month Pipeline (${monthLabels.nextMonth})`
-                  : `📅 This Month Pipeline (${monthLabels.thisMonth})`}
+                Funnel Value
               </span>
               <div className="flex items-center gap-1.5">
                 <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-200 border border-indigo-400/30">
