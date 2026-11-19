@@ -2006,16 +2006,6 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
             />
           </form>
 
-          {/* Month Pipeline Filter (This Month & Next Month only) */}
-          <select
-            value={selectedMonthFilter}
-            onChange={(e) => setSelectedMonthFilter(e.target.value)}
-            className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs text-slate-800 font-bold focus:outline-none focus:border-slate-800 cursor-pointer"
-          >
-            <option value="THIS_MONTH">📅 This Month ({monthLabels.thisMonth})</option>
-            <option value="NEXT_MONTH">🚀 Next Month ({monthLabels.nextMonth})</option>
-          </select>
-
           {/* Client Status Filter (Hot / Warm / Lost) */}
           <select
             value={selectedClientStatusFilter}
