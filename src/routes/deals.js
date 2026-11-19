@@ -164,8 +164,8 @@ router.get('/', authenticateToken, async (req, res) => {
 
     const isAll = req.query.limit === 'all' || req.query.all === 'true';
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const defaultLimit = roleFilter && roleFilter !== 'BDM' ? 100 : 20;
-    const limit = isAll ? undefined : Math.max(1, parseInt(req.query.limit, 10) || defaultLimit);
+    const defaultLimit = roleFilter && roleFilter !== 'BDM' ? 100 : 10;
+    const limit = isAll ? undefined : Math.max(1, parseInt(req.query.limit, 10) || 10);
     const skip = isAll ? undefined : (page - 1) * limit;
 
     const [total, deals] = await Promise.all([
@@ -808,6 +808,10 @@ router.post(
 
       const selectedAccount = (accountName || 'Corporatemart private limited').trim();
 
+      if (!file) {
+        return res.status(400).json({ error: 'Payment screenshot / proof is mandatory. Please attach the payment screenshot.' });
+      }
+
       if (isCash) {
         if (!cashCollectorName || !cashCollectorName.trim()) {
           return res.status(400).json({ error: 'For Cash payment, the name of the person who collected the cash is mandatory.' });
@@ -1269,11 +1273,11 @@ router.post(
 );
 
 // -----------------------------------------------------------------------------
-// POST /api/deals/:id/services/:serviceId - Stage 06: Ops Milestone / Assignment
+// PATCH /api/deals/:id/services/:serviceId - Stage 06: Ops Milestone / Service Amount Update
 // -----------------------------------------------------------------------------
-router.patch('/:id/services/:serviceId', authenticateToken, requireRoles('OPERATIONS', 'ADMIN'), async (req, res) => {
+router.patch('/:id/services/:serviceId', authenticateToken, requireRoles('OPERATIONS', 'ADMIN', 'BDM', 'RM', 'ACCOUNTS', 'LEGAL'), async (req, res) => {
   try {
-    const { assignedOpsUserId, status, govApplicationNumber, notes, completedAt, targetCompletionDate } = req.body;
+    const { assignedOpsUserId, status, govApplicationNumber, notes, completedAt, targetCompletionDate, serviceFee, dealAmount } = req.body;
 
     const updateData = {};
     if (assignedOpsUserId !== undefined) {
@@ -1294,6 +1298,12 @@ router.patch('/:id/services/:serviceId', authenticateToken, requireRoles('OPERAT
     if (completedAt !== undefined) {
       updateData.completedAt = completedAt ? new Date(completedAt) : null;
     }
+    if (serviceFee !== undefined || dealAmount !== undefined) {
+      const feeVal = parseFloat(serviceFee !== undefined ? serviceFee : dealAmount);
+      if (!isNaN(feeVal) && feeVal >= 0) {
+        updateData.serviceFee = feeVal;
+      }
+    }
 
     const updatedService = await prisma.dealService.update({
       where: { id: req.params.serviceId },
@@ -1305,17 +1315,79 @@ router.patch('/:id/services/:serviceId', authenticateToken, requireRoles('OPERAT
       },
     });
 
+    let newDealTotal = null;
+    if (updateData.serviceFee !== undefined) {
+      const allServices = await prisma.dealService.findMany({
+        where: { dealId: req.params.id },
+      });
+      newDealTotal = allServices.reduce((sum, s) => sum + (parseFloat(s.serviceFee) || 0), 0);
+      await prisma.deal.update({
+        where: { id: req.params.id },
+        data: { totalAmount: newDealTotal },
+      });
+    }
+
+    const feeMsg = updateData.serviceFee !== undefined
+      ? ` Deal Amount updated to ₹${updateData.serviceFee.toLocaleString('en-IN')}.${newDealTotal !== null ? ` New Deal Total: ₹${newDealTotal.toLocaleString('en-IN')}.` : ''}`
+      : '';
+
     await recordAuditLog({
       dealId: req.params.id,
       userId: req.user.id,
       action: 'SERVICE_MILESTONE_UPDATED',
-      remarks: `Service "${updatedService.serviceName}" status updated to ${updatedService.status}. Assignee: ${updatedService.assignedOpsUser?.fullName || 'Unassigned'}. Gov Ref: ${updatedService.govApplicationNumber || 'N/A'}`,
+      remarks: `Service "${updatedService.serviceName}" updated.${updateData.status ? ` Status: ${updatedService.status}.` : ''}${feeMsg}`,
     });
 
-    return res.json({ message: 'Service milestone updated.', service: updatedService });
+    return res.json({ message: 'Service updated.', service: updatedService, totalAmount: newDealTotal });
   } catch (error) {
     console.error('Service update error:', error);
     return res.status(500).json({ error: error.message || 'Failed to update service milestone.' });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// PATCH /api/deals/:id/deal-amount - Direct Update to Total Deal Amount
+// -----------------------------------------------------------------------------
+router.patch('/:id/deal-amount', authenticateToken, requireRoles('BDM', 'ADMIN', 'RM', 'ACCOUNTS', 'OPERATIONS', 'LEGAL'), async (req, res) => {
+  try {
+    const { totalAmount, remarks } = req.body;
+    const newTotal = parseFloat(totalAmount);
+    if (isNaN(newTotal) || newTotal <= 0) {
+      return res.status(400).json({ error: 'Valid total deal amount greater than zero is required.' });
+    }
+
+    const currentDeal = await prisma.deal.findUnique({
+      where: { id: req.params.id },
+    });
+    if (!currentDeal) {
+      return res.status(404).json({ error: 'Deal not found.' });
+    }
+
+    const updatedDeal = await prisma.deal.update({
+      where: { id: req.params.id },
+      data: { totalAmount: newTotal },
+      include: {
+        client: { include: { directors: true } },
+        bdm: { select: { id: true, fullName: true, email: true } },
+        coBdms: { select: { id: true, fullName: true, email: true } },
+        services: { include: { assignedOpsUser: { select: { id: true, fullName: true, email: true } } } },
+        documents: true,
+        payments: true,
+        auditLogs: { include: { user: { select: { id: true, fullName: true } } }, orderBy: { createdAt: 'desc' } },
+      },
+    });
+
+    await recordAuditLog({
+      dealId: req.params.id,
+      userId: req.user.id,
+      action: 'DEAL_AMOUNT_UPDATED',
+      remarks: `Total Deal Amount updated from ₹${Number(currentDeal.totalAmount).toLocaleString('en-IN')} to ₹${newTotal.toLocaleString('en-IN')}.${remarks ? ` Note: ${remarks}` : ''}`,
+    });
+
+    return res.json({ message: 'Deal amount updated successfully.', deal: updatedDeal });
+  } catch (error) {
+    console.error('Update deal amount error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to update deal amount.' });
   }
 });
 

@@ -60,6 +60,11 @@ export default function CollectBalanceModal({ deal, isOpen, onClose, onSuccess }
       return;
     }
 
+    if (!file) {
+      setErrorMsg('Payment screenshot / proof is mandatory. Please attach the payment screenshot.');
+      return;
+    }
+
     if (isCash) {
       if (!cashCollectorName || !cashCollectorName.trim()) {
         setErrorMsg('Please enter the name of the person who collected the cash payment.');
@@ -85,7 +90,7 @@ export default function CollectBalanceModal({ deal, isOpen, onClose, onSuccess }
       }
       formData.append('paymentDate', paymentDate);
       formData.append('notes', notes.trim());
-      if (file && !isCash) {
+      if (file) {
         formData.append('file', file);
       }
 
@@ -262,11 +267,11 @@ export default function CollectBalanceModal({ deal, isOpen, onClose, onSuccess }
             </div>
 
             {/* CASH Payment Mode Handling */}
-            {isCash ? (
+            {isCash && (
               <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
                 <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
                   <IndianRupee className="w-4 h-4 text-amber-700" />
-                  <span>Cash Payment Mode: No Screenshot / Receipt Required</span>
+                  <span>Cash Payment Mode</span>
                 </div>
                 <p className="text-[11px] text-amber-800">
                   Physical cash collected directly. Enter the name of the executive who received the cash.
@@ -285,19 +290,21 @@ export default function CollectBalanceModal({ deal, isOpen, onClose, onSuccess }
                   />
                 </div>
               </div>
-            ) : (
-              <div>
-                <label className="text-slate-700 font-semibold block mb-1 text-xs">
-                  Attach Payment Slip / Screenshot Proof <span className="text-slate-400 font-normal">(Optional)</span>
-                </label>
-                <div className="border border-dashed border-slate-300 hover:border-slate-400 rounded-lg p-4 text-center bg-slate-50/50 transition">
-                  <input
-                    type="file"
-                    id="balance-proof-file"
-                    accept="application/pdf,image/*"
-                    onChange={(e) => setFile(e.target.files?.[0] || null)}
-                    className="hidden"
-                  />
+            )}
+
+            <div>
+              <label className="text-slate-800 font-bold block mb-1 text-xs">
+                Payment Slip / Screenshot Proof <span className="text-rose-500">*</span>
+              </label>
+              <div className="border border-dashed border-slate-300 hover:border-slate-400 rounded-lg p-4 text-center bg-slate-50/50 transition">
+                <input
+                  type="file"
+                  id="balance-proof-file"
+                  required
+                  accept="application/pdf,image/*"
+                  onChange={(e) => setFile(e.target.files?.[0] || null)}
+                  className="hidden"
+                />
                   <label
                     htmlFor="balance-proof-file"
                     className="cursor-pointer flex flex-col items-center justify-center space-y-1.5"
@@ -314,7 +321,6 @@ export default function CollectBalanceModal({ deal, isOpen, onClose, onSuccess }
                   </label>
                 </div>
               </div>
-            )}
 
             {/* Optional Notes */}
             <div>

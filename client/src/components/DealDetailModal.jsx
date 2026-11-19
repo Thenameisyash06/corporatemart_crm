@@ -50,6 +50,10 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
   const [previewDoc, setPreviewDoc] = useState(null);
   const [deliverableFile, setDeliverableFile] = useState(null);
   const [isCollectBalanceOpen, setIsCollectBalanceOpen] = useState(false);
+  const [editingServiceId, setEditingServiceId] = useState(null);
+  const [editingServiceFee, setEditingServiceFee] = useState('');
+  const [isEditingTotalDeal, setIsEditingTotalDeal] = useState(false);
+  const [editingTotalAmount, setEditingTotalAmount] = useState('');
   const [renewalForm, setRenewalForm] = useState({
     serviceName: 'Annual ROC Compliance & Filing',
     dueDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -148,6 +152,40 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
       await fetchDeal();
     } catch (err) {
       setErrorMsg('Failed to update service milestone.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleUpdateServiceFee = async (serviceId, newFee) => {
+    try {
+      setActionLoading(true);
+      setErrorMsg(null);
+      await api.patch(`/deals/${deal.id}/services/${serviceId}`, {
+        serviceFee: parseFloat(newFee) || 0,
+      });
+      setSuccessMsg('Service deal amount updated successfully.');
+      await fetchDeal();
+      if (onRefreshParent) onRefreshParent();
+    } catch (err) {
+      setErrorMsg(err.response?.data?.error || 'Failed to update service deal amount.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleUpdateTotalDealAmount = async (newTotal) => {
+    try {
+      setActionLoading(true);
+      setErrorMsg(null);
+      await api.patch(`/deals/${deal.id}/deal-amount`, {
+        totalAmount: parseFloat(newTotal) || 0,
+      });
+      setSuccessMsg('Total deal amount updated successfully.');
+      await fetchDeal();
+      if (onRefreshParent) onRefreshParent();
+    } catch (err) {
+      setErrorMsg(err.response?.data?.error || 'Failed to update total deal amount.');
     } finally {
       setActionLoading(false);
     }
@@ -537,7 +575,46 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
                   receivedAmount={deal.amountReceived}
                   pendingAmount={pendingAmount}
                   receivingAccount={deal.receivingAccount}
+                  onEditDealAmount={() => {
+                    setIsEditingTotalDeal(true);
+                    setEditingTotalAmount(deal.totalAmount || 0);
+                  }}
                 />
+
+                {isEditingTotalDeal && (
+                  <div className="p-3 bg-indigo-50/80 border border-indigo-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-indigo-950">Adjust Total Deal Amount:</span>
+                      <span className="font-bold text-slate-700">₹</span>
+                      <input
+                        type="number"
+                        min="1"
+                        value={editingTotalAmount}
+                        onChange={(e) => setEditingTotalAmount(e.target.value)}
+                        className="w-36 bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-900 focus:outline-none focus:border-slate-800"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await handleUpdateTotalDealAmount(editingTotalAmount);
+                          setIsEditingTotalDeal(false);
+                        }}
+                        className="px-3 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold shadow-xs cursor-pointer"
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingTotalDeal(false)}
+                        className="px-2.5 py-1 text-slate-600 hover:text-slate-900 text-xs font-medium cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Departmental Workflow & Desks */}
@@ -811,10 +888,66 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div>
                       <h4 className="font-bold text-sm text-slate-900">{svc.serviceName}</h4>
-                      <p className="text-xs text-slate-600 mt-1">
-                        Service Fee: <strong className="text-slate-800">₹{Number(svc.serviceFee).toLocaleString('en-IN')}</strong>{' '}
-                        {svc.govtFee && `• Govt Fee: ₹${Number(svc.govtFee).toLocaleString('en-IN')}`}
-                      </p>
+                      <div className="text-xs text-slate-600 mt-1 flex items-center gap-2 flex-wrap">
+                        <span>
+                          Deal Amount:{' '}
+                          {editingServiceId === svc.id ? (
+                            <span className="inline-flex items-center gap-1">
+                              <span className="font-bold text-slate-700">₹</span>
+                              <input
+                                type="number"
+                                min="0"
+                                value={editingServiceFee}
+                                onChange={(e) => setEditingServiceFee(e.target.value)}
+                                className="w-24 bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs font-bold text-slate-900 focus:outline-none focus:border-slate-800"
+                              />
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await handleUpdateServiceFee(svc.id, editingServiceFee);
+                                  setEditingServiceId(null);
+                                }}
+                                className="px-2 py-0.5 text-white bg-slate-900 hover:bg-slate-800 rounded text-[10px] font-bold cursor-pointer"
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingServiceId(null)}
+                                className="px-1.5 py-0.5 text-slate-500 hover:text-slate-800 text-[10px] cursor-pointer"
+                              >
+                                Cancel
+                              </button>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5">
+                              <strong className="text-slate-900 font-bold">
+                                ₹{Number(svc.serviceFee || 0).toLocaleString('en-IN')}
+                              </strong>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingServiceId(svc.id);
+                                  setEditingServiceFee(svc.serviceFee || 0);
+                                }}
+                                className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold underline cursor-pointer"
+                              >
+                                Edit Amount
+                              </button>
+                            </span>
+                          )}
+                        </span>
+                        {svc.standardAmount && (
+                          <span className="text-slate-400">
+                            • Standard: ₹{Number(svc.standardAmount).toLocaleString('en-IN')}
+                          </span>
+                        )}
+                        {svc.govtFee && (
+                          <span className="text-slate-400">
+                            • Govt Fee: ₹{Number(svc.govtFee).toLocaleString('en-IN')}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <span className="text-xs px-2.5 py-1 rounded-md bg-white text-slate-800 border border-slate-300 font-semibold self-start sm:self-auto shadow-xs">
                       {svc.status}

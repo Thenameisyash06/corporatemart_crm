@@ -93,6 +93,49 @@ export default function RmWorkbench({ currentUser, onRefreshParent, onOpenDossie
     },
   ]);
 
+  const [editingTotalDealId, setEditingTotalDealId] = useState(null);
+  const [editingTotalDealAmount, setEditingTotalDealAmount] = useState('');
+  const [editingSvcId, setEditingSvcId] = useState(null);
+  const [editingSvcAmount, setEditingSvcAmount] = useState('');
+
+  const handleSaveTotalDealAmount = async () => {
+    if (!selectedDeal) return;
+    try {
+      const newTotal = parseFloat(editingTotalDealAmount);
+      if (isNaN(newTotal) || newTotal <= 0) {
+        alert('Please enter a valid deal amount.');
+        return;
+      }
+      await api.patch(`/deals/${selectedDeal.id}/deal-amount`, {
+        totalAmount: newTotal,
+      });
+      setFeedback({ type: 'success', message: `Total deal amount updated to ₹${newTotal.toLocaleString('en-IN')}` });
+      setEditingTotalDealId(null);
+      await fetchRmQueue();
+    } catch (err) {
+      setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to update deal amount.' });
+    }
+  };
+
+  const handleSaveServiceDealAmount = async (serviceId, amount) => {
+    if (!selectedDeal) return;
+    try {
+      const newFee = parseFloat(amount);
+      if (isNaN(newFee) || newFee < 0) {
+        alert('Please enter a valid service amount.');
+        return;
+      }
+      await api.patch(`/deals/${selectedDeal.id}/services/${serviceId}`, {
+        serviceFee: newFee,
+      });
+      setFeedback({ type: 'success', message: `Service deal amount updated to ₹${newFee.toLocaleString('en-IN')}` });
+      setEditingSvcId(null);
+      await fetchRmQueue();
+    } catch (err) {
+      setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to update service deal amount.' });
+    }
+  };
+
   const fetchRmQueue = async () => {
     try {
       setLoading(true);
@@ -591,19 +634,64 @@ export default function RmWorkbench({ currentUser, onRefreshParent, onOpenDossie
                   </div>
 
                   <div className="p-3 bg-white rounded-lg border border-slate-200 space-y-1">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase block">Commercial Terms</span>
-                    <div className="font-bold text-slate-900 text-sm">
-                      Total: ₹{Number(selectedDeal.totalAmount || 0).toLocaleString('en-IN')}
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase block">Commercial Terms</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingTotalDealId(selectedDeal.id);
+                          setEditingTotalDealAmount(selectedDeal.totalAmount || 0);
+                        }}
+                        className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold underline cursor-pointer"
+                      >
+                        Edit Deal Amount
+                      </button>
                     </div>
-                    <div className="text-emerald-700 font-medium text-[11px]">
-                      Received: ₹{Number(selectedDeal.amountReceived || 0).toLocaleString('en-IN')}
-                    </div>
-                    {Number(selectedDeal.pendingAmount) > 0 ? (
-                      <div className="text-amber-700 font-medium text-[11px]">
-                        Pending Balance: ₹{Number(selectedDeal.pendingAmount).toLocaleString('en-IN')}
+                    {editingTotalDealId === selectedDeal.id ? (
+                      <div className="space-y-1.5 pt-1">
+                        <div className="flex items-center gap-1">
+                          <span className="font-bold text-xs">₹</span>
+                          <input
+                            type="number"
+                            min="1"
+                            value={editingTotalDealAmount}
+                            onChange={(e) => setEditingTotalDealAmount(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 text-xs font-bold text-slate-900 focus:outline-none focus:border-slate-800"
+                          />
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={handleSaveTotalDealAmount}
+                            className="px-2 py-0.5 bg-slate-900 hover:bg-slate-800 text-white rounded text-[10px] font-bold cursor-pointer"
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingTotalDealId(null)}
+                            className="px-1.5 py-0.5 text-slate-500 hover:text-slate-800 text-[10px] cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
                       </div>
                     ) : (
-                      <div className="text-emerald-700 font-bold text-[11px]">✓ 100% Paid in Full</div>
+                      <>
+                        <div className="font-bold text-slate-900 text-sm">
+                          Total: ₹{Number(selectedDeal.totalAmount || 0).toLocaleString('en-IN')}
+                        </div>
+                        <div className="text-emerald-700 font-medium text-[11px]">
+                          Received: ₹{Number(selectedDeal.amountReceived || 0).toLocaleString('en-IN')}
+                        </div>
+                        {Number(selectedDeal.pendingAmount) > 0 ? (
+                          <div className="text-amber-700 font-medium text-[11px]">
+                            Pending Balance: ₹{Number(selectedDeal.pendingAmount).toLocaleString('en-IN')}
+                          </div>
+                        ) : (
+                          <div className="text-emerald-700 font-bold text-[11px]">✓ 100% Paid in Full</div>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -705,7 +793,46 @@ export default function RmWorkbench({ currentUser, onRefreshParent, onOpenDossie
                               </span>
                             </div>
                             <div className="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5">
-                              <span>Fee: ₹{Number(svc.serviceFee || 0).toLocaleString('en-IN')}</span>
+                              {editingSvcId === svc.id ? (
+                                <span className="inline-flex items-center gap-1">
+                                  <span className="font-bold text-slate-700">Fee: ₹</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={editingSvcAmount}
+                                    onChange={(e) => setEditingSvcAmount(e.target.value)}
+                                    className="w-24 bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs font-bold text-slate-900 focus:outline-none focus:border-slate-800"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSaveServiceDealAmount(svc.id, editingSvcAmount)}
+                                    className="px-2 py-0.5 bg-slate-900 hover:bg-slate-800 text-white rounded text-[10px] font-bold cursor-pointer"
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingSvcId(null)}
+                                    className="px-1.5 py-0.5 text-slate-500 hover:text-slate-800 text-[10px] cursor-pointer"
+                                  >
+                                    Cancel
+                                  </button>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1.5">
+                                  <span>Fee: <strong className="text-slate-900 font-bold">₹{Number(svc.serviceFee || 0).toLocaleString('en-IN')}</strong></span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingSvcId(svc.id);
+                                      setEditingSvcAmount(svc.serviceFee || 0);
+                                    }}
+                                    className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold underline cursor-pointer"
+                                  >
+                                    Edit Fee
+                                  </button>
+                                </span>
+                              )}
                               <span>•</span>
                               <span>
                                 Assigned Specialist: <strong className="text-slate-700">{svc.assignedOpsUser?.fullName || 'In Operations Pool'}</strong>
@@ -803,7 +930,48 @@ export default function RmWorkbench({ currentUser, onRefreshParent, onOpenDossie
                                 {isCompleted ? 'COMPLETED & READY FOR CLIENT' : `STATUS: ${svc.status}`}
                               </span>
                             </div>
-                            <div className="text-xs text-slate-600 mt-1">
+                            <div className="text-xs text-slate-600 mt-1 flex items-center gap-2 flex-wrap">
+                              {editingSvcId === svc.id ? (
+                                <span className="inline-flex items-center gap-1">
+                                  <span className="font-bold text-slate-700">Deal Amount: ₹</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={editingSvcAmount}
+                                    onChange={(e) => setEditingSvcAmount(e.target.value)}
+                                    className="w-24 bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs font-bold text-slate-900 focus:outline-none focus:border-slate-800"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSaveServiceDealAmount(svc.id, editingSvcAmount)}
+                                    className="px-2 py-0.5 bg-slate-900 hover:bg-slate-800 text-white rounded text-[10px] font-bold cursor-pointer"
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingSvcId(null)}
+                                    className="px-1.5 py-0.5 text-slate-500 hover:text-slate-800 text-[10px] cursor-pointer"
+                                  >
+                                    Cancel
+                                  </button>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1.5">
+                                  <span>Deal Amount: <strong className="text-slate-900 font-bold">₹{Number(svc.serviceFee || 0).toLocaleString('en-IN')}</strong></span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingSvcId(svc.id);
+                                      setEditingSvcAmount(svc.serviceFee || 0);
+                                    }}
+                                    className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold underline cursor-pointer"
+                                  >
+                                    Edit
+                                  </button>
+                                </span>
+                              )}
+                              <span>•</span>
                               {svc.govApplicationNumber ? (
                                 <>Govt Ref: <strong className="font-mono text-slate-800">{svc.govApplicationNumber}</strong> • </>
                               ) : (

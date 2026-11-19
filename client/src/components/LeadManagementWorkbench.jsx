@@ -138,8 +138,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(25);
-  const [pagination, setPagination] = useState({ page: 1, limit: 25, total: 0, totalPages: 1 });
+  const [limit, setLimit] = useState(10);
+  const [pagination, setPagination] = useState({ page: 1, limit: 10, total: 0, totalPages: 1 });
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState(null);
   const [formErrors, setFormErrors] = useState({});
@@ -2975,26 +2975,6 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 </strong>{' '}
                 of <strong className="text-slate-900">{pagination.total}</strong> leads
               </span>
-              <span className="text-slate-300">|</span>
-              <div className="flex items-center gap-1.5">
-                <label htmlFor="leads-limit-select" className="text-slate-500">Per page:</label>
-                <select
-                  id="leads-limit-select"
-                  value={pagination.limit}
-                  onChange={(e) => {
-                    const newLimit = Number(e.target.value);
-                    setLimit(newLimit);
-                    setPage(1);
-                    fetchLeads(1, newLimit);
-                  }}
-                  className="border border-slate-200 rounded px-2 py-1 bg-slate-50 font-medium text-slate-800 focus:outline-none focus:border-slate-800"
-                >
-                  <option value={15}>15</option>
-                  <option value={25}>25</option>
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
-                </select>
-              </div>
             </div>
 
             <div className="flex items-center gap-1">
