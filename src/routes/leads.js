@@ -178,6 +178,25 @@ async function ensureLeadsTable() {
         BEGIN
           ALTER TABLE "leads" ADD COLUMN "followUps" JSONB DEFAULT '[]'::jsonb;
         EXCEPTION WHEN duplicate_column THEN END;
+        BEGIN
+          ALTER TABLE "leads" ADD COLUMN "nextFollowUpDate" TIMESTAMP(3);
+        EXCEPTION WHEN duplicate_column THEN END;
+        BEGIN
+          UPDATE "leads"
+          SET "nextFollowUpDate" = (
+            SELECT (elem->>'date')::timestamp
+            FROM jsonb_array_elements("followUps") AS elem
+            WHERE elem->>'date' IS NOT NULL AND elem->>'date' != ''
+            ORDER BY (elem->>'date')::timestamp DESC
+            LIMIT 1
+          )
+          WHERE "nextFollowUpDate" IS NULL AND "followUps" IS NOT NULL AND jsonb_array_length("followUps") > 0;
+        EXCEPTION WHEN OTHERS THEN END;
+        BEGIN
+          UPDATE "leads"
+          SET "nextFollowUpDate" = COALESCE("meetingDate", "expectedDateOfCloser", "createdAt")
+          WHERE "nextFollowUpDate" IS NULL;
+        EXCEPTION WHEN OTHERS THEN END;
       END $$;
     `);
 
@@ -221,10 +240,24 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       search,
       teamMember,
       todayMeetings,
+      monthFilter, // 'ALL' | 'THIS_MONTH' | 'NEXT_MONTH'
     } = req.query;
 
     const isAdmin = req.user.role === 'ADMIN';
     const isBdmOnly = req.user.role === 'BDM';
+
+    // Compute calendar bounds for This Month and Next Month
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth(); // 0 to 11
+
+    const startOfThisMonth = new Date(currentYear, currentMonth, 1, 0, 0, 0, 0);
+    const endOfThisMonth = new Date(currentYear, currentMonth + 1, 0, 23, 59, 59, 999);
+
+    const nextMonth = (currentMonth + 1) % 12;
+    const nextYear = currentMonth === 11 ? currentYear + 1 : currentYear;
+    const startOfNextMonth = new Date(nextYear, nextMonth, 1, 0, 0, 0, 0);
+    const endOfNextMonth = new Date(nextYear, nextMonth + 1, 0, 23, 59, 59, 999);
 
     // Build SQL Query conditions
     const conditions = [];
@@ -233,24 +266,35 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
 
     // RBAC: If BDM and scope is 'my' (or default for BDM), strictly restrict to:
     // 1. Their own leads (as BDM-1, BDM-2, or creator)
-    // 2. Leads where closerStatus = 'Lead Sharing' and the user is the assigned Leader
+    // 2. If user is an LMS Leader (myLeaderName provided), also include leads under their leadership
     if (isBdmOnly || scope === 'my') {
       const userFullName = (req.user.fullName || '').replace(/\s*\([^)]*\)/g, '').trim();
       const targetBdm = (!isBdmOnly && req.query.myBdmName && req.query.myBdmName.trim()) 
         ? req.query.myBdmName.trim() 
         : userFullName;
-      const targetLeader = (!isBdmOnly && req.query.myLeaderName && req.query.myLeaderName.trim())
+      const targetLeader = req.query.myLeaderName && req.query.myLeaderName.trim()
         ? req.query.myLeaderName.trim()
-        : userFullName;
+        : null;
 
-      conditions.push(`(
-        "bdmName1" ILIKE $${paramIndex} 
-        OR "bdmName2" ILIKE $${paramIndex}
-        OR ("createdById" = $${paramIndex + 1} AND ("bdmName1" ILIKE $${paramIndex} OR "bdmName1" = '' OR "bdmName1" IS NULL))
-        OR ("leaderName" ILIKE $${paramIndex + 2})
-      )`);
-      params.push(`%${targetBdm}%`, req.user.id, `%${targetLeader}%`);
-      paramIndex += 3;
+      if (targetLeader) {
+        conditions.push(`(
+          "bdmName1" ILIKE $${paramIndex} 
+          OR "bdmName2" ILIKE $${paramIndex}
+          OR ("createdById" = $${paramIndex + 1} AND ("bdmName1" ILIKE $${paramIndex} OR "bdmName1" = '' OR "bdmName1" IS NULL))
+          OR ("leaderName" ILIKE $${paramIndex + 2})
+        )`);
+        params.push(`%${targetBdm}%`, req.user.id, `%${targetLeader}%`);
+        paramIndex += 3;
+      } else {
+        // Regular BDM: strictly their own leads only
+        conditions.push(`(
+          "bdmName1" ILIKE $${paramIndex} 
+          OR "bdmName2" ILIKE $${paramIndex}
+          OR ("createdById" = $${paramIndex + 1} AND ("bdmName1" ILIKE $${paramIndex} OR "bdmName1" = '' OR "bdmName1" IS NULL))
+        )`);
+        params.push(`%${targetBdm}%`, req.user.id);
+        paramIndex += 2;
+      }
     } else if (bdmName && bdmName !== 'ALL') {
       conditions.push(`("bdmName1" = $${paramIndex} OR "bdmName2" = $${paramIndex})`);
       params.push(bdmName);
@@ -303,6 +347,8 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       conditions.push(`"meetingDate" IS NOT NULL AND "leadStatus" != 'CLOSED_LOST'`);
     }
 
+
+
     if (search && search.trim()) {
       const q = `%${search.trim()}%`;
       conditions.push(`("companyName" ILIKE $${paramIndex} OR "directorName" ILIKE $${paramIndex} OR "mobileNo" ILIKE $${paramIndex} OR "emailId" ILIKE $${paramIndex} OR "remarks" ILIKE $${paramIndex})`);
@@ -312,41 +358,24 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     
-    // 1. Fetch lightweight summary rows for 100% accurate full-dataset analytics and total count
+    // 1. Fetch lightweight summary rows for 100% accurate full-dataset analytics across ALL months
     const summarySql = `
       SELECT 
         "id", "companyName", "bdmName1", "bdmName2", "leaderName", "createdById",
         "closerStatus", "sourcingStatus", "meetingStatus", "meetingDate", 
         "clientStatus", "leadStatus", "dealValue", "expectedDateOfCloser",
-        "followUps", "createdAt"
+        "followUps", "nextFollowUpDate", "createdAt"
       FROM "leads" ${whereClause}
+      ORDER BY "createdAt" DESC
     `;
     const summaryRows = await prisma.$queryRawUnsafe(summarySql, ...params);
 
-    // 2. Fetch paginated lead slice
-    const total = summaryRows.length;
-    const isAll = req.query.limit === 'all' || req.query.all === 'true';
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = isAll ? null : Math.max(1, parseInt(req.query.limit, 10) || 25);
-    const offset = isAll ? 0 : (page - 1) * limit;
-
-    let paginatedSql;
-    let paginatedParams = [...params];
-
-    if (isAll) {
-      paginatedSql = `SELECT * FROM "leads" ${whereClause} ORDER BY "createdAt" DESC`;
-    } else {
-      paginatedSql = `SELECT * FROM "leads" ${whereClause} ORDER BY "createdAt" DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
-      paginatedParams.push(limit, offset);
-    }
-
-    const leads = await prisma.$queryRawUnsafe(paginatedSql, ...paginatedParams);
-    const totalPages = isAll ? 1 : Math.max(1, Math.ceil(total / limit));
+    // Target month filter: strictly default to THIS_MONTH
+    const targetMonth = (monthFilter === 'NEXT_MONTH') ? 'NEXT_MONTH' : 'THIS_MONTH';
 
     // Compute Analytics on the full summary dataset
-    const now = new Date();
     const analytics = {
-      totalLeads: summaryRows.length,
+      totalLeads: 0,
       byMeetingStatus: {},
       bySourcingStatus: {},
       byCloserStatus: {},
@@ -363,6 +392,23 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       lostFunnelValue: 0,
       convertedFunnelValue: 0,
       bdmFunnel: {},
+      monthMeta: {
+        thisMonthLabel: startOfThisMonth.toLocaleString('en-US', { month: 'short', year: 'numeric' }),
+        nextMonthLabel: startOfNextMonth.toLocaleString('en-US', { month: 'short', year: 'numeric' }),
+        activeFilter: targetMonth,
+      },
+      thisMonthCount: 0,
+      nextMonthCount: 0,
+      thisMonthFunnel: 0,
+      nextMonthFunnel: 0,
+      myThisMonthCount: 0,
+      myNextMonthCount: 0,
+      myThisMonthFunnel: 0,
+      myNextMonthFunnel: 0,
+      myThisMonthHot: 0,
+      myNextMonthHot: 0,
+      myThisMonthWarm: 0,
+      myNextMonthWarm: 0,
     };
 
     // Initialize counts with 0 for all standard options
@@ -383,78 +429,13 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
     let myDirectHot = 0;
     let myDirectWarm = 0;
     const teamMembersMap = {};
+    const activeSummaryRows = [];
 
     summaryRows.forEach((l) => {
-      // Client status
-      const rawCs = (l.clientStatus || 'Warm').toLowerCase();
-      if (l.clientStatus) {
-        const cs = l.clientStatus.charAt(0).toUpperCase() + l.clientStatus.slice(1).toLowerCase();
-        analytics.byClientStatus[cs] = (analytics.byClientStatus[cs] || 0) + 1;
-      }
-      // Meeting status
-      if (l.meetingStatus) {
-        analytics.byMeetingStatus[l.meetingStatus] = (analytics.byMeetingStatus[l.meetingStatus] || 0) + 1;
-      }
-      // Sourcing status
-      if (l.sourcingStatus) {
-        analytics.bySourcingStatus[l.sourcingStatus] = (analytics.bySourcingStatus[l.sourcingStatus] || 0) + 1;
-      }
-      // Closer status
-      if (l.closerStatus) {
-        analytics.byCloserStatus[l.closerStatus] = (analytics.byCloserStatus[l.closerStatus] || 0) + 1;
-      }
-      // Leader
-      if (l.leaderName) {
-        analytics.byLeader[l.leaderName] = (analytics.byLeader[l.leaderName] || 0) + 1;
-      }
-      // BDM
-      if (l.bdmName1) {
-        analytics.byBdm[l.bdmName1] = (analytics.byBdm[l.bdmName1] || 0) + 1;
-      }
-      // Stage
-      const stage = l.leadStatus || 'OPEN';
-      analytics.byStage[stage] = (analytics.byStage[stage] || 0) + 1;
-
-      // Deal value and Funnel aggregation
       const val = l.dealValue ? parseFloat(l.dealValue) || 0 : 0;
-      if (val > 0) {
-        analytics.totalEstimatedValue += val;
-        if (rawCs === 'hot') analytics.hotFunnelValue += val;
-        else if (rawCs === 'warm') analytics.warmFunnelValue += val;
-        else if (rawCs === 'lost') analytics.lostFunnelValue += val;
-
-        if (stage === 'CLOSED_WON') {
-          analytics.convertedFunnelValue += val;
-        } else if (stage !== 'CLOSED_LOST') {
-          analytics.activeFunnelValue += val;
-        }
-      }
-
-      // Aggregate into bdmFunnel
+      const stage = l.leadStatus || 'OPEN';
+      const rawCs = (l.clientStatus || 'warm').toLowerCase();
       const bdm1 = (l.bdmName1 || '').trim();
-      if (bdm1) {
-        if (!analytics.bdmFunnel[bdm1]) {
-          analytics.bdmFunnel[bdm1] = { count: 0, totalValue: 0, hotValue: 0, warmValue: 0, lostValue: 0 };
-        }
-        analytics.bdmFunnel[bdm1].count++;
-        analytics.bdmFunnel[bdm1].totalValue += val;
-        if (rawCs === 'hot') analytics.bdmFunnel[bdm1].hotValue += val;
-        else if (rawCs === 'warm') analytics.bdmFunnel[bdm1].warmValue += val;
-        else if (rawCs === 'lost') analytics.bdmFunnel[bdm1].lostValue += val;
-      }
-
-      // EDC Urgency
-      if (l.expectedDateOfCloser) {
-        const edcDate = new Date(l.expectedDateOfCloser);
-        const diffDays = Math.ceil((edcDate - now) / (1000 * 60 * 60 * 24));
-        if (diffDays < 0 && l.leadStatus !== 'CLOSED_WON' && l.leadStatus !== 'CLOSED_LOST') {
-          analytics.overdueEdcCount++;
-        } else if (diffDays >= 0 && diffDays <= 7 && l.leadStatus !== 'CLOSED_WON') {
-          analytics.upcomingEdcCount++;
-        }
-      }
-
-      // Personal direct leads vs leader shared team leads metrics
       const bdm1Lower = (l.bdmName1 || '').toLowerCase().trim();
       const bdm2Lower = (l.bdmName2 || '').toLowerCase().trim();
       const leadLeaderLower = (l.leaderName || '').toLowerCase().trim();
@@ -468,11 +449,111 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
             (l.createdById === req.user.id && (!l.bdmName1 || bdm1Lower.includes(userFullNameClean) || userFullNameClean.includes(bdm1Lower)))
           );
 
-      if (isOwnLead) {
-        myDirectCount++;
-        myDirectFunnel += val;
-        if (rawCs === 'hot') myDirectHot += val;
-        else if (rawCs === 'warm') myDirectWarm += val;
+      // Monthly categorization (This Month vs Next Month)
+      const effDate = l.nextFollowUpDate
+        ? new Date(l.nextFollowUpDate)
+        : (l.meetingDate ? new Date(l.meetingDate) : (l.expectedDateOfCloser ? new Date(l.expectedDateOfCloser) : new Date(l.createdAt)));
+      const isThisMonth = effDate >= startOfThisMonth && effDate <= endOfThisMonth;
+      const isNextMonth = effDate >= startOfNextMonth && effDate <= endOfNextMonth;
+
+      // Always populate monthly counters across the entire dataset so both tabs retain their numbers!
+      if (isThisMonth) {
+        analytics.thisMonthCount++;
+        analytics.thisMonthFunnel += val;
+        if (isOwnLead) {
+          analytics.myThisMonthCount++;
+          analytics.myThisMonthFunnel += val;
+          if (rawCs === 'hot') analytics.myThisMonthHot += val;
+          else if (rawCs === 'warm') analytics.myThisMonthWarm += val;
+        }
+      } else if (isNextMonth) {
+        analytics.nextMonthCount++;
+        analytics.nextMonthFunnel += val;
+        if (isOwnLead) {
+          analytics.myNextMonthCount++;
+          analytics.myNextMonthFunnel += val;
+          if (rawCs === 'hot') analytics.myNextMonthHot += val;
+          else if (rawCs === 'warm') analytics.myNextMonthWarm += val;
+        }
+      }
+
+      // Check if lead matches the active month tab view
+      const matchesActiveMonth = targetMonth === 'NEXT_MONTH' ? isNextMonth : isThisMonth;
+
+      if (matchesActiveMonth) {
+        activeSummaryRows.push(l);
+
+        // Client status for active month
+        if (l.clientStatus) {
+          const cs = l.clientStatus.charAt(0).toUpperCase() + l.clientStatus.slice(1).toLowerCase();
+          analytics.byClientStatus[cs] = (analytics.byClientStatus[cs] || 0) + 1;
+        }
+        // Meeting status for active month
+        if (l.meetingStatus) {
+          analytics.byMeetingStatus[l.meetingStatus] = (analytics.byMeetingStatus[l.meetingStatus] || 0) + 1;
+        }
+        // Sourcing status for active month
+        if (l.sourcingStatus) {
+          analytics.bySourcingStatus[l.sourcingStatus] = (analytics.bySourcingStatus[l.sourcingStatus] || 0) + 1;
+        }
+        // Closer status for active month
+        if (l.closerStatus) {
+          analytics.byCloserStatus[l.closerStatus] = (analytics.byCloserStatus[l.closerStatus] || 0) + 1;
+        }
+        // Leader
+        if (l.leaderName) {
+          analytics.byLeader[l.leaderName] = (analytics.byLeader[l.leaderName] || 0) + 1;
+        }
+        // BDM
+        if (l.bdmName1) {
+          analytics.byBdm[l.bdmName1] = (analytics.byBdm[l.bdmName1] || 0) + 1;
+        }
+        // Stage
+        analytics.byStage[stage] = (analytics.byStage[stage] || 0) + 1;
+
+        // Deal value and Funnel aggregation for active month
+        if (val > 0) {
+          analytics.totalEstimatedValue += val;
+          if (rawCs === 'hot') analytics.hotFunnelValue += val;
+          else if (rawCs === 'warm') analytics.warmFunnelValue += val;
+          else if (rawCs === 'lost') analytics.lostFunnelValue += val;
+
+          if (stage === 'CLOSED_WON') {
+            analytics.convertedFunnelValue += val;
+          } else if (stage !== 'CLOSED_LOST') {
+            analytics.activeFunnelValue += val;
+          }
+        }
+
+        // Aggregate into bdmFunnel for active month
+        if (bdm1) {
+          if (!analytics.bdmFunnel[bdm1]) {
+            analytics.bdmFunnel[bdm1] = { count: 0, totalValue: 0, hotValue: 0, warmValue: 0, lostValue: 0 };
+          }
+          analytics.bdmFunnel[bdm1].count++;
+          analytics.bdmFunnel[bdm1].totalValue += val;
+          if (rawCs === 'hot') analytics.bdmFunnel[bdm1].hotValue += val;
+          else if (rawCs === 'warm') analytics.bdmFunnel[bdm1].warmValue += val;
+          else if (rawCs === 'lost') analytics.bdmFunnel[bdm1].lostValue += val;
+        }
+
+        // EDC Urgency
+        if (l.expectedDateOfCloser) {
+          const edcDate = new Date(l.expectedDateOfCloser);
+          const diffDays = Math.ceil((edcDate - now) / (1000 * 60 * 60 * 24));
+          if (diffDays < 0 && l.leadStatus !== 'CLOSED_WON' && l.leadStatus !== 'CLOSED_LOST') {
+            analytics.overdueEdcCount++;
+          } else if (diffDays >= 0 && diffDays <= 7 && l.leadStatus !== 'CLOSED_WON') {
+            analytics.upcomingEdcCount++;
+          }
+        }
+
+        if (isOwnLead) {
+          myDirectCount++;
+          myDirectFunnel += val;
+          if (rawCs === 'hot') myDirectHot += val;
+          else if (rawCs === 'warm') myDirectWarm += val;
+        }
       }
 
       const isSharedWithMeAsLeader = !isOwnLead &&
@@ -491,6 +572,33 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
         teamMembersMap[memberName].leads.push(l);
       }
     });
+
+    analytics.totalLeads = activeSummaryRows.length;
+    analytics.myDirectFunnel = myDirectFunnel;
+    analytics.myDirectHot = myDirectHot;
+    analytics.myDirectWarm = myDirectWarm;
+    analytics.myDirectCount = myDirectCount;
+
+    // 2. Fetch paginated lead slice strictly for active month
+    const total = activeSummaryRows.length;
+    const isAll = req.query.limit === 'all' || req.query.all === 'true';
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = isAll ? null : Math.max(1, parseInt(req.query.limit, 10) || 25);
+    const offset = isAll ? 0 : (page - 1) * limit;
+
+    let leads = [];
+    if (total > 0) {
+      const pageSlice = isAll ? activeSummaryRows : activeSummaryRows.slice(offset, offset + limit);
+      const pageIds = pageSlice.map((r) => r.id);
+      if (pageIds.length > 0) {
+        const placeholders = pageIds.map((_, i) => `$${i + 1}`).join(', ');
+        leads = await prisma.$queryRawUnsafe(
+          `SELECT * FROM "leads" WHERE "id" IN (${placeholders}) ORDER BY "createdAt" DESC`,
+          ...pageIds
+        );
+      }
+    }
+    const totalPages = isAll ? 1 : Math.max(1, Math.ceil(total / limit));
 
     // Compute team member pipeline cards for Leader BDM
     const teamMembersOverview = Object.values(teamMembersMap).map((member) => {
@@ -702,6 +810,7 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
     const parsedMeetingDate = meetingDate ? new Date(meetingDate) : null;
     const finalStage = leadStatus || 'OPEN';
     const finalValue = dealValue ? parseFloat(dealValue) : null;
+    const initialFollowUpDate = parsedMeetingDate || edc || new Date();
 
     await prisma.$executeRawUnsafe(
       `INSERT INTO "leads" (
@@ -709,8 +818,8 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
         "leaderName", "bdmName1", "bdmName2", "closerStatus", "sourcingStatus",
         "meetingStatus", "meetingDate", "clientStatus", "expectedDateOfCloser", "leadStatus", "dealValue",
         "remarks", "quotationFileUrl", "quotationFileName", "quotationFileSize",
-        "createdById", "createdAt", "updatedAt"
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW(), NOW())`,
+        "createdById", "nextFollowUpDate", "createdAt", "updatedAt"
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, NOW(), NOW())`,
       id,
       companyName.trim(),
       directorName ? directorName.trim() : null,
@@ -731,7 +840,8 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
       quotationFileUrl,
       file.originalname,
       file.size,
-      req.user.id
+      req.user.id,
+      initialFollowUpDate
     );
 
     const [created] = await prisma.$queryRawUnsafe(`SELECT * FROM "leads" WHERE "id" = $1`, id);
@@ -1003,17 +1113,20 @@ router.post('/:id/follow-up', authenticateToken, requireRoles('BDM', 'ADMIN'), a
       finalLeadStatus = 'CLOSED_WON';
     }
 
-    // Atomic SQL JSONB append to prevent race conditions
+    // Atomic SQL JSONB append to prevent race conditions and update nextFollowUpDate
+    const followUpDateObj = new Date(date);
     await prisma.$executeRawUnsafe(
       `UPDATE "leads" SET 
         "followUps" = COALESCE("followUps", '[]'::jsonb) || $1::jsonb,
         "clientStatus" = $2,
         "leadStatus" = $3,
+        "nextFollowUpDate" = $4,
         "updatedAt" = NOW()
-      WHERE "id" = $4`,
+      WHERE "id" = $5`,
       JSON.stringify([newEntry]),
       finalClientStatus,
       finalLeadStatus,
+      isNaN(followUpDateObj.getTime()) ? new Date() : followUpDateObj,
       id
     );
 
