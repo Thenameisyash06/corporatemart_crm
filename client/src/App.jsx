@@ -12,6 +12,7 @@ import RmWorkbench from './components/RmWorkbench';
 import AdminDashboard from './components/AdminDashboard';
 import LeadManagementWorkbench from './components/LeadManagementWorkbench';
 import MeetingTodayPopup from './components/MeetingTodayPopup';
+import LeadAlertPopup from './components/LeadAlertPopup';
 import { filterTodayMeetings } from './lib/meetingUtils';
 import api from './lib/api';
 import {
@@ -53,6 +54,7 @@ export default function App() {
   const [dealsLimit, setDealsLimit] = useState(10);
   const [dealsPagination, setDealsPagination] = useState({ page: 1, limit: 10, total: 0, totalPages: 1 });
   const [previousCrmTab, setPreviousCrmTab] = useState('pipeline');
+  const [isLeadAlertShowing, setIsLeadAlertShowing] = useState(false);
   const currentMode = activeTab === 'lms' ? 'LMS' : 'CRM';
 
   const handleSwitchMode = (targetMode) => {
@@ -392,8 +394,17 @@ export default function App() {
         onNavigateToLms={handleNavigateToLms}
       />
 
-      {/* TODAY'S MEETING ALERT POPUP (3-4 SECONDS ON LOGIN / REFRESH) - ONLY FOR BDM (LEADERS & MEMBERS) */}
-      {currentUser?.role === 'BDM' && showMeetingPopup && todayMeetings.length > 0 && (
+      {/* LEAD REVOCATION & ASSIGNMENT POP-UP ALERT (FOR BOTH BDMs) */}
+      {currentUser?.role === 'BDM' && (
+        <LeadAlertPopup
+          currentUser={currentUser}
+          onNavigateToLms={handleNavigateToLms}
+          onAlertActiveChange={setIsLeadAlertShowing}
+        />
+      )}
+
+      {/* TODAY'S MEETING ALERT POPUP (3-4 SECONDS ON LOGIN / REFRESH - ONLY WHEN NO URGENT LEAD REVOCATION POPUP IS ACTIVE) */}
+      {currentUser?.role === 'BDM' && !isLeadAlertShowing && showMeetingPopup && todayMeetings.length > 0 && (
         <MeetingTodayPopup
           meetings={todayMeetings}
           onClose={() => setShowMeetingPopup(false)}

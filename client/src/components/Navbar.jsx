@@ -136,11 +136,12 @@ export default function Navbar({
 
         {/* Right: Active Profile & Sign Out */}
         <div className="flex items-center space-x-2.5">
-          {/* Today's Meetings Notification Button with Indicator Dot (BDM Leaders & Members only - Removed from Admin) */}
-          {currentUser?.role === 'BDM' && (
+          {/* Notification Center: Meetings & Reassignment Alerts (BDM Only - Hidden on Admin Portal) */}
+          {currentUser && currentUser.role !== 'ADMIN' && (
             <MeetingNotificationDropdown
               meetings={todayMeetings}
               onNavigateToLms={onNavigateToLms}
+              currentUser={currentUser}
             />
           )}
 

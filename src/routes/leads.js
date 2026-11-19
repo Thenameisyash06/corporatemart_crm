@@ -214,8 +214,44 @@ async function ensureLeadsTable() {
           SET "nextFollowUpDate" = COALESCE("meetingDate", "expectedDateOfCloser", "createdAt")
           WHERE "nextFollowUpDate" IS NULL;
         EXCEPTION WHEN OTHERS THEN END;
+        BEGIN
+          ALTER TABLE "leads" ADD COLUMN "reassignmentHistory" JSONB DEFAULT '[]'::jsonb;
+        EXCEPTION WHEN duplicate_column THEN END;
       END $$;
     `);
+
+    // Ensure lead_notifications table exists for revocation and assignment alerts
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "lead_notifications" (
+        "id" TEXT PRIMARY KEY,
+        "targetBdmName" TEXT NOT NULL,
+        "targetUserId" TEXT,
+        "title" TEXT NOT NULL,
+        "message" TEXT NOT NULL,
+        "type" TEXT NOT NULL,
+        "leadId" TEXT,
+        "companyName" TEXT,
+        "reason" TEXT,
+        "isRead" BOOLEAN DEFAULT false,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    try {
+      await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS "idx_lead_notif_target" ON "lead_notifications"("targetBdmName")
+      `);
+    } catch (e) {
+      // Index might already exist
+    }
+
+    try {
+      await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS "idx_lead_notif_created" ON "lead_notifications"("createdAt" DESC)
+      `);
+    } catch (e) {
+      // Index might already exist
+    }
 
     tableReady = true;
   } catch (err) {
@@ -276,10 +312,10 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
     const startOfNextMonth = new Date(nextYear, nextMonth, 1, 0, 0, 0, 0);
     const endOfNextMonth = new Date(nextYear, nextMonth + 1, 0, 23, 59, 59, 999);
 
-    // Build SQL Query conditions
-    const conditions = [];
-    const params = [];
-    let paramIndex = 1;
+    // Build SQL Query conditions (Separated into Scope vs Table Filters)
+    const scopeConditions = [];
+    const scopeParams = [];
+    let scopeParamIndex = 1;
 
     // RBAC: If BDM and scope is 'my' (or default for BDM), strictly restrict to:
     // 1. Their own leads (as BDM-1, BDM-2, or creator)
@@ -299,98 +335,39 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
         : (matchedLeader || null);
 
       if (targetLeader) {
-        conditions.push(`(
-          "bdmName1" ILIKE $${paramIndex} 
-          OR "bdmName2" ILIKE $${paramIndex}
-          OR ("createdById" = $${paramIndex + 1} AND ("bdmName1" ILIKE $${paramIndex} OR "bdmName1" = '' OR "bdmName1" IS NULL))
-          OR ("leaderName" ILIKE $${paramIndex + 2} AND "closerStatus" ILIKE '%Lead Sharing%')
+        scopeConditions.push(`(
+          "bdmName1" ILIKE $${scopeParamIndex} 
+          OR "bdmName2" ILIKE $${scopeParamIndex}
+          OR ("createdById" = $${scopeParamIndex + 1} AND ("bdmName1" ILIKE $${scopeParamIndex} OR "bdmName1" = '' OR "bdmName1" IS NULL))
+          OR ("leaderName" ILIKE $${scopeParamIndex + 2} AND "closerStatus" ILIKE '%Lead Sharing%')
         )`);
-        params.push(`%${targetBdm}%`, req.user.id, `%${targetLeader}%`);
-        paramIndex += 3;
+        scopeParams.push(`%${targetBdm}%`, req.user.id, `%${targetLeader}%`);
+        scopeParamIndex += 3;
       } else {
         // Regular BDM: strictly their own leads only
-        conditions.push(`(
-          "bdmName1" ILIKE $${paramIndex} 
-          OR "bdmName2" ILIKE $${paramIndex}
-          OR ("createdById" = $${paramIndex + 1} AND ("bdmName1" ILIKE $${paramIndex} OR "bdmName1" = '' OR "bdmName1" IS NULL))
+        scopeConditions.push(`(
+          "bdmName1" ILIKE $${scopeParamIndex} 
+          OR "bdmName2" ILIKE $${scopeParamIndex}
+          OR ("createdById" = $${scopeParamIndex + 1} AND ("bdmName1" ILIKE $${scopeParamIndex} OR "bdmName1" = '' OR "bdmName1" IS NULL))
         )`);
-        params.push(`%${targetBdm}%`, req.user.id);
-        paramIndex += 2;
+        scopeParams.push(`%${targetBdm}%`, req.user.id);
+        scopeParamIndex += 2;
       }
-    } else if (bdmName && bdmName !== 'ALL') {
-      conditions.push(`("bdmName1" = $${paramIndex} OR "bdmName2" = $${paramIndex})`);
-      params.push(bdmName);
-      paramIndex++;
     }
 
-    if (leaderName && leaderName !== 'ALL') {
-      conditions.push(`"leaderName" = $${paramIndex}`);
-      params.push(leaderName);
-      paramIndex++;
-    }
-
-    if (closerStatus && closerStatus !== 'ALL') {
-      conditions.push(`"closerStatus" = $${paramIndex}`);
-      params.push(closerStatus);
-      paramIndex++;
-    }
-
-    if (clientStatus && clientStatus !== 'ALL') {
-      conditions.push(`"clientStatus" ILIKE $${paramIndex}`);
-      params.push(clientStatus);
-      paramIndex++;
-    }
-
-    if (sourcingStatus && sourcingStatus !== 'ALL') {
-      conditions.push(`"sourcingStatus" = $${paramIndex}`);
-      params.push(sourcingStatus);
-      paramIndex++;
-    }
-
-    if (meetingStatus && meetingStatus !== 'ALL') {
-      conditions.push(`"meetingStatus" = $${paramIndex}`);
-      params.push(meetingStatus);
-      paramIndex++;
-    }
-
-    if (leadStatus && leadStatus !== 'ALL') {
-      conditions.push(`"leadStatus" = $${paramIndex}`);
-      params.push(leadStatus);
-      paramIndex++;
-    }
-
-    if (teamMember && teamMember !== 'ALL') {
-      conditions.push(`("bdmName1" ILIKE $${paramIndex} OR "bdmName2" ILIKE $${paramIndex})`);
-      params.push(`%${teamMember.trim()}%`);
-      paramIndex++;
-    }
-
-    if (todayMeetings === 'true') {
-      conditions.push(`"meetingDate" IS NOT NULL AND "leadStatus" != 'CLOSED_LOST'`);
-    }
-
-
-
-    if (search && search.trim()) {
-      const q = `%${search.trim()}%`;
-      conditions.push(`("companyName" ILIKE $${paramIndex} OR "directorName" ILIKE $${paramIndex} OR "mobileNo" ILIKE $${paramIndex} OR "emailId" ILIKE $${paramIndex} OR "remarks" ILIKE $${paramIndex})`);
-      params.push(q);
-      paramIndex++;
-    }
-
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const scopeWhereClause = scopeConditions.length > 0 ? `WHERE ${scopeConditions.join(' AND ')}` : '';
     
-    // 1. Fetch lightweight summary rows for 100% accurate full-dataset analytics across ALL months
+    // 1. Fetch lightweight summary rows for 100% accurate full-dataset analytics across ALL months & BDM Cockpit tracker
     const summarySql = `
       SELECT 
         "id", "companyName", "bdmName1", "bdmName2", "leaderName", "createdById",
         "closerStatus", "sourcingStatus", "meetingStatus", "meetingDate", 
         "clientStatus", "leadStatus", "dealValue", "expectedDateOfCloser",
         "followUps", "nextFollowUpDate", "createdAt"
-      FROM "leads" ${whereClause}
+      FROM "leads" ${scopeWhereClause}
       ORDER BY "createdAt" DESC
     `;
-    const summaryRows = await prisma.$queryRawUnsafe(summarySql, ...params);
+    const summaryRows = await prisma.$queryRawUnsafe(summarySql, ...scopeParams);
 
     // Target month filter: strictly default to THIS_MONTH
     const targetMonth = (monthFilter === 'NEXT_MONTH') ? 'NEXT_MONTH' : 'THIS_MONTH';
@@ -528,7 +505,71 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       // Check if lead matches the active month tab view
       const matchesActiveMonth = targetMonth === 'NEXT_MONTH' ? isNextMonth : isThisMonth;
 
-      if (matchesActiveMonth) {
+      // Check if lead matches table-level search and dropdown filters
+      let matchesTableFilter = true;
+      if (bdmName && bdmName !== 'ALL') {
+        const b = bdmName.trim().toLowerCase();
+        if ((l.bdmName1 || '').toLowerCase() !== b && (l.bdmName2 || '').toLowerCase() !== b) {
+          matchesTableFilter = false;
+        }
+      }
+      if (leaderName && leaderName !== 'ALL') {
+        if ((l.leaderName || '').toLowerCase() !== leaderName.trim().toLowerCase()) {
+          matchesTableFilter = false;
+        }
+      }
+      if (closerStatus && closerStatus !== 'ALL') {
+        if ((l.closerStatus || '').toLowerCase() !== closerStatus.trim().toLowerCase()) {
+          matchesTableFilter = false;
+        }
+      }
+      if (clientStatus && clientStatus !== 'ALL') {
+        if (!l.clientStatus || !l.clientStatus.toLowerCase().includes(clientStatus.trim().toLowerCase())) {
+          matchesTableFilter = false;
+        }
+      }
+      if (sourcingStatus && sourcingStatus !== 'ALL') {
+        if ((l.sourcingStatus || '').toLowerCase() !== sourcingStatus.trim().toLowerCase()) {
+          matchesTableFilter = false;
+        }
+      }
+      if (meetingStatus && meetingStatus !== 'ALL') {
+        if ((l.meetingStatus || '').toLowerCase() !== meetingStatus.trim().toLowerCase()) {
+          matchesTableFilter = false;
+        }
+      }
+      if (leadStatus && leadStatus !== 'ALL') {
+        if ((l.leadStatus || '').toLowerCase() !== leadStatus.trim().toLowerCase()) {
+          matchesTableFilter = false;
+        }
+      }
+      if (teamMember && teamMember !== 'ALL') {
+        const tm = teamMember.trim().toLowerCase();
+        const b1 = (l.bdmName1 || '').toLowerCase();
+        const b2 = (l.bdmName2 || '').toLowerCase();
+        if (!b1.includes(tm) && !b2.includes(tm)) {
+          matchesTableFilter = false;
+        }
+      }
+      if (todayMeetings === 'true') {
+        if (!l.meetingDate || l.leadStatus === 'CLOSED_LOST') {
+          matchesTableFilter = false;
+        }
+      }
+      if (search && search.trim()) {
+        const sq = search.trim().toLowerCase();
+        const matchesSearch =
+          (l.companyName && l.companyName.toLowerCase().includes(sq)) ||
+          (l.directorName && l.directorName.toLowerCase().includes(sq)) ||
+          (l.mobileNo && l.mobileNo.toLowerCase().includes(sq)) ||
+          (l.emailId && l.emailId.toLowerCase().includes(sq)) ||
+          (l.remarks && l.remarks.toLowerCase().includes(sq));
+        if (!matchesSearch) {
+          matchesTableFilter = false;
+        }
+      }
+
+      if (matchesActiveMonth && matchesTableFilter) {
         activeSummaryRows.push(l);
 
         // Client status for active month
@@ -841,37 +882,100 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       activeLeadsWithEdc.sort((a, b) => new Date(a.expectedDateOfCloser) - new Date(b.expectedDateOfCloser));
       const nearestEdcLead = activeLeadsWithEdc[0] || mLeads.find((l) => l.expectedDateOfCloser) || null;
 
-      const pendingFollowupsCount = mLeads.filter((l) => {
-        if (l.leadStatus === 'CLOSED_WON' || l.leadStatus === 'CLOSED_LOST') return false;
+      let pendingFollowupsCount = 0;
+      let maxDaysOverdue = 0;
+      const todayDateObj = new Date(todayStr);
+
+      mLeads.forEach((l) => {
+        if (l.leadStatus === 'CLOSED_WON' || l.leadStatus === 'CLOSED_LOST') return;
+        const cs = (l.clientStatus || '').toLowerCase();
+        if (cs === 'lost' || cs === 'closed') return;
+
         let fus = [];
         if (Array.isArray(l.followUps)) fus = l.followUps;
         else if (typeof l.followUps === 'string') {
           try { fus = JSON.parse(l.followUps); } catch {}
         }
-        if (!Array.isArray(fus) || fus.length === 0) return false;
-        const latest = [...fus].sort((a, b) => new Date(b.addedAt || b.date).getTime() - new Date(a.addedAt || a.date).getTime())[0];
-        if (!latest || !latest.date) return false;
-        const fuDateStr = latest.date.includes('T') ? latest.date.split('T')[0] : latest.date;
-        return fuDateStr < todayStr;
-      }).length;
+        let targetDateStr = null;
+        if (Array.isArray(fus) && fus.length > 0) {
+          const latest = [...fus].sort((a, b) => new Date(b.addedAt || b.date).getTime() - new Date(a.addedAt || a.date).getTime())[0];
+          if (latest && latest.date && (latest.status || '').toLowerCase() !== 'closed' && (latest.status || '').toLowerCase() !== 'lost') {
+            targetDateStr = latest.date.includes('T') ? latest.date.split('T')[0] : latest.date;
+          }
+        }
+        if (!targetDateStr) {
+          if (l.nextFollowUpDate) {
+            targetDateStr = new Date(l.nextFollowUpDate).toISOString().split('T')[0];
+          } else if (l.meetingDate) {
+            targetDateStr = new Date(l.meetingDate).toISOString().split('T')[0];
+          }
+        }
+        if (targetDateStr && targetDateStr < todayStr) {
+          pendingFollowupsCount++;
+          const targetDateObj = new Date(targetDateStr);
+          const diffDays = Math.max(1, Math.floor((todayDateObj.getTime() - targetDateObj.getTime()) / (1000 * 60 * 60 * 24)));
+          if (diffDays > maxDaysOverdue) {
+            maxDaysOverdue = diffDays;
+          }
+        }
+      });
 
-      const modalLeads = mLeads.map((l) => ({
-        id: l.id,
-        companyName: l.companyName,
-        directorName: l.directorName,
-        mobileNo: l.mobileNo,
-        closerStatus: l.closerStatus,
-        sourcingStatus: l.sourcingStatus,
-        meetingStatus: l.meetingStatus,
-        meetingDate: l.meetingDate,
-        clientStatus: l.clientStatus,
-        leadStatus: l.leadStatus,
-        dealValue: l.dealValue,
-        expectedDateOfCloser: l.expectedDateOfCloser,
-        nextFollowUpDate: l.nextFollowUpDate,
-        followUps: l.followUps,
-        createdAt: l.createdAt,
-      }));
+      const modalLeads = mLeads.map((l) => {
+        let overdueDays = 0;
+        let isOverdue = false;
+        if (l.leadStatus !== 'CLOSED_WON' && l.leadStatus !== 'CLOSED_LOST') {
+          const cs = (l.clientStatus || '').toLowerCase();
+          if (cs !== 'lost' && cs !== 'closed') {
+            let fus = [];
+            if (Array.isArray(l.followUps)) fus = l.followUps;
+            else if (typeof l.followUps === 'string') {
+              try { fus = JSON.parse(l.followUps); } catch {}
+            }
+            let targetDateStr = null;
+            if (Array.isArray(fus) && fus.length > 0) {
+              const latest = [...fus].sort((a, b) => new Date(b.addedAt || b.date).getTime() - new Date(a.addedAt || a.date).getTime())[0];
+              if (latest && latest.date && (latest.status || '').toLowerCase() !== 'closed' && (latest.status || '').toLowerCase() !== 'lost') {
+                targetDateStr = latest.date.includes('T') ? latest.date.split('T')[0] : latest.date;
+              }
+            }
+            if (!targetDateStr) {
+              if (l.nextFollowUpDate) {
+                targetDateStr = new Date(l.nextFollowUpDate).toISOString().split('T')[0];
+              } else if (l.meetingDate) {
+                targetDateStr = new Date(l.meetingDate).toISOString().split('T')[0];
+              }
+            }
+            if (targetDateStr && targetDateStr < todayStr) {
+              isOverdue = true;
+              overdueDays = Math.max(1, Math.floor((todayDateObj.getTime() - new Date(targetDateStr).getTime()) / (1000 * 60 * 60 * 24)));
+            }
+          }
+        }
+
+        return {
+          id: l.id,
+          companyName: l.companyName,
+          directorName: l.directorName,
+          mobileNo: l.mobileNo,
+          closerStatus: l.closerStatus,
+          sourcingStatus: l.sourcingStatus,
+          meetingStatus: l.meetingStatus,
+          meetingDate: l.meetingDate,
+          clientStatus: l.clientStatus,
+          leadStatus: l.leadStatus,
+          dealValue: l.dealValue,
+          expectedDateOfCloser: l.expectedDateOfCloser,
+          nextFollowUpDate: l.nextFollowUpDate,
+          followUps: l.followUps,
+          reassignmentHistory: l.reassignmentHistory,
+          bdmName1: l.bdmName1,
+          bdmName2: l.bdmName2,
+          leaderName: l.leaderName,
+          createdAt: l.createdAt,
+          isOverdue,
+          overdueDays,
+        };
+      });
 
       return {
         name: entry.name,
@@ -892,6 +996,7 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
         nearestEdcLead,
         totalFunnel,
         pendingFollowupsCount,
+        maxDaysOverdue,
         leads: modalLeads,
       };
     });
@@ -1437,6 +1542,200 @@ router.delete('/:id', authenticateToken, requireRoles('BDM', 'ADMIN'), async (re
   } catch (error) {
     console.error('[LMS] Delete lead error:', error);
     return res.status(500).json({ error: 'Failed to delete lead: ' + error.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// GET /api/leads/notifications/my - Notifications for the authenticated user
+// -----------------------------------------------------------------------------
+router.get('/notifications/my', authenticateToken, async (req, res) => {
+  try {
+    await ensureLeadsTable();
+    const rawName = req.user.fullName || '';
+    const cleanName = rawName.replace(/\s*\([^)]*\)/g, '').trim().toUpperCase();
+    const isAdmin = req.user.role === 'ADMIN';
+
+    let notifications = [];
+    if (isAdmin) {
+      notifications = await prisma.$queryRawUnsafe(
+        `SELECT * FROM "lead_notifications" ORDER BY "createdAt" DESC LIMIT 50`
+      );
+    } else {
+      notifications = await prisma.$queryRawUnsafe(
+        `SELECT * FROM "lead_notifications" 
+         WHERE UPPER("targetBdmName") LIKE $1 
+            OR ($2 != '' AND $2 LIKE '%' || UPPER("targetBdmName") || '%')
+            OR "targetUserId" = $3
+         ORDER BY "createdAt" DESC LIMIT 50`,
+        `%${cleanName}%`,
+        cleanName,
+        req.user.id
+      );
+    }
+
+    const unreadCount = notifications.filter((n) => !n.isRead).length;
+
+    return res.json({
+      notifications,
+      unreadCount,
+    });
+  } catch (error) {
+    console.error('[LMS] Fetch notifications error:', error);
+    return res.status(500).json({ error: 'Failed to fetch notifications: ' + error.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// POST /api/leads/notifications/mark-read - Mark notifications as read
+// -----------------------------------------------------------------------------
+router.post('/notifications/mark-read', authenticateToken, async (req, res) => {
+  try {
+    await ensureLeadsTable();
+    const { id } = req.body;
+    const rawName = req.user.fullName || '';
+    const cleanName = rawName.replace(/\s*\([^)]*\)/g, '').trim().toUpperCase();
+    const isAdmin = req.user.role === 'ADMIN';
+
+    if (id) {
+      await prisma.$executeRawUnsafe(`UPDATE "lead_notifications" SET "isRead" = true WHERE "id" = $1`, id);
+    } else if (isAdmin) {
+      await prisma.$executeRawUnsafe(`UPDATE "lead_notifications" SET "isRead" = true`);
+    } else {
+      await prisma.$executeRawUnsafe(
+        `UPDATE "lead_notifications" 
+         SET "isRead" = true 
+         WHERE UPPER("targetBdmName") LIKE $1 
+            OR ($2 != '' AND $2 LIKE '%' || UPPER("targetBdmName") || '%')
+            OR "targetUserId" = $3`,
+        `%${cleanName}%`,
+        cleanName,
+        req.user.id
+      );
+    }
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('[LMS] Mark read notifications error:', error);
+    return res.status(500).json({ error: 'Failed to mark notifications as read: ' + error.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// POST /api/leads/:id/revoke-reassign - Revoke and Reassign an Overdue Lead (Admin only)
+// -----------------------------------------------------------------------------
+router.post('/:id/revoke-reassign', authenticateToken, requireRoles('ADMIN'), async (req, res) => {
+  try {
+    await ensureLeadsTable();
+    const { id } = req.params;
+    const { newBdmName, newLeaderName, reason, nextFollowUpDate, handoverNotes } = req.body;
+
+    if (!newBdmName || !newBdmName.trim()) {
+      return res.status(400).json({ error: 'New BDM assignment is mandatory.' });
+    }
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ error: 'Reason for lead revocation is mandatory.' });
+    }
+
+    const [lead] = await prisma.$queryRawUnsafe(`SELECT * FROM "leads" WHERE "id" = $1`, id);
+    if (!lead) {
+      return res.status(404).json({ error: 'Lead not found.' });
+    }
+
+    const previousBdm = (lead.bdmName1 || 'UNASSIGNED').trim().toUpperCase();
+    const previousLeader = (lead.leaderName || 'Management').trim().toUpperCase();
+    const targetNewBdm = newBdmName.trim().toUpperCase();
+    const targetNewLeader = newLeaderName ? newLeaderName.trim().toUpperCase() : previousLeader;
+    const cleanReason = reason.trim();
+
+    // Compute next follow-up date
+    let followUpDateObj = nextFollowUpDate ? new Date(nextFollowUpDate) : new Date(Date.now() + 86400000);
+    if (isNaN(followUpDateObj.getTime())) {
+      followUpDateObj = new Date(Date.now() + 86400000);
+    }
+
+    // 1. Audit trail in followUps array
+    const auditEntry = {
+      id: crypto.randomUUID(),
+      date: followUpDateObj.toISOString().split('T')[0],
+      status: 'WARM',
+      remarks: `[LEAD REVOKED & REASSIGNED BY ADMIN] Revoked from ${previousBdm} and assigned to ${targetNewBdm}. Reason: ${cleanReason}${handoverNotes ? ` | Handover Notes: ${handoverNotes.trim()}` : ''}`,
+      addedAt: new Date().toISOString(),
+      addedById: req.user.id,
+      addedByName: req.user.fullName ? req.user.fullName.toUpperCase() : 'ADMIN',
+      isReassignment: true,
+      revokedFrom: previousBdm,
+      assignedTo: targetNewBdm,
+      reason: cleanReason,
+    };
+
+    // 2. Reassignment history object
+    const historyEntry = {
+      id: crypto.randomUUID(),
+      revokedAt: new Date().toISOString(),
+      revokedFrom: previousBdm,
+      revokedFromLeader: previousLeader,
+      assignedTo: targetNewBdm,
+      assignedToLeader: targetNewLeader,
+      reason: cleanReason,
+      handoverNotes: handoverNotes ? handoverNotes.trim() : null,
+      revokedById: req.user.id,
+      revokedByName: req.user.fullName || 'Admin',
+    };
+
+    // 3. Update lead in DB
+    await prisma.$executeRawUnsafe(
+      `UPDATE "leads" SET 
+        "bdmName1" = $1,
+        "leaderName" = $2,
+        "nextFollowUpDate" = $3,
+        "followUps" = COALESCE("followUps", '[]'::jsonb) || $4::jsonb,
+        "reassignmentHistory" = COALESCE("reassignmentHistory", '[]'::jsonb) || $5::jsonb,
+        "updatedAt" = NOW()
+      WHERE "id" = $6`,
+      targetNewBdm,
+      targetNewLeader,
+      followUpDateObj,
+      JSON.stringify([auditEntry]),
+      JSON.stringify([historyEntry]),
+      id
+    );
+
+    // 4. Create notifications for BOTH previous BDM and new BDM
+    const prevNotifId = crypto.randomUUID();
+    const prevTitle = `Lead Revoked: ${lead.companyName}`;
+    const prevMessage = `Admin revoked lead "${lead.companyName}" from your pipeline. Reason: "${cleanReason}". Reassigned to ${targetNewBdm}.`;
+
+    const newNotifId = crypto.randomUUID();
+    const newTitle = `New Lead Assigned: ${lead.companyName}`;
+    const newMessage = `Admin assigned lead "${lead.companyName}" to your pipeline (previously with ${previousBdm}). Reason/Notes: "${cleanReason}".`;
+
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "lead_notifications" ("id", "targetBdmName", "title", "message", "type", "leadId", "companyName", "reason", "isRead", "createdAt")
+       VALUES 
+         ($1, $2, $3, $4, 'LEAD_REVOKED', $5, $6, $7, false, NOW()),
+         ($8, $9, $10, $11, 'LEAD_ASSIGNED', $5, $6, $7, false, NOW())`,
+      prevNotifId,
+      previousBdm,
+      prevTitle,
+      prevMessage,
+      lead.id,
+      lead.companyName,
+      cleanReason,
+      newNotifId,
+      targetNewBdm,
+      newTitle,
+      newMessage
+    );
+
+    const [updated] = await prisma.$queryRawUnsafe(`SELECT * FROM "leads" WHERE "id" = $1`, id);
+
+    return res.json({
+      message: `Lead "${lead.companyName}" was successfully revoked from ${previousBdm} and assigned to ${targetNewBdm}. Both BDMs have been notified.`,
+      lead: updated,
+    });
+  } catch (error) {
+    console.error('[LMS] Revoke & Reassign error:', error);
+    return res.status(500).json({ error: 'Failed to revoke and reassign lead: ' + error.message });
   }
 });
 

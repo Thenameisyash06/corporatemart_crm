@@ -34,6 +34,11 @@ import {
   Flame,
   Award,
   Lock,
+  UserX,
+  AlertTriangle,
+  ArrowRightLeft,
+  ArrowUpDown,
+  Check,
 } from 'lucide-react';
 import api from '../lib/api';
 import { exportLeadsToCsv } from '../lib/exportCsv';
@@ -265,35 +270,61 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     return sorted[0] || null;
   };
 
-  const isLeadFollowUpExceeded = (lead) => {
-    if (!lead) return false;
+  // Helper to determine if lead's follow-up is overdue and calculate exact days overdue
+  const getLeadOverdueInfo = useCallback((lead) => {
+    if (!lead) return { isOverdue: false, daysOverdue: 0, targetDateStr: null };
     const lStatus = (lead.leadStatus || '').toUpperCase();
-    if (lStatus === 'CLOSED_WON' || lStatus === 'CLOSED_LOST') return false;
+    if (lStatus === 'CLOSED_WON' || lStatus === 'CLOSED_LOST') {
+      return { isOverdue: false, daysOverdue: 0, targetDateStr: null };
+    }
     const cStatus = (lead.clientStatus || '').toLowerCase();
-    if (cStatus === 'lost' || cStatus === 'closed') return false;
+    if (cStatus === 'lost' || cStatus === 'closed') {
+      return { isOverdue: false, daysOverdue: 0, targetDateStr: null };
+    }
 
-    const latestFu = getLeadLatestFollowUp(lead);
-    if (!latestFu || !latestFu.date) return false;
+    const fus = getFollowUpsList(lead);
+    let targetDateStr = null;
+    if (fus && fus.length > 0) {
+      const sorted = [...fus].sort((a, b) => {
+        const da = a.date ? new Date(a.date).getTime() : (a.addedAt ? new Date(a.addedAt).getTime() : 0);
+        const db = b.date ? new Date(b.date).getTime() : (b.addedAt ? new Date(b.addedAt).getTime() : 0);
+        return db - da;
+      });
+      const latest = sorted[0];
+      if (latest && latest.date && (latest.status || '').toLowerCase() !== 'closed' && (latest.status || '').toLowerCase() !== 'lost') {
+        targetDateStr = latest.date.includes('T') ? latest.date.split('T')[0] : latest.date;
+      }
+    }
+    if (!targetDateStr) {
+      if (lead.nextFollowUpDate) {
+        targetDateStr = new Date(lead.nextFollowUpDate).toISOString().split('T')[0];
+      } else if (lead.meetingDate) {
+        targetDateStr = new Date(lead.meetingDate).toISOString().split('T')[0];
+      }
+    }
 
-    const fuStatus = (latestFu.status || '').toLowerCase();
-    if (fuStatus === 'closed' || fuStatus === 'lost') return false;
+    if (!targetDateStr) return { isOverdue: false, daysOverdue: 0, targetDateStr: null };
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const dateParts = targetDateStr.split('-');
+    if (dateParts.length < 3) return { isOverdue: false, daysOverdue: 0, targetDateStr: null };
+    const [y, m, d] = dateParts.map(Number);
+    if (!y || !m || !d) return { isOverdue: false, daysOverdue: 0, targetDateStr: null };
+    const targetDate = new Date(y, m - 1, d);
+    targetDate.setHours(0, 0, 0, 0);
 
-    let fuDate;
-    if (typeof latestFu.date === 'string') {
-      const datePart = latestFu.date.includes('T') ? latestFu.date.split('T')[0] : latestFu.date;
-      const [y, m, d] = datePart.split('-').map(Number);
-      if (!y || !m || !d) return false;
-      fuDate = new Date(y, m - 1, d);
-    } else {
-      fuDate = new Date(latestFu.date);
+    const diffTime = today.getTime() - targetDate.getTime();
+    if (diffTime > 0) {
+      const daysOverdue = Math.max(1, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
+      return { isOverdue: true, daysOverdue, targetDateStr };
     }
-    fuDate.setHours(0, 0, 0, 0);
+    return { isOverdue: false, daysOverdue: 0, targetDateStr };
+  }, []);
 
-    return fuDate.getTime() < today.getTime();
-  };
+  const isLeadFollowUpExceeded = useCallback((lead) => {
+    return getLeadOverdueInfo(lead).isOverdue;
+  }, [getLeadOverdueInfo]);
 
   const handleSaveFollowUp = async (e) => {
     if (e) e.preventDefault();
@@ -329,6 +360,56 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       alert('Failed to save follow-up: ' + (err.response?.data?.error || err.message));
     } finally {
       setSavingFollowUp(false);
+    }
+  };
+
+  const handleRevokeAndReassign = async (e) => {
+    if (e) e.preventDefault();
+    if (!reassignModalLead) return;
+    if (!reassignForm.newBdmName) {
+      alert('Please select a new BDM to assign this lead to.');
+      return;
+    }
+    if (reassignForm.newBdmName.trim().toUpperCase() === (reassignModalLead.bdmName1 || '').trim().toUpperCase()) {
+      alert('New BDM must be different from current assigned BDM.');
+      return;
+    }
+    if (!reassignForm.reason.trim()) {
+      alert('Please provide a reason for revoking and reassigning this lead.');
+      return;
+    }
+
+    try {
+      setIsSubmittingReassign(true);
+      const res = await api.post(`/leads/${reassignModalLead.id}/revoke-reassign`, {
+        newBdmName: reassignForm.newBdmName,
+        newLeaderName: reassignForm.newLeaderName,
+        reason: reassignForm.reason,
+        nextFollowUpDate: reassignForm.nextFollowUpDate,
+        handoverNotes: reassignForm.handoverNotes,
+      });
+
+      setFeedback({
+        type: 'success',
+        message: res.data?.message || `Lead "${reassignModalLead.companyName}" successfully revoked and reassigned.`,
+      });
+
+      // Dispatch notification event for navbar & listeners
+      window.dispatchEvent(new CustomEvent('lead_notifications_changed'));
+      window.dispatchEvent(new CustomEvent('lms_leads_changed'));
+
+      setReassignModalLead(null);
+      if (selectedBdmDetailModal) {
+        setSelectedBdmDetailModal(null);
+      }
+      if (selectedTeamMemberFilter !== 'ALL') {
+        setSelectedTeamMemberFilter('ALL');
+      }
+      fetchLeads(1, limit);
+    } catch (err) {
+      alert('Failed to revoke and reassign lead: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setIsSubmittingReassign(false);
     }
   };
 
@@ -380,7 +461,23 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
   const [selectedStageFilter, setSelectedStageFilter] = useState('ALL');
   const [selectedTeamMemberFilter, setSelectedTeamMemberFilter] = useState('ALL');
   const [pendingFollowUpFilter, setPendingFollowUpFilter] = useState(false);
-  const [selectedMonthFilter, setSelectedMonthFilter] = useState('THIS_MONTH'); // 'THIS_MONTH' | 'NEXT_MONTH'
+  const [selectedMonthFilter, setSelectedMonthFilter] = useState('THIS_MONTH'); // 'THIS_MONTH' | 'NEXT_MONTH' | 'PENDING_FOLLOWUPS'
+
+  // Admin Cockpit Sorting & Overdue Filter Controls
+  const [adminCockpitSort, setAdminCockpitSort] = useState('DEFAULT'); // 'DEFAULT' | 'OVERDUE_DESC' | 'OVERDUE_ASC' | 'FUNNEL_DESC'
+  const [overdueSortOrder, setOverdueSortOrder] = useState('MAX_TO_MIN'); // 'MAX_TO_MIN' | 'MIN_TO_MAX'
+  const [overdueBdmFilter, setOverdueBdmFilter] = useState('ALL');
+
+  // Lead Revoke & Reassign Modal State
+  const [reassignModalLead, setReassignModalLead] = useState(null);
+  const [reassignForm, setReassignForm] = useState({
+    newBdmName: '',
+    newLeaderName: '',
+    reason: '',
+    nextFollowUpDate: getTodayDateStr(),
+    handoverNotes: '',
+  });
+  const [isSubmittingReassign, setIsSubmittingReassign] = useState(false);
 
   // Month Meta and Labels for This Month vs Next Month
   const monthLabels = useMemo(() => {
@@ -781,7 +878,24 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         (l) => (l.bdmName1 || '').toLowerCase().trim() === selectedTeamMemberFilter.toLowerCase().trim()
       );
     }
-    if (selectedMonthFilter === 'NEXT_MONTH') {
+    if (selectedMonthFilter === 'PENDING_FOLLOWUPS') {
+      list = (isAdmin ? (leads && leads.length > 0 ? leads : visibleLeads) : visibleLeads).filter(
+        (l) => getLeadOverdueInfo(l).isOverdue
+      );
+      if (overdueBdmFilter && overdueBdmFilter !== 'ALL') {
+        list = list.filter(
+          (l) => (l.bdmName1 || '').toLowerCase().trim() === overdueBdmFilter.toLowerCase().trim()
+        );
+      }
+      list.sort((a, b) => {
+        const da = getLeadOverdueInfo(a).daysOverdue;
+        const db = getLeadOverdueInfo(b).daysOverdue;
+        if (overdueSortOrder === 'MIN_TO_MAX') {
+          return da - db;
+        }
+        return db - da; // default MAX_TO_MIN
+      });
+    } else if (selectedMonthFilter === 'NEXT_MONTH') {
       list = list.filter((l) => {
         const badge = getLeadMonthBadge(l);
         return badge?.icon === '🚀';
@@ -793,17 +907,39 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         return badge?.icon === '📅';
       });
     }
-    if (pendingFollowUpFilter) {
+    if (pendingFollowUpFilter && selectedMonthFilter !== 'PENDING_FOLLOWUPS') {
       list = list.filter((l) => isLeadFollowUpExceeded(l));
     }
     return list;
-  }, [visibleLeads, selectedTeamMemberFilter, selectedMonthFilter, getLeadMonthBadge, pendingFollowUpFilter]);
+  }, [visibleLeads, leads, isAdmin, selectedTeamMemberFilter, selectedMonthFilter, getLeadMonthBadge, pendingFollowUpFilter, getLeadOverdueInfo, overdueBdmFilter, overdueSortOrder]);
+
+  // All overdue leads across available leads
+  const allOverdueLeads = useMemo(() => {
+    const targetLeads = isAdmin ? (leads && leads.length > 0 ? leads : visibleLeads) : (isLeader ? visibleLeads : ownDirectLeads);
+    return targetLeads.filter((l) => getLeadOverdueInfo(l).isOverdue);
+  }, [isAdmin, isLeader, leads, visibleLeads, ownDirectLeads, getLeadOverdueInfo]);
+
+  // Unique list of BDMs with pending follow-ups and their stats
+  const bdmsWithOverdueList = useMemo(() => {
+    const map = {};
+    allOverdueLeads.forEach((l) => {
+      const bdm = (l.bdmName1 || 'UNASSIGNED').trim();
+      if (!map[bdm]) {
+        map[bdm] = { name: bdm, count: 0, maxOverdue: 0 };
+      }
+      map[bdm].count++;
+      const overdue = getLeadOverdueInfo(l).daysOverdue;
+      if (overdue > map[bdm].maxOverdue) {
+        map[bdm].maxOverdue = overdue;
+      }
+    });
+    return Object.values(map).sort((a, b) => b.maxOverdue - a.maxOverdue || b.count - a.count);
+  }, [allOverdueLeads, getLeadOverdueInfo]);
 
   // Count of leads whose follow-up date exceeded the current date
   const calculatedPendingFollowups = useMemo(() => {
-    const targetLeads = isAdmin ? visibleLeads : (isLeader ? visibleLeads : ownDirectLeads);
-    return targetLeads.filter((l) => isLeadFollowUpExceeded(l)).length;
-  }, [isAdmin, isLeader, visibleLeads, ownDirectLeads]);
+    return allOverdueLeads.length;
+  }, [allOverdueLeads]);
 
   const displayPendingFollowupsCount = analytics?.pendingFollowupsCount ?? calculatedPendingFollowups;
 
@@ -1033,6 +1169,13 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
           if (ldr && !map[name].leaderName && !map[name].isLeader) {
             map[name].leaderName = ldr;
           }
+          const overdueInfo = getLeadOverdueInfo(l);
+          if (overdueInfo.isOverdue) {
+            map[name].pendingFollowupsCount = (map[name].pendingFollowupsCount || 0) + 1;
+            if (overdueInfo.daysOverdue > (map[name].maxDaysOverdue || 0)) {
+              map[name].maxDaysOverdue = overdueInfo.daysOverdue;
+            }
+          }
         });
       });
       list = Object.values(map);
@@ -1043,10 +1186,33 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       });
     }
 
-    return list;
-  }, [isAdmin, analytics, leads]);
+    // Ensure pendingFollowupsCount and maxDaysOverdue are strictly synchronized
+    list = list.map((card) => {
+      let maxOverdue = card.maxDaysOverdue || 0;
+      let overdueCount = card.pendingFollowupsCount || 0;
+      if (card.leads && Array.isArray(card.leads)) {
+        overdueCount = 0;
+        card.leads.forEach((l) => {
+          const info = getLeadOverdueInfo(l);
+          if (info.isOverdue) {
+            overdueCount++;
+            if (info.daysOverdue > maxOverdue) {
+              maxOverdue = info.daysOverdue;
+            }
+          }
+        });
+      }
+      return {
+        ...card,
+        pendingFollowupsCount: overdueCount,
+        maxDaysOverdue: maxOverdue,
+      };
+    });
 
-  // Filtered cards for display in Cockpit based on Tab and Search
+    return list;
+  }, [isAdmin, analytics, leads, getLeadOverdueInfo]);
+
+  // Filtered cards for display in Cockpit based on Tab, Sort and Search
   const filteredAdminCards = useMemo(() => {
     let result = adminBdmCards;
 
@@ -1054,6 +1220,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       result = result.filter((c) => c.isLeader);
     } else if (adminCockpitTab === 'MEMBERS') {
       result = result.filter((c) => !c.isLeader);
+    } else if (adminCockpitTab === 'PENDING_FOLLOWUPS') {
+      result = result.filter((c) => (c.pendingFollowupsCount || 0) > 0);
     } else if (adminCockpitTab === 'ACTIVE_ONLY') {
       result = result.filter((c) => (c.totalFunnel || 0) > 0 || (c.activeLeads || 0) > 0 || (c.totalLeads || 0) > 0);
     }
@@ -1063,8 +1231,27 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       result = result.filter((c) => c.name.toLowerCase().includes(q) || (c.leaderName && c.leaderName.toLowerCase().includes(q)));
     }
 
+    result = [...result].sort((a, b) => {
+      if (adminCockpitSort === 'OVERDUE_DESC') {
+        return (b.maxDaysOverdue || 0) - (a.maxDaysOverdue || 0) || (b.pendingFollowupsCount || 0) - (a.pendingFollowupsCount || 0);
+      }
+      if (adminCockpitSort === 'OVERDUE_ASC') {
+        return (a.maxDaysOverdue || 0) - (b.maxDaysOverdue || 0) || (a.pendingFollowupsCount || 0) - (b.pendingFollowupsCount || 0);
+      }
+      if (adminCockpitSort === 'FUNNEL_DESC') {
+        return (b.totalFunnel || 0) - (a.totalFunnel || 0);
+      }
+      if (a.isLeader && !b.isLeader) return -1;
+      if (!a.isLeader && b.isLeader) return 1;
+      return (b.totalFunnel || 0) - (a.totalFunnel || 0) || (b.totalLeads || 0) - (a.totalLeads || 0);
+    });
+
     return result;
-  }, [adminBdmCards, adminCockpitTab, adminCockpitSearch]);
+  }, [adminBdmCards, adminCockpitTab, adminCockpitSort, adminCockpitSearch]);
+
+  const pendingFollowupsBdmCount = useMemo(() => {
+    return adminBdmCards.filter((c) => (c.pendingFollowupsCount || 0) > 0).length;
+  }, [adminBdmCards]);
 
   // Aggregate stats for Admin Cockpit header
   const adminTotalFunnel = useMemo(() => {
@@ -1705,6 +1892,26 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
               </button>
               <button
                 type="button"
+                onClick={() => {
+                  setAdminCockpitTab('PENDING_FOLLOWUPS');
+                  setAdminCockpitSort('OVERDUE_DESC');
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap cursor-pointer border flex items-center gap-1.5 ${
+                  adminCockpitTab === 'PENDING_FOLLOWUPS'
+                    ? 'bg-rose-700 text-white border-rose-700 shadow-xs'
+                    : 'bg-white text-rose-700 border-rose-200 hover:bg-rose-50'
+                }`}
+              >
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>Pending Follow-ups</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded font-bold ${
+                  adminCockpitTab === 'PENDING_FOLLOWUPS' ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-800'
+                }`}>
+                  {pendingFollowupsBdmCount}
+                </span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setAdminCockpitTab('ACTIVE_ONLY')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap cursor-pointer border flex items-center gap-1.5 ${
                   adminCockpitTab === 'ACTIVE_ONLY'
@@ -1721,33 +1928,71 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
               </button>
             </div>
 
-            <div className="relative min-w-[240px]">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                value={adminCockpitSearch}
-                onChange={(e) => setAdminCockpitSearch(e.target.value)}
-                placeholder="Search by name or team..."
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8.5 pr-8 py-1.5 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:border-slate-800"
-              />
-              {adminCockpitSearch && (
-                <button
-                  type="button"
-                  onClick={() => setAdminCockpitSearch('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Overdue / Metric Sort Dropdown */}
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs">
+                <ArrowUpDown className="w-3.5 h-3.5 text-slate-500" />
+                <span className="text-[10px] text-slate-500 font-semibold uppercase">Sort:</span>
+                <select
+                  value={adminCockpitSort}
+                  onChange={(e) => setAdminCockpitSort(e.target.value)}
+                  className="bg-transparent text-xs font-bold text-slate-800 focus:outline-none cursor-pointer"
                 >
-                  ✕
-                </button>
-              )}
+                  <option value="DEFAULT">Default (Leaders First)</option>
+                  <option value="OVERDUE_DESC">⏳ Overdue Days: Max to Min</option>
+                  <option value="OVERDUE_ASC">⏳ Overdue Days: Min to Max</option>
+                  <option value="FUNNEL_DESC">💰 Highest Funnel Value</option>
+                </select>
+              </div>
+
+              <div className="relative min-w-[200px]">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={adminCockpitSearch}
+                  onChange={(e) => setAdminCockpitSearch(e.target.value)}
+                  placeholder="Search by name or team..."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8.5 pr-8 py-1.5 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:border-slate-800"
+                />
+                {adminCockpitSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setAdminCockpitSearch('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
           {/* Cards Grid */}
           {filteredAdminCards.length === 0 ? (
-            <div className="bg-slate-50 border border-dashed border-slate-200 rounded-xl p-8 text-center text-xs text-slate-500">
-              <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-              <p className="font-semibold text-slate-700">No BDMs or Leaders match this filter</p>
-              <p className="text-[11px] text-slate-400 mt-0.5">Try selecting "All" or clearing your search query.</p>
+            <div className="bg-slate-50 border border-dashed border-slate-200 rounded-xl p-8 text-center text-xs text-slate-500 space-y-2">
+              <Users className="w-8 h-8 text-slate-300 mx-auto" />
+              <p className="font-semibold text-slate-700">
+                {adminCockpitTab === 'PENDING_FOLLOWUPS'
+                  ? '🎉 No Pending Follow-ups! All BDMs & Leaders are up to date.'
+                  : 'No BDMs or Leaders match this filter'}
+              </p>
+              <p className="text-[11px] text-slate-400">
+                {adminCockpitTab === 'PENDING_FOLLOWUPS'
+                  ? 'All overdue follow-ups have been addressed.'
+                  : 'Try selecting "All" or clearing your search query.'}
+              </p>
+              {adminCockpitTab !== 'ALL' && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setAdminCockpitTab('ALL')}
+                    className="mt-2 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold cursor-pointer inline-flex items-center gap-1.5 transition"
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>View All ({adminBdmCards.length}) BDMs & Leaders</span>
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
@@ -1946,9 +2191,23 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
 
                         {/* Overdue Follow-ups */}
                         {member.pendingFollowupsCount > 0 && (
-                          <div className="pt-1 flex items-center justify-between text-[11px] font-semibold text-rose-700 bg-rose-50/60 border border-rose-200/70 px-2 py-0.5 rounded">
-                            <span>Overdue Follow-ups:</span>
-                            <span>{member.pendingFollowupsCount} Leads</span>
+                          <div
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedBdmDetailModal(member);
+                              setBdmDetailModalTab('FOLLOWUPS');
+                            }}
+                            className="mt-1 flex items-center justify-between text-[11px] font-bold text-rose-800 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2 py-1 rounded-md transition cursor-pointer"
+                            title="Click to inspect overdue follow-ups and revoke leads"
+                          >
+                            <span className="flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3 text-rose-600" />
+                              <span>Overdue Follow-ups:</span>
+                            </span>
+                            <span className="font-mono">
+                              {member.pendingFollowupsCount} {member.pendingFollowupsCount === 1 ? 'Lead' : 'Leads'}
+                              {member.maxDaysOverdue > 0 ? ` (${member.maxDaysOverdue}d max)` : ''}
+                            </span>
                           </div>
                         )}
                       </div>
@@ -3010,6 +3269,28 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 (₹{Number(isAdmin ? (analytics?.nextMonthFunnel || 0) : (analytics?.myNextMonthFunnel || 0)).toLocaleString('en-IN')})
               </span>
             </button>
+
+            {/* Pending Follow-ups Tab */}
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedMonthFilter('PENDING_FOLLOWUPS');
+                setPage(1);
+              }}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer border ${
+                selectedMonthFilter === 'PENDING_FOLLOWUPS'
+                  ? 'bg-rose-700 text-white border-rose-700 shadow-xs'
+                  : 'bg-rose-50/60 text-rose-800 border-rose-200 hover:bg-rose-100'
+              }`}
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>Pending Follow-ups</span>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold ${
+                selectedMonthFilter === 'PENDING_FOLLOWUPS' ? 'bg-white/20 text-white' : 'bg-rose-200 text-rose-900'
+              }`}>
+                {displayPendingFollowupsCount}
+              </span>
+            </button>
           </div>
 
           <div className="flex items-center gap-2">
@@ -3021,11 +3302,50 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
           </div>
         </div>
 
+        {/* Sub-bar for Pending Follow-ups: BDM selection and Days Overdue Sort */}
+        {selectedMonthFilter === 'PENDING_FOLLOWUPS' && (
+          <div className="bg-rose-50/40 border-b border-rose-200 px-5 py-2.5 flex items-center justify-between text-xs flex-wrap gap-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-rose-900 flex items-center gap-1">
+                <Filter className="w-3.5 h-3.5 text-rose-600" />
+                <span>Filter Overdue BDMs:</span>
+              </span>
+              <select
+                value={overdueBdmFilter}
+                onChange={(e) => setOverdueBdmFilter(e.target.value)}
+                className="bg-white border border-rose-300 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-900 focus:outline-none"
+              >
+                <option value="ALL">All BDMs with Overdue Follow-ups ({allOverdueLeads.length} leads)</option>
+                {bdmsWithOverdueList.map((b) => (
+                  <option key={b.name} value={b.name}>
+                    {b.name} ({b.count} overdue • max {b.maxOverdue}d)
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <ArrowUpDown className="w-3.5 h-3.5 text-slate-500" />
+              <span className="text-[10px] font-bold uppercase text-slate-600">Sort Overdue:</span>
+              <select
+                value={overdueSortOrder}
+                onChange={(e) => setOverdueSortOrder(e.target.value)}
+                className="bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-900 focus:outline-none cursor-pointer"
+              >
+                <option value="MAX_TO_MIN">⬇️ Overdue Days: Max to Min (Highest Delay First)</option>
+                <option value="MIN_TO_MAX">⬆️ Overdue Days: Min to Max (Lowest Delay First)</option>
+              </select>
+            </div>
+          </div>
+        )}
+
         {/* Table Scope Indicator Header */}
         <div className="bg-slate-50/60 border-b border-slate-200 px-5 py-2.5 flex items-center justify-between text-xs text-slate-500 flex-wrap gap-2">
           <div className="flex items-center gap-2 flex-wrap">
             <span>
-              {selectedMonthFilter === 'NEXT_MONTH'
+              {selectedMonthFilter === 'PENDING_FOLLOWUPS'
+                ? `⚠️ Showing Pending Follow-ups (${displayedLeads.length} overdue leads in view${overdueBdmFilter !== 'ALL' ? ` for ${overdueBdmFilter}` : ''})`
+                : selectedMonthFilter === 'NEXT_MONTH'
                 ? `🚀 Showing Next Month (${monthLabels.nextMonth}) leads (${displayedLeads.length} leads in view, ${pagination.total} total)`
                 : `📅 Showing This Month (${monthLabels.thisMonth}) leads (${displayedLeads.length} leads in view, ${pagination.total} total)`}
             </span>
@@ -3221,6 +3541,21 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                               🔔 Follow-up: {new Date(lead.nextFollowUpDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
                             </span>
                           )}
+                          {(() => {
+                            const overdueInfo = getLeadOverdueInfo(lead);
+                            if (overdueInfo.isOverdue) {
+                              return (
+                                <span
+                                  className="inline-flex items-center gap-1 text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-300 mt-0.5"
+                                  title={`Follow-up date passed on ${overdueInfo.targetDateStr}`}
+                                >
+                                  <AlertTriangle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
+                                  <span>{overdueInfo.daysOverdue}d Overdue</span>
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
                         </td>
 
                         {/* Deal Value */}
@@ -3299,6 +3634,34 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                               <ArrowRight className="w-2.5 h-2.5" />
                               <span>Deal</span>
                             </button>
+
+                            {/* Revoke & Reassign Lead (Admin only) */}
+                            {isAdmin && (
+                              <button
+                                onClick={() => {
+                                  const overdueInfo = getLeadOverdueInfo(lead);
+                                  setReassignModalLead(lead);
+                                  setReassignForm({
+                                    newBdmName: '',
+                                    newLeaderName: lead.leaderName || LMS_LEADERS[0],
+                                    reason: overdueInfo.isOverdue
+                                      ? `Follow-up overdue for ${overdueInfo.daysOverdue} days without response.`
+                                      : 'Administrative lead reassignment.',
+                                    nextFollowUpDate: getTodayDateStr(),
+                                    handoverNotes: '',
+                                  });
+                                }}
+                                title="Revoke & Reassign Lead to another BDM"
+                                className={`px-2 py-1 rounded text-[11px] font-bold transition shadow-2xs flex items-center gap-0.5 cursor-pointer ${
+                                  getLeadOverdueInfo(lead).isOverdue
+                                    ? 'bg-rose-700 hover:bg-rose-800 text-white ring-1 ring-rose-400'
+                                    : 'bg-slate-800 hover:bg-slate-900 text-white'
+                                }`}
+                              >
+                                <ArrowRightLeft className="w-2.5 h-2.5" />
+                                <span>Reassign</span>
+                              </button>
+                            )}
 
                             {/* Delete Lead */}
                             {(isAdmin || lead.createdById === currentUser?.id) && (
@@ -3505,6 +3868,53 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                                   <p className="text-slate-700 italic">"{lead.remarks}"</p>
                                 </div>
                               )}
+
+                              {/* Reassignment & Revocation Trail (if present) */}
+                              {(() => {
+                                let rh = [];
+                                if (Array.isArray(lead.reassignmentHistory)) rh = lead.reassignmentHistory;
+                                else if (typeof lead.reassignmentHistory === 'string') {
+                                  try { rh = JSON.parse(lead.reassignmentHistory); } catch {}
+                                }
+                                if (rh && rh.length > 0) {
+                                  return (
+                                    <div className="bg-amber-50/70 border border-amber-200 rounded-lg p-2.5 text-xs space-y-1.5">
+                                      <div className="font-bold text-amber-900 flex items-center gap-1.5">
+                                        <ArrowRightLeft className="w-3.5 h-3.5 text-amber-700" />
+                                        <span>Reassignment & Revocation Trail ({rh.length})</span>
+                                      </div>
+                                      <div className="space-y-1.5">
+                                        {rh.map((item, idx) => (
+                                          <div key={idx} className="text-[11px] text-amber-900 bg-white/70 p-2 rounded border border-amber-200/60 flex items-start justify-between gap-2">
+                                            <div>
+                                              <div>
+                                                Revoked from <strong className="text-rose-700">{item.revokedFrom}</strong> → Assigned to <strong className="text-emerald-700">{item.assignedTo}</strong>
+                                                {item.assignedToLeader && (
+                                                  <span className="text-slate-500 text-[10px] ml-1">(Team: {item.assignedToLeader})</span>
+                                                )}
+                                              </div>
+                                              {item.reason && (
+                                                <div className="italic text-slate-700 mt-0.5 font-medium">
+                                                  Reason: "{item.reason}"
+                                                </div>
+                                              )}
+                                              {item.handoverNotes && (
+                                                <div className="text-[10px] text-slate-500 mt-0.5">
+                                                  Notes: {item.handoverNotes}
+                                                </div>
+                                              )}
+                                            </div>
+                                            <span className="font-mono text-[10px] text-slate-400 shrink-0">
+                                              {item.revokedAt ? new Date(item.revokedAt).toLocaleDateString('en-IN') : ''}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  );
+                                }
+                                return null;
+                              })()}
                             </div>
                           </td>
                         </tr>
@@ -4047,7 +4457,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                                 )}
                               </td>
                               <td className="py-2.5 px-3 text-center">
-                                <div className="flex items-center justify-center gap-1.5">
+                                <div className="flex items-center justify-center gap-1.5 flex-wrap">
                                   {onConvertToDeal && l.leadStatus !== 'CONVERTED' && l.leadStatus !== 'CLOSED_WON' && (
                                     <button
                                       type="button"
@@ -4055,10 +4465,33 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                                         setSelectedBdmDetailModal(null);
                                         onConvertToDeal(l);
                                       }}
-                                      className="px-2 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded text-[10px] font-semibold transition shadow-2xs"
+                                      className="px-2 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded text-[10px] font-semibold transition shadow-2xs cursor-pointer"
                                       title="Convert to Active Deal Dossier"
                                     >
                                       Convert
+                                    </button>
+                                  )}
+                                  {isAdmin && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const overdueInfo = getLeadOverdueInfo(l);
+                                        setReassignModalLead(l);
+                                        setReassignForm({
+                                          newBdmName: '',
+                                          newLeaderName: l.leaderName || LMS_LEADERS[0],
+                                          reason: overdueInfo.isOverdue
+                                            ? `Follow-up overdue for ${overdueInfo.daysOverdue} days without response.`
+                                            : 'Administrative lead reassignment.',
+                                          nextFollowUpDate: getTodayDateStr(),
+                                          handoverNotes: '',
+                                        });
+                                      }}
+                                      className="px-2 py-1 bg-rose-700 hover:bg-rose-800 text-white rounded text-[10px] font-bold transition shadow-2xs flex items-center gap-1 cursor-pointer"
+                                      title="Revoke & Reassign Lead to another BDM"
+                                    >
+                                      <ArrowRightLeft className="w-2.5 h-2.5" />
+                                      <span>Revoke</span>
                                     </button>
                                   )}
                                   <button
@@ -4069,7 +4502,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                                       const rowEl = document.getElementById(`lead-row-${l.id}`);
                                       if (rowEl) rowEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
                                     }}
-                                    className="p-1 hover:bg-slate-200 rounded text-slate-600 transition"
+                                    className="p-1 hover:bg-slate-200 rounded text-slate-600 transition cursor-pointer"
                                     title="View row in main table"
                                   >
                                     <Eye className="w-3.5 h-3.5 text-slate-500" />
@@ -4088,6 +4521,65 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
               {/* TAB 2: FOLLOW-UPS & MEETINGS */}
               {bdmDetailModalTab === 'FOLLOWUPS' && (
                 <div className="space-y-4">
+                  {/* Overdue Follow-ups Alert Section if any */}
+                  {(() => {
+                    const overdueList = (selectedBdmDetailModal.leads || []).filter((l) => getLeadOverdueInfo(l).isOverdue);
+                    if (overdueList.length > 0) {
+                      return (
+                        <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-xs font-bold text-rose-900 flex items-center gap-1.5">
+                              <AlertTriangle className="w-4 h-4 text-rose-600" />
+                              <span>Overdue Follow-ups ({overdueList.length} Leads Requiring Attention)</span>
+                            </h4>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-600 text-white">
+                              Action Required
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {overdueList.map((l) => {
+                              const info = getLeadOverdueInfo(l);
+                              return (
+                                <div key={l.id} className="p-3 bg-white border border-rose-200 rounded-lg flex items-start justify-between gap-2 shadow-2xs">
+                                  <div>
+                                    <span className="font-bold text-slate-900 text-xs block">{l.companyName}</span>
+                                    <span className="text-[10px] text-slate-500 block">
+                                      Value: <strong>₹{Number(l.dealValue || 0).toLocaleString('en-IN')}</strong>
+                                    </span>
+                                    <span className="text-[10px] font-bold text-rose-700 mt-1 inline-block bg-rose-50 border border-rose-200 px-1.5 py-0.2 rounded">
+                                      ⚠️ {info.daysOverdue} Days Overdue (Due: {info.targetDateStr})
+                                    </span>
+                                  </div>
+                                  {isAdmin && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setReassignModalLead(l);
+                                        setReassignForm({
+                                          newBdmName: '',
+                                          newLeaderName: l.leaderName || LMS_LEADERS[0],
+                                          reason: `Follow-up overdue for ${info.daysOverdue} days without update.`,
+                                          nextFollowUpDate: getTodayDateStr(),
+                                          handoverNotes: '',
+                                        });
+                                      }}
+                                      className="px-2 py-1 bg-rose-700 hover:bg-rose-800 text-white rounded text-[10px] font-bold transition flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
+                                      title="Revoke & Reassign Lead"
+                                    >
+                                      <ArrowRightLeft className="w-3 h-3" />
+                                      <span>Revoke</span>
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+
                   {/* Scheduled Meetings */}
                   <div>
                     <h4 className="text-xs font-bold text-slate-900 mb-2 flex items-center gap-1.5">
@@ -4247,6 +4739,221 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 Close Dossier
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 8. REVOKE & REASSIGN OVERDUE LEAD MODAL (ADMIN ONLY) */}
+      {reassignModalLead && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50 animate-in fade-in">
+          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-slate-200">
+            {/* Modal Header */}
+            <div className="px-5 py-3.5 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-rose-500/20 text-rose-400 flex items-center justify-center border border-rose-500/30">
+                  <ArrowRightLeft className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold tracking-tight">Revoke & Reassign Lead</h3>
+                  <p className="text-[11px] text-slate-300">
+                    Transfer lead ownership & notify both BDMs simultaneously
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReassignModalLead(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleRevokeAndReassign} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <div className="p-5 space-y-4 overflow-y-auto flex-1">
+                {/* Lead Summary Box */}
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">Company / Opportunity</span>
+                      <h4 className="text-sm font-extrabold text-slate-900">{reassignModalLead.companyName}</h4>
+                      {reassignModalLead.directorName && (
+                        <span className="text-slate-500 text-[11px]">Contact: {reassignModalLead.directorName} • {reassignModalLead.mobileNo}</span>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">Deal Value</span>
+                      <span className="text-sm font-mono font-bold text-slate-900">
+                        {reassignModalLead.dealValue ? `₹${Number(reassignModalLead.dealValue).toLocaleString('en-IN')}` : '—'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200/60 text-[11px]">
+                    <div>
+                      <span className="text-slate-500 block">Current Assignee:</span>
+                      <span className="font-bold text-slate-800">{reassignModalLead.bdmName1 || 'UNASSIGNED'}</span>
+                      <span className="text-slate-500 block text-[10px]">Team: {reassignModalLead.leaderName || 'Management'}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">Follow-up Status:</span>
+                      {(() => {
+                        const overdue = getLeadOverdueInfo(reassignModalLead);
+                        if (overdue.isOverdue) {
+                          return (
+                            <span className="font-bold text-rose-700 block">
+                              ⚠️ {overdue.daysOverdue} Days Overdue (Due: {overdue.targetDateStr})
+                            </span>
+                          );
+                        }
+                        return <span className="font-semibold text-slate-700 block">Up to date</span>;
+                      })()}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Form Input: New BDM */}
+                <div>
+                  <label className="text-xs text-slate-700 font-semibold block mb-1">
+                    Assign to New BDM <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={reassignForm.newBdmName}
+                    onChange={(e) => {
+                      const newBdm = e.target.value;
+                      setReassignForm((prev) => ({
+                        ...prev,
+                        newBdmName: newBdm,
+                      }));
+                    }}
+                    required
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-none focus:border-slate-800 cursor-pointer"
+                  >
+                    <option value="">-- Select New BDM from Team --</option>
+                    {LMS_BDMS.filter((b) => b.toUpperCase() !== (reassignModalLead.bdmName1 || '').toUpperCase()).map((b) => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
+                  <span className="text-[10px] text-slate-500 mt-0.5 block">
+                    Select the recipient BDM who will take over this lead.
+                  </span>
+                </div>
+
+                {/* Form Input: Team Leader */}
+                <div>
+                  <label className="text-xs text-slate-700 font-semibold block mb-1">
+                    Designated Team Leader <span className="text-slate-400 font-normal">(Optional / Auto-align)</span>
+                  </label>
+                  <select
+                    value={reassignForm.newLeaderName}
+                    onChange={(e) => setReassignForm({ ...reassignForm, newLeaderName: e.target.value })}
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-none focus:border-slate-800 cursor-pointer"
+                  >
+                    {LMS_LEADERS.map((ldr) => (
+                      <option key={ldr} value={ldr}>{ldr}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Form Input: Revocation Reason (Mandatory) */}
+                <div>
+                  <label className="text-xs text-slate-700 font-semibold block mb-1">
+                    Reason for Revocation & Reassignment <span className="text-rose-500">*</span>
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={reassignForm.reason}
+                    onChange={(e) => setReassignForm({ ...reassignForm, reason: e.target.value })}
+                    required
+                    placeholder="Explain why this lead is being revoked from current BDM and reassigned..."
+                    className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 focus:outline-none focus:border-slate-800"
+                  />
+
+                  {/* Quick Presets */}
+                  <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+                    <span className="text-[10px] text-slate-400 font-medium">Quick Presets:</span>
+                    {[
+                      'Follow-up overdue for 5+ days without response',
+                      'Scheduled follow-up missed; reassigned for rapid closing',
+                      'Unattended follow-up; transferred for prompt deal recovery',
+                      'Administrative team load rebalancing',
+                    ].map((preset, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setReassignForm({ ...reassignForm, reason: preset })}
+                        className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-0.5 rounded cursor-pointer transition border border-slate-200"
+                      >
+                        {preset.slice(0, 32)}...
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Form Input: Next Follow-up Date */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-700 font-semibold block mb-1">
+                      New Next Follow-up Date <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={reassignForm.nextFollowUpDate}
+                      onChange={(e) => setReassignForm({ ...reassignForm, nextFollowUpDate: e.target.value })}
+                      required
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-slate-800 cursor-pointer"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-700 font-semibold block mb-1">
+                      Handover Notes <span className="text-slate-400 font-normal">(Optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={reassignForm.handoverNotes}
+                      onChange={(e) => setReassignForm({ ...reassignForm, handoverNotes: e.target.value })}
+                      placeholder="e.g. Call client immediately"
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-slate-800"
+                    />
+                  </div>
+                </div>
+
+                {/* Notification Guarantee Notice */}
+                <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-[11px] text-indigo-900 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                  <p className="leading-relaxed">
+                    <strong>Simultaneous Notification Dispatch:</strong> Upon clicking Confirm, <strong>{reassignModalLead.bdmName1}</strong> will receive an instant notification that this lead was revoked with your reason, and <strong>{reassignForm.newBdmName || 'the new BDM'}</strong> will receive a notification that this lead has been assigned to them.
+                  </p>
+                </div>
+              </div>
+
+              {/* Action Buttons - Fixed / Docked Footer */}
+              <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setReassignModalLead(null)}
+                  disabled={isSubmittingReassign}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingReassign}
+                  className="px-4 py-2 bg-rose-700 hover:bg-rose-800 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+                >
+                  {isSubmittingReassign ? (
+                    <span>Processing Reassignment...</span>
+                  ) : (
+                    <>
+                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                      <span>Confirm Revoke & Reassign</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
