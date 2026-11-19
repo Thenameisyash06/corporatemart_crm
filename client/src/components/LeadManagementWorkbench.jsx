@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   UserPlus,
   Users,
@@ -360,6 +360,68 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
   const [selectedStageFilter, setSelectedStageFilter] = useState('ALL');
   const [selectedTeamMemberFilter, setSelectedTeamMemberFilter] = useState('ALL');
   const [pendingFollowUpFilter, setPendingFollowUpFilter] = useState(false);
+  const [selectedMonthFilter, setSelectedMonthFilter] = useState('THIS_MONTH'); // 'THIS_MONTH' | 'NEXT_MONTH'
+
+  // Month Meta and Labels for This Month vs Next Month
+  const monthLabels = useMemo(() => {
+    const now = new Date();
+    const thisMonth = now.toLocaleString('en-IN', { month: 'short', year: 'numeric' });
+    const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const nextMonth = nextMonthDate.toLocaleString('en-IN', { month: 'short', year: 'numeric' });
+    return {
+      thisMonth: analytics?.monthMeta?.thisMonthLabel || thisMonth,
+      nextMonth: analytics?.monthMeta?.nextMonthLabel || nextMonth,
+    };
+  }, [analytics]);
+
+  // Check if a date string falls in next calendar month
+  const isNextMonthDate = useCallback((dateStr) => {
+    if (!dateStr) return false;
+    const parts = String(dateStr).split('T')[0].split('-');
+    if (parts.length < 2) return false;
+    const targetYear = parseInt(parts[0], 10);
+    const targetMonth = parseInt(parts[1], 10) - 1; // 0-based
+    const now = new Date();
+    const currYear = now.getFullYear();
+    const currMonth = now.getMonth();
+    const nextMonthYear = currMonth === 11 ? currYear + 1 : currYear;
+    const nextMonthVal = currMonth === 11 ? 0 : currMonth + 1;
+    return targetYear === nextMonthYear && targetMonth === nextMonthVal;
+  }, []);
+
+  // Compute month badge for lead row
+  const getLeadMonthBadge = useCallback((lead) => {
+    const targetDateStr = lead.nextFollowUpDate || lead.meetingDate || lead.expectedDateOfCloser || lead.createdAt;
+    if (!targetDateStr) return null;
+    const parts = String(targetDateStr).split('T')[0].split('-');
+    if (parts.length < 2) return null;
+    const targetYear = parseInt(parts[0], 10);
+    const targetMonth = parseInt(parts[1], 10) - 1;
+
+    const now = new Date();
+    const currYear = now.getFullYear();
+    const currMonth = now.getMonth();
+    const nextMonthYear = currMonth === 11 ? currYear + 1 : currYear;
+    const nextMonthVal = currMonth === 11 ? 0 : currMonth + 1;
+
+    const formattedDate = new Date(targetDateStr).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+
+    if (targetYear === nextMonthYear && targetMonth === nextMonthVal) {
+      return {
+        label: `Next Month (${formattedDate})`,
+        icon: '🚀',
+        badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-300 font-extrabold',
+      };
+    }
+    if (targetYear === currYear && targetMonth === currMonth) {
+      return {
+        label: `This Month (${formattedDate})`,
+        icon: '📅',
+        badgeClass: 'bg-slate-100 text-slate-700 border-slate-300',
+      };
+    }
+    return null;
+  }, []);
 
   // Active Leader associated with this user:
   // - If current user is a Leader: matchedLeaderName
@@ -372,7 +434,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
   }, [matchedLeaderName, leads, form.leaderName]);
 
   // Fetch Leads
-  const fetchLeads = async (targetPage = page, targetLimit = limit) => {
+  const fetchLeads = async (targetPage = page, targetLimit = limit, targetMonthFilter = selectedMonthFilter) => {
     try {
       setLoading(true);
       const params = {
@@ -382,7 +444,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       if (!isAdmin) {
         params.scope = 'my';
         params.myBdmName = loggedInBdmName;
-        if (effectiveLeaderName) {
+        // Strictly only pass myLeaderName if current user is an LMS Leader
+        if (isLeader && effectiveLeaderName) {
           params.myLeaderName = effectiveLeaderName;
         }
       } else {
@@ -397,6 +460,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       if (selectedTeamMemberFilter && selectedTeamMemberFilter !== 'ALL') {
         params.teamMember = selectedTeamMemberFilter;
       }
+      const activeMonth = targetMonthFilter || selectedMonthFilter || 'THIS_MONTH';
+      params.monthFilter = activeMonth;
       if (searchQuery.trim()) params.search = searchQuery.trim();
 
       const res = await api.get('/leads', { params });
@@ -432,6 +497,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     selectedMeetingFilter,
     selectedStageFilter,
     selectedTeamMemberFilter,
+    selectedMonthFilter,
   ]);
 
   // Handle Search on Enter
@@ -454,6 +520,27 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     }
 
     const myName = (loggedInBdmName || '').toLowerCase().trim();
+
+    // If regular BDM (NOT a leader), only their own direct leads exist! No team member leads.
+    if (!isLeader) {
+      const own = leads.filter((lead) => {
+        const bdm1 = (lead.bdmName1 || '').toLowerCase().trim();
+        const bdm2 = (lead.bdmName2 || '').toLowerCase().trim();
+        return (
+          bdm1.includes(myName) ||
+          myName.includes(bdm1) ||
+          bdm2.includes(myName) ||
+          (lead.createdById === currentUser?.id && (!lead.bdmName1 || bdm1.includes(myName) || myName.includes(bdm1)))
+        );
+      });
+      return {
+        ownDirectLeads: own,
+        sharedTeamLeads: [],
+        visibleLeads: own,
+      };
+    }
+
+    // Only designated Leader manages shared team leads
     const leaderKey = (effectiveLeaderName || matchedLeaderName || myName).toLowerCase().trim();
     if (!myName && !leaderKey) {
       return {
@@ -487,15 +574,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       if (isOwnLead) {
         own.push(lead);
       } else if (isTeamLead) {
-        // If regular BDM, do NOT include the leader's personal leads in team leads
-        if (!isLeader) {
-          const isLeadByLeader = LMS_LEADERS.some((ldr) => ldr.toLowerCase().trim() === bdm1);
-          if (!isLeadByLeader) {
-            shared.push(lead);
-          }
-        } else {
-          shared.push(lead);
-        }
+        shared.push(lead);
       }
     });
 
@@ -669,19 +748,31 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     return cards;
   }, [isLeader, matchedLeaderName, loggedInBdmName, leads, sharedTeamLeads]);
 
-  // Leads actually displayed in the table below (supports filtering to a selected team member or pending follow-ups)
+  // Leads actually displayed in the table below (supports filtering to a selected team member, selected month, and pending follow-ups)
   const displayedLeads = useMemo(() => {
-    let result = visibleLeads;
+    let list = visibleLeads;
     if (selectedTeamMemberFilter && selectedTeamMemberFilter !== 'ALL') {
-      result = result.filter(
+      list = list.filter(
         (l) => (l.bdmName1 || '').toLowerCase().trim() === selectedTeamMemberFilter.toLowerCase().trim()
       );
     }
-    if (pendingFollowUpFilter) {
-      result = result.filter((l) => isLeadFollowUpExceeded(l));
+    if (selectedMonthFilter === 'NEXT_MONTH') {
+      list = list.filter((l) => {
+        const badge = getLeadMonthBadge(l);
+        return badge?.icon === '🚀';
+      });
+    } else {
+      // Default: THIS_MONTH (Current month leads)
+      list = list.filter((l) => {
+        const badge = getLeadMonthBadge(l);
+        return badge?.icon === '📅';
+      });
     }
-    return result;
-  }, [visibleLeads, selectedTeamMemberFilter, pendingFollowUpFilter]);
+    if (pendingFollowUpFilter) {
+      list = list.filter((l) => isLeadFollowUpExceeded(l));
+    }
+    return list;
+  }, [visibleLeads, selectedTeamMemberFilter, selectedMonthFilter, getLeadMonthBadge, pendingFollowUpFilter]);
 
   // Count of leads whose follow-up date exceeded the current date
   const calculatedPendingFollowups = useMemo(() => {
@@ -1082,6 +1173,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       if (selectedMeetingFilter !== 'ALL') params.meetingStatus = selectedMeetingFilter;
       if (selectedStageFilter !== 'ALL') params.leadStatus = selectedStageFilter;
       if (selectedTeamMemberFilter && selectedTeamMemberFilter !== 'ALL') params.teamMember = selectedTeamMemberFilter;
+      params.monthFilter = selectedMonthFilter || 'THIS_MONTH';
       if (searchQuery.trim()) params.search = searchQuery.trim();
 
       const res = await api.get('/leads', { params });
@@ -1169,7 +1261,9 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
               <TrendingUp className="w-3.5 h-3.5 text-indigo-400" />
-              {isAdmin ? 'Total Funnel' : 'Funnel'}
+              {selectedMonthFilter === 'NEXT_MONTH'
+                ? `🚀 Next Month Pipeline (${monthLabels.nextMonth})`
+                : `📅 This Month Pipeline (${monthLabels.thisMonth})`}
             </span>
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-200 border border-indigo-400/30">
@@ -1862,6 +1956,16 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
             />
           </form>
 
+          {/* Month Pipeline Filter (This Month & Next Month only) */}
+          <select
+            value={selectedMonthFilter}
+            onChange={(e) => setSelectedMonthFilter(e.target.value)}
+            className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs text-slate-800 font-bold focus:outline-none focus:border-slate-800 cursor-pointer"
+          >
+            <option value="THIS_MONTH">📅 This Month ({monthLabels.thisMonth})</option>
+            <option value="NEXT_MONTH">🚀 Next Month ({monthLabels.nextMonth})</option>
+          </select>
+
           {/* Client Status Filter (Hot / Warm / Lost) */}
           <select
             value={selectedClientStatusFilter}
@@ -2260,17 +2364,73 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
 
       {/* 5. LEADS DATA TABLE */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+        {/* LEADS LIST MONTH & TIMELINE FILTER TABS */}
+        <div className="bg-white border-b border-slate-200 px-5 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5 mr-1">
+              <Calendar className="w-4 h-4 text-indigo-600" />
+              <span>Leads Month:</span>
+            </span>
+
+            {/* This Month Tab (Default Active) */}
+            <button
+              type="button"
+              onClick={() => { setSelectedMonthFilter('THIS_MONTH'); setPage(1); fetchLeads(1, limit, 'THIS_MONTH'); }}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer border ${
+                selectedMonthFilter === 'THIS_MONTH'
+                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                  : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-indigo-50 hover:text-indigo-700'
+              }`}
+            >
+              <span>📅 This Month ({monthLabels.thisMonth})</span>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold ${
+                selectedMonthFilter === 'THIS_MONTH' ? 'bg-white/20 text-white' : 'bg-indigo-100 text-indigo-800'
+              }`}>
+                {isAdmin ? (analytics?.thisMonthCount ?? 0) : (analytics?.myThisMonthCount ?? 0)}
+              </span>
+              <span className="text-[10px] opacity-80 font-medium">
+                (₹{Number(isAdmin ? (analytics?.thisMonthFunnel || 0) : (analytics?.myThisMonthFunnel || 0)).toLocaleString('en-IN')})
+              </span>
+            </button>
+
+            {/* Next Month Tab */}
+            <button
+              type="button"
+              onClick={() => { setSelectedMonthFilter('NEXT_MONTH'); setPage(1); fetchLeads(1, limit, 'NEXT_MONTH'); }}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer border ${
+                selectedMonthFilter === 'NEXT_MONTH'
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                  : 'bg-emerald-50/60 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+              }`}
+            >
+              <span>🚀 Next Month ({monthLabels.nextMonth})</span>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold ${
+                selectedMonthFilter === 'NEXT_MONTH' ? 'bg-white/20 text-white' : 'bg-emerald-200 text-emerald-900'
+              }`}>
+                {isAdmin ? (analytics?.nextMonthCount ?? 0) : (analytics?.myNextMonthCount ?? 0)}
+              </span>
+              <span className="text-[10px] opacity-80 font-medium">
+                (₹{Number(isAdmin ? (analytics?.nextMonthFunnel || 0) : (analytics?.myNextMonthFunnel || 0)).toLocaleString('en-IN')})
+              </span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {!isAdmin && (
+              <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-lg">
+                {isLeader ? `BDM Leader: ${loggedInBdmName}` : `BDM: ${loggedInBdmName}`}
+              </span>
+            )}
+          </div>
+        </div>
+
         {/* Table Scope Indicator Header */}
         <div className="bg-slate-50/60 border-b border-slate-200 px-5 py-2.5 flex items-center justify-between text-xs text-slate-500 flex-wrap gap-2">
           <div className="flex items-center gap-2 flex-wrap">
             <span>
-              {isAdmin
-                ? `Showing company leads across all BDMs (${pagination.total} total)`
-                : sharedTeamLeads.length > 0
-                ? selectedTeamMemberFilter !== 'ALL'
-                  ? `Filtered to ${selectedTeamMemberFilter}'s leads (${pagination.total} leads)`
-                  : `Showing leads (${pagination.total} total)`
-                : `Showing your personal leads only (${pagination.total} leads)`}
+              {selectedMonthFilter === 'NEXT_MONTH'
+                ? `🚀 Showing Next Month (${monthLabels.nextMonth}) leads (${displayedLeads.length} leads in view, ${pagination.total} total)`
+                : `📅 Showing This Month (${monthLabels.thisMonth}) leads (${displayedLeads.length} leads in view, ${pagination.total} total)`}
             </span>
             {selectedTeamMemberFilter !== 'ALL' && (
               <button
@@ -2284,11 +2444,6 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
               </button>
             )}
           </div>
-          {!isAdmin && (
-            <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded">
-              {isLeader ? `BDM (Leader): ${loggedInBdmName}` : `BDM Account: ${loggedInBdmName}`}
-            </span>
-          )}
         </div>
 
         <div className="w-full">
@@ -2333,6 +2488,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                   const isPdf = lead.quotationFileName?.toLowerCase().endsWith('.pdf');
                   const currentClientStatus = lead.clientStatus || 'Warm';
                   const leadFollowUps = getFollowUpsList(lead);
+                  const leadMonthBadge = getLeadMonthBadge(lead);
 
                   return (
                     <React.Fragment key={lead.id}>
@@ -2364,20 +2520,30 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                               <span className="font-bold text-slate-900 group-hover:text-indigo-600 text-xs leading-snug block truncate" title={lead.companyName}>
                                 {lead.companyName}
                               </span>
-                              {lead.directorName && (
-                                <span className="text-[10px] text-slate-500 block truncate" title={lead.directorName}>
-                                  {lead.directorName}
-                                </span>
-                              )}
-                              {isLeadFollowUpExceeded(lead) && (
-                                <span
-                                  className="inline-flex items-center gap-1 text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-rose-50 text-rose-700 border border-rose-200 mt-0.5"
-                                  title={`Follow-up date exceeded: ${getLeadLatestFollowUp(lead)?.date || ''}`}
-                                >
-                                  <Clock className="w-2.5 h-2.5 text-rose-600" />
-                                  <span>Pending Follow-up ({getLeadLatestFollowUp(lead)?.date ? new Date(getLeadLatestFollowUp(lead).date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : 'Overdue'})</span>
-                                </span>
-                              )}
+                              <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                                {lead.directorName && (
+                                  <span className="text-[10px] text-slate-500 block truncate" title={lead.directorName}>
+                                    {lead.directorName}
+                                  </span>
+                                )}
+                                {leadMonthBadge?.icon === '🚀' && (
+                                  <span
+                                    className="inline-flex items-center gap-0.5 text-[9px] font-extrabold px-1.5 py-0.2 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-300"
+                                    title={`Pipeline scheduled for next month (${monthLabels.nextMonth})`}
+                                  >
+                                    🚀 Next Month
+                                  </span>
+                                )}
+                                {isLeadFollowUpExceeded(lead) && (
+                                  <span
+                                    className="inline-flex items-center gap-1 text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-rose-50 text-rose-700 border border-rose-200"
+                                    title={`Follow-up date exceeded: ${getLeadLatestFollowUp(lead)?.date || ''}`}
+                                  >
+                                    <Clock className="w-2.5 h-2.5 text-rose-600" />
+                                    <span>Pending Follow-up ({getLeadLatestFollowUp(lead)?.date ? new Date(getLeadLatestFollowUp(lead).date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : 'Overdue'})</span>
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </button>
                         </td>
@@ -2446,6 +2612,16 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                               title={`Meeting on ${new Date(lead.meetingDate).toLocaleDateString('en-IN')}`}
                             >
                               📅 {new Date(lead.meetingDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                            </span>
+                          )}
+                          {lead.nextFollowUpDate && (
+                            <span
+                              className={`text-[9px] font-bold block mt-0.5 truncate ${
+                                leadMonthBadge?.icon === '🚀' ? 'text-emerald-700 font-extrabold' : 'text-indigo-600'
+                              }`}
+                              title={`Next Follow-up on ${new Date(lead.nextFollowUpDate).toLocaleDateString('en-IN')}`}
+                            >
+                              🔔 Follow-up: {new Date(lead.nextFollowUpDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
                             </span>
                           )}
                         </td>
@@ -2881,6 +3057,15 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                     className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-900 font-semibold focus:bg-white focus:border-slate-900 focus:outline-none cursor-pointer"
                   />
                 </div>
+                {isNextMonthDate(followUpForm.date) && (
+                  <div className="mt-2 p-2.5 bg-emerald-50 border border-emerald-300 rounded-lg text-xs text-emerald-800 flex items-start gap-2">
+                    <span className="text-sm shrink-0">🚀</span>
+                    <div>
+                      <strong className="block font-bold text-emerald-900">Next Month Pipeline Transition</strong>
+                      This follow-up date is in <span className="font-extrabold underline">{monthLabels.nextMonth}</span>. This lead and its {followUpModalLead?.dealValue ? `₹${Number(followUpModalLead.dealValue).toLocaleString('en-IN')}` : 'prospective'} deal value will automatically count into your <span className="font-bold">Next Month Deal Funnel</span>!
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Follow-up Status (Hot, Warm, Closed, Lost) */}
