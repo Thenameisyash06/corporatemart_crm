@@ -180,6 +180,12 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
   // Admin BDM Funnel Leaderboard toggle
   const [showBdmLeaderboard, setShowBdmLeaderboard] = useState(false);
 
+  // Admin Cockpit & Detailed BDM Dossier Modal State
+  const [selectedBdmDetailModal, setSelectedBdmDetailModal] = useState(null);
+  const [adminCockpitTab, setAdminCockpitTab] = useState('ALL'); // 'ALL' | 'LEADERS' | 'MEMBERS' | 'ACTIVE_ONLY'
+  const [adminCockpitSearch, setAdminCockpitSearch] = useState('');
+  const [bdmDetailModalTab, setBdmDetailModalTab] = useState('LEADS'); // 'LEADS' | 'FOLLOWUPS' | 'METRICS'
+
   // Quotation File Upload State
   const [quotationFile, setQuotationFile] = useState(null);
   const [fileError, setFileError] = useState(null);
@@ -916,6 +922,171 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     return list;
   }, [analytics, leads, visibleLeads, isAdmin, isLeader, matchedLeaderName, loggedInBdmName, effectiveLeaderName, form.leaderName]);
 
+  // Admin Cockpit: Full list of all BDMs and Leaders with rich performance metrics
+  const adminBdmCards = useMemo(() => {
+    if (!isAdmin) return [];
+
+    let list = [];
+    if (analytics?.allBdmPerformance && Array.isArray(analytics.allBdmPerformance) && analytics.allBdmPerformance.length > 0) {
+      list = [...analytics.allBdmPerformance];
+    } else {
+      // Fallback: build from leads + LMS_LEADERS + LMS_BDMS
+      const map = {};
+      LMS_LEADERS.forEach((ldr) => {
+        map[ldr] = {
+          name: ldr,
+          isLeader: true,
+          leads: [],
+          totalLeads: 0,
+          activeLeads: 0,
+          totalFunnel: 0,
+          hotCount: 0,
+          hotValue: 0,
+          warmCount: 0,
+          warmValue: 0,
+          lostCount: 0,
+          closedCount: 0,
+          closedValue: 0,
+          pendingFollowupsCount: 0,
+          nextMeetingLead: null,
+          lastFollowUp: null,
+          nearestEdcLead: null,
+        };
+      });
+      LMS_BDMS.forEach((b) => {
+        const isLdr = LMS_LEADERS.some((l) => l.toLowerCase() === b.toLowerCase());
+        if (!map[b]) {
+          map[b] = {
+            name: b,
+            isLeader: isLdr,
+            leads: [],
+            totalLeads: 0,
+            activeLeads: 0,
+            totalFunnel: 0,
+            hotCount: 0,
+            hotValue: 0,
+            warmCount: 0,
+            warmValue: 0,
+            lostCount: 0,
+            closedCount: 0,
+            closedValue: 0,
+            pendingFollowupsCount: 0,
+            nextMeetingLead: null,
+            lastFollowUp: null,
+            nearestEdcLead: null,
+          };
+        }
+      });
+      (leads || []).forEach((l) => {
+        const b1 = (l.bdmName1 || '').trim();
+        const b2 = (l.bdmName2 || '').trim();
+        const ldr = (l.leaderName || '').trim();
+        const names = [b1, b2].filter((n) => n && n !== '-- None (Single BDM) --');
+        const val = parseFloat(l.dealValue) || 0;
+        const cs = (l.clientStatus || 'warm').toLowerCase();
+        const isWon = l.leadStatus === 'CLOSED_WON' || cs === 'closed';
+        const isLost = l.leadStatus === 'CLOSED_LOST' || cs === 'lost';
+        const isActive = !isWon && !isLost;
+
+        names.forEach((name) => {
+          if (!map[name]) {
+            const isLdr = LMS_LEADERS.some((l) => l.toLowerCase() === name.toLowerCase());
+            map[name] = {
+              name,
+              isLeader: isLdr,
+              leads: [],
+              totalLeads: 0,
+              activeLeads: 0,
+              totalFunnel: 0,
+              hotCount: 0,
+              hotValue: 0,
+              warmCount: 0,
+              warmValue: 0,
+              lostCount: 0,
+              closedCount: 0,
+              closedValue: 0,
+              pendingFollowupsCount: 0,
+              nextMeetingLead: null,
+              lastFollowUp: null,
+              nearestEdcLead: null,
+            };
+          }
+          map[name].leads.push(l);
+          map[name].totalLeads++;
+          if (isActive) {
+            map[name].activeLeads++;
+            map[name].totalFunnel += val;
+          }
+          if (cs === 'hot') {
+            map[name].hotCount++;
+            map[name].hotValue += val;
+          } else if (cs === 'warm') {
+            map[name].warmCount++;
+            map[name].warmValue += val;
+          } else if (isLost) {
+            map[name].lostCount++;
+          }
+          if (isWon) {
+            map[name].closedCount++;
+            map[name].closedValue += val;
+          }
+          if (ldr && !map[name].leaderName && !map[name].isLeader) {
+            map[name].leaderName = ldr;
+          }
+        });
+      });
+      list = Object.values(map);
+      list.sort((a, b) => {
+        if (a.isLeader && !b.isLeader) return -1;
+        if (!a.isLeader && b.isLeader) return 1;
+        return (b.totalFunnel || 0) - (a.totalFunnel || 0) || (b.totalLeads || 0) - (a.totalLeads || 0);
+      });
+    }
+
+    return list;
+  }, [isAdmin, analytics, leads]);
+
+  // Filtered cards for display in Cockpit based on Tab and Search
+  const filteredAdminCards = useMemo(() => {
+    let result = adminBdmCards;
+
+    if (adminCockpitTab === 'LEADERS') {
+      result = result.filter((c) => c.isLeader);
+    } else if (adminCockpitTab === 'MEMBERS') {
+      result = result.filter((c) => !c.isLeader);
+    } else if (adminCockpitTab === 'ACTIVE_ONLY') {
+      result = result.filter((c) => (c.totalFunnel || 0) > 0 || (c.activeLeads || 0) > 0 || (c.totalLeads || 0) > 0);
+    }
+
+    if (adminCockpitSearch.trim()) {
+      const q = adminCockpitSearch.toLowerCase().trim();
+      result = result.filter((c) => c.name.toLowerCase().includes(q) || (c.leaderName && c.leaderName.toLowerCase().includes(q)));
+    }
+
+    return result;
+  }, [adminBdmCards, adminCockpitTab, adminCockpitSearch]);
+
+  // Aggregate stats for Admin Cockpit header
+  const adminTotalFunnel = useMemo(() => {
+    return adminBdmCards.reduce((sum, c) => sum + (c.totalFunnel || 0), 0);
+  }, [adminBdmCards]);
+
+  const adminTotalActiveLeads = useMemo(() => {
+    return adminBdmCards.reduce((sum, c) => sum + (c.activeLeads || 0), 0);
+  }, [adminBdmCards]);
+
+  const leadersCount = useMemo(() => {
+    return adminBdmCards.filter((c) => c.isLeader).length;
+  }, [adminBdmCards]);
+
+  const membersCount = useMemo(() => {
+    return adminBdmCards.filter((c) => !c.isLeader).length;
+  }, [adminBdmCards]);
+
+  const activeFunnelCount = useMemo(() => {
+    return adminBdmCards.filter((c) => (c.totalFunnel || 0) > 0 || (c.activeLeads || 0) > 0 || (c.totalLeads || 0) > 0).length;
+  }, [adminBdmCards]);
+
   // Real-Time BDM Funnel Accumulator for Form Input
   const currentBdmFunnel = useMemo(() => {
     if (!isAdmin) {
@@ -1304,142 +1475,539 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         </div>
       )}
 
-      {/* 2. ANALYTICS KPI TILES (HERO FUNNEL VALUE CARD + STATUS COUNTERS) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-3">
-        {/* HERO TILE: TOTAL DEAL FUNNEL VALUE */}
-        <div className="col-span-2 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 p-4 rounded-xl border border-indigo-700/40 text-white shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
-              <TrendingUp className="w-3.5 h-3.5 text-indigo-400" />
-              Funnel Value
-            </span>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-200 border border-indigo-400/30">
-                {activeLeadsCount} Leads
+      {/* 2A. BDM PERSONAL KPI TILES (HERO FUNNEL VALUE CARD + STATUS COUNTERS - HIDDEN FOR ADMIN) */}
+      {!isAdmin && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-3">
+          {/* HERO TILE: TOTAL DEAL FUNNEL VALUE */}
+          <div className="col-span-2 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 p-4 rounded-xl border border-indigo-700/40 text-white shadow-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
+                <TrendingUp className="w-3.5 h-3.5 text-indigo-400" />
+                {selectedMonthFilter === 'NEXT_MONTH'
+                  ? `🚀 Next Month Pipeline (${monthLabels.nextMonth})`
+                  : `📅 This Month Pipeline (${monthLabels.thisMonth})`}
               </span>
-              {!isAdmin && sharedTeamLeads.length > 0 && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-200 border border-purple-400/30" title="Team member leads shared with you for collaboration">
-                  +{sharedTeamLeads.length} Team
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-200 border border-indigo-400/30">
+                  {activeLeadsCount} Leads
                 </span>
+                {!isAdmin && sharedTeamLeads.length > 0 && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-200 border border-purple-400/30" title="Team member leads shared with you for collaboration">
+                    +{sharedTeamLeads.length} Team
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="text-2xl font-black text-white mt-1.5 tracking-tight">
+              ₹{Number(bdmPersonalFunnel).toLocaleString('en-IN')}
+            </div>
+            <div className="flex items-center gap-2.5 text-[11px] text-slate-300 mt-2 pt-2 border-t border-white/10 flex-wrap">
+              <span className="flex items-center gap-1">
+                <span className="text-rose-400 font-bold">🔥 Hot:</span>
+                <span className="text-white font-semibold">
+                  ₹{Number(bdmHotFunnel).toLocaleString('en-IN')}
+                </span>
+              </span>
+              <span className="text-white/20">•</span>
+              <span className="flex items-center gap-1">
+                <span className="text-amber-400 font-bold">☀️ Warm:</span>
+                <span className="text-white font-semibold">
+                  ₹{Number(bdmWarmFunnel).toLocaleString('en-IN')}
+                </span>
+              </span>
+            </div>
+          </div>
+
+          {/* Active Leads (Sum of Hot + Warm Clients) */}
+          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+              Active Leads
+            </span>
+            <div className="text-xl font-extrabold text-slate-900 mt-0.5">
+              {activeLeadsCount}
+            </div>
+          </div>
+
+          {/* Hot Clients */}
+          <div className="bg-rose-50/50 p-3.5 rounded-xl border border-rose-200 shadow-xs">
+            <span className="text-[10px] font-bold text-rose-700 uppercase tracking-wider flex items-center gap-1">
+              <span>🔥</span> Hot Clients
+            </span>
+            <div className="text-xl font-extrabold text-rose-700 mt-0.5">
+              {hotClientsCount}
+            </div>
+            <div className="text-[11px] text-rose-600 mt-1 font-semibold truncate">
+              Val: ₹{Number(bdmHotFunnel).toLocaleString('en-IN')}
+            </div>
+          </div>
+
+          {/* Warm Clients */}
+          <div className="bg-amber-50/50 p-3.5 rounded-xl border border-amber-200 shadow-xs">
+            <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider flex items-center gap-1">
+              <span>☀️</span> Warm Clients
+            </span>
+            <div className="text-xl font-extrabold text-amber-700 mt-0.5">
+              {warmClientsCount}
+            </div>
+            <div className="text-[11px] text-amber-600 mt-1 font-semibold truncate">
+              Val: ₹{Number(bdmWarmFunnel).toLocaleString('en-IN')}
+            </div>
+          </div>
+
+          {/* Lost Clients */}
+          <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 shadow-xs">
+            <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1">
+              <span>❄️</span> Lost Clients
+            </span>
+            <div className="text-xl font-extrabold text-slate-700 mt-0.5">
+              {ownDirectLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'lost').length}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-1">
+              Dropped
+            </div>
+          </div>
+
+          {/* Meetings Scheduled */}
+          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+            <span className="text-[10px] font-bold text-blue-700 uppercase tracking-wider block">
+              Meetings Scheduled
+            </span>
+            <div className="text-xl font-extrabold text-blue-600 mt-0.5">
+              {ownDirectLeads.filter((l) =>
+                ['Google/Team Meet', 'Conference Call', 'Physical Meeting'].includes(l.meetingStatus)
+              ).length}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-1 truncate">
+              Physical / Meets
+            </div>
+          </div>
+
+          {/* Pending Follow-ups */}
+          <div
+            onClick={() => setPendingFollowUpFilter((prev) => !prev)}
+            className={`p-3.5 rounded-xl border shadow-xs transition cursor-pointer ${
+              pendingFollowUpFilter
+                ? 'bg-rose-100/80 border-rose-400 ring-2 ring-rose-400'
+                : 'bg-white hover:bg-rose-50/50 border-slate-200 hover:border-rose-300'
+            }`}
+            title="Click to view leads whose follow-up date exceeded current date"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-rose-700 uppercase tracking-wider block">
+                Pending Follow-ups
+              </span>
+              {pendingFollowUpFilter && (
+                <span className="text-[9px] bg-rose-600 text-white px-1.5 py-0.2 rounded font-extrabold">Active</span>
+              )}
+            </div>
+            <div className="text-xl font-extrabold text-red-600 mt-0.5">
+              {displayPendingFollowupsCount}
+            </div>
+            <div className="text-[11px] text-rose-600/80 mt-1">
+              Follow-up Exceeded
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2B. ADMIN BDM & LEADER PERFORMANCE TRACKING COCKPIT (ADMIN ONLY) */}
+      {isAdmin && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-4">
+          {/* Header Bar */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 pb-3.5">
+            <div>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center shadow-xs">
+                  <Users className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-bold text-slate-900 tracking-tight">
+                      BDM & Team Leaders Performance Tracker
+                    </h2>
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                      {adminBdmCards.length} Tracked
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Pipeline tracking across team leaders and BDMs. Click any card to inspect detailed dossier and leads.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap self-end sm:self-auto">
+              <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg text-xs text-slate-600">
+                <TrendingUp className="w-3.5 h-3.5 text-slate-500" />
+                <span>Total Active Funnel:</span>
+                <span className="font-mono font-bold text-slate-900">
+                  ₹{Number(adminTotalFunnel).toLocaleString('en-IN')}
+                </span>
+              </div>
+
+              {selectedTeamMemberFilter !== 'ALL' && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedTeamMemberFilter('ALL')}
+                  className="text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-300 px-2.5 py-1.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+                  title="Clear current table filter"
+                >
+                  <span>Filtered: {selectedTeamMemberFilter}</span>
+                  <X className="w-3.5 h-3.5" />
+                </button>
               )}
             </div>
           </div>
-          <div className="text-2xl font-black text-white mt-1.5 tracking-tight">
-            ₹{Number(isAdmin ? (analytics?.totalEstimatedValue || 0) : bdmPersonalFunnel).toLocaleString('en-IN')}
-          </div>
-          <div className="flex items-center gap-2.5 text-[11px] text-slate-300 mt-2 pt-2 border-t border-white/10 flex-wrap">
-            <span className="flex items-center gap-1">
-              <span className="text-rose-400 font-bold">🔥 Hot:</span>
-              <span className="text-white font-semibold">
-                ₹{Number(isAdmin ? (analytics?.hotFunnelValue || 0) : bdmHotFunnel).toLocaleString('en-IN')}
-              </span>
-            </span>
-            <span className="text-white/20">•</span>
-            <span className="flex items-center gap-1">
-              <span className="text-amber-400 font-bold">☀️ Warm:</span>
-              <span className="text-white font-semibold">
-                ₹{Number(isAdmin ? (analytics?.warmFunnelValue || 0) : bdmWarmFunnel).toLocaleString('en-IN')}
-              </span>
-            </span>
-          </div>
-        </div>
 
-        {/* Active Leads (Sum of Hot + Warm Clients) */}
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
-          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-            Active Leads
-          </span>
-          <div className="text-xl font-extrabold text-slate-900 mt-0.5">
-            {activeLeadsCount}
-          </div>
-        </div>
+          {/* Filter Tabs & Search Bar */}
+          <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
+              <button
+                type="button"
+                onClick={() => setAdminCockpitTab('ALL')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap cursor-pointer border ${
+                  adminCockpitTab === 'ALL'
+                    ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                All ({adminBdmCards.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setAdminCockpitTab('LEADERS')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap cursor-pointer border flex items-center gap-1.5 ${
+                  adminCockpitTab === 'LEADERS'
+                    ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                <span>Team Leaders</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded font-semibold ${
+                  adminCockpitTab === 'LEADERS' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {leadersCount}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAdminCockpitTab('MEMBERS')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap cursor-pointer border flex items-center gap-1.5 ${
+                  adminCockpitTab === 'MEMBERS'
+                    ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                <span>BDM Members</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded font-semibold ${
+                  adminCockpitTab === 'MEMBERS' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {membersCount}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAdminCockpitTab('ACTIVE_ONLY')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap cursor-pointer border flex items-center gap-1.5 ${
+                  adminCockpitTab === 'ACTIVE_ONLY'
+                    ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                <span>Active Pipeline</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded font-semibold ${
+                  adminCockpitTab === 'ACTIVE_ONLY' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {activeFunnelCount}
+                </span>
+              </button>
+            </div>
 
-        {/* Hot Clients */}
-        <div className="bg-rose-50/50 p-3.5 rounded-xl border border-rose-200 shadow-xs">
-          <span className="text-[10px] font-bold text-rose-700 uppercase tracking-wider flex items-center gap-1">
-            <span>🔥</span> Hot Clients
-          </span>
-          <div className="text-xl font-extrabold text-rose-700 mt-0.5">
-            {hotClientsCount}
+            <div className="relative min-w-[240px]">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={adminCockpitSearch}
+                onChange={(e) => setAdminCockpitSearch(e.target.value)}
+                placeholder="Search by name or team..."
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8.5 pr-8 py-1.5 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:border-slate-800"
+              />
+              {adminCockpitSearch && (
+                <button
+                  type="button"
+                  onClick={() => setAdminCockpitSearch('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           </div>
-          <div className="text-[11px] text-rose-600 mt-1 font-semibold truncate">
-            Val: ₹{Number(isAdmin ? (analytics?.hotFunnelValue || 0) : bdmHotFunnel).toLocaleString('en-IN')}
-          </div>
-        </div>
 
-        {/* Warm Clients */}
-        <div className="bg-amber-50/50 p-3.5 rounded-xl border border-amber-200 shadow-xs">
-          <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider flex items-center gap-1">
-            <span>☀️</span> Warm Clients
-          </span>
-          <div className="text-xl font-extrabold text-amber-700 mt-0.5">
-            {warmClientsCount}
-          </div>
-          <div className="text-[11px] text-amber-600 mt-1 font-semibold truncate">
-            Val: ₹{Number(isAdmin ? (analytics?.warmFunnelValue || 0) : bdmWarmFunnel).toLocaleString('en-IN')}
-          </div>
-        </div>
+          {/* Cards Grid */}
+          {filteredAdminCards.length === 0 ? (
+            <div className="bg-slate-50 border border-dashed border-slate-200 rounded-xl p-8 text-center text-xs text-slate-500">
+              <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+              <p className="font-semibold text-slate-700">No BDMs or Leaders match this filter</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">Try selecting "All" or clearing your search query.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
+              {filteredAdminCards.map((member) => {
+                const isSelected = selectedTeamMemberFilter.toLowerCase() === member.name.toLowerCase();
+                const memberInitials = member.name
+                  .split(' ')
+                  .map((n) => n[0])
+                  .filter(Boolean)
+                  .slice(0, 2)
+                  .join('')
+                  .toUpperCase();
 
-        {/* Lost Clients */}
-        <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 shadow-xs">
-          <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1">
-            <span>❄️</span> Lost Clients
-          </span>
-          <div className="text-xl font-extrabold text-slate-700 mt-0.5">
-            {isAdmin
-              ? (analytics?.byClientStatus?.Lost ?? 0)
-              : ownDirectLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'lost').length}
-          </div>
-          <div className="text-[11px] text-slate-500 mt-1">
-            Dropped
-          </div>
-        </div>
+                return (
+                  <div
+                    key={member.name}
+                    onClick={() => setSelectedBdmDetailModal(member)}
+                    className={`bg-white border rounded-xl p-4 transition shadow-2xs flex flex-col justify-between gap-3 cursor-pointer group ${
+                      isSelected
+                        ? 'border-slate-900 ring-2 ring-slate-900/10 bg-slate-50/30'
+                        : 'border-slate-200 hover:border-slate-400 hover:shadow-xs'
+                    }`}
+                  >
+                    <div>
+                      {/* Card Header: Avatar, Name, Role tag, Funnel Value */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${
+                              member.isLeader
+                                ? 'bg-slate-900 text-white'
+                                : 'bg-slate-100 text-slate-700 border border-slate-200'
+                            }`}
+                          >
+                            {memberInitials}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <h4 className="text-xs font-bold text-slate-900 leading-tight group-hover:text-indigo-600 transition">
+                                {member.name}
+                              </h4>
+                              {member.isLeader && (
+                                <span className="text-[9px] font-semibold px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                                  Leader
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-slate-500 block font-normal truncate max-w-[150px]">
+                              {member.isLeader
+                                ? 'Team Leader'
+                                : member.leaderName
+                                ? `Team: ${member.leaderName}`
+                                : 'BDM Member'}
+                            </span>
+                          </div>
+                        </div>
 
-        {/* Meetings Scheduled */}
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
-          <span className="text-[10px] font-bold text-blue-700 uppercase tracking-wider block">
-            Meetings Scheduled
-          </span>
-          <div className="text-xl font-extrabold text-blue-600 mt-0.5">
-            {isAdmin
-              ? ((analytics?.byMeetingStatus?.['Google/Team Meet'] || 0) +
-                 (analytics?.byMeetingStatus?.['Conference Call'] || 0) +
-                 (analytics?.byMeetingStatus?.['Physical Meeting'] || 0))
-              : ownDirectLeads.filter((l) =>
-                  ['Google/Team Meet', 'Conference Call', 'Physical Meeting'].includes(l.meetingStatus)
-                ).length}
-          </div>
-          <div className="text-[11px] text-slate-500 mt-1 truncate">
-            Physical / Meets
-          </div>
-        </div>
+                        <div className="text-right">
+                          <span className="text-sm font-mono font-bold text-slate-900 block leading-tight">
+                            ₹{Number(member.totalFunnel || 0).toLocaleString('en-IN')}
+                          </span>
+                          <span className="text-[9px] text-slate-400 uppercase font-medium">
+                            Funnel Value
+                          </span>
+                        </div>
+                      </div>
 
-        {/* Pending Follow-ups */}
-        <div
-          onClick={() => setPendingFollowUpFilter((prev) => !prev)}
-          className={`p-3.5 rounded-xl border shadow-xs transition cursor-pointer ${
-            pendingFollowUpFilter
-              ? 'bg-rose-100/80 border-rose-400 ring-2 ring-rose-400'
-              : 'bg-white hover:bg-rose-50/50 border-slate-200 hover:border-rose-300'
-          }`}
-          title="Click to view leads whose follow-up date exceeded current date"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold text-rose-700 uppercase tracking-wider block">
-              Pending Follow-ups
-            </span>
-            {pendingFollowUpFilter && (
-              <span className="text-[9px] bg-rose-600 text-white px-1.5 py-0.2 rounded font-extrabold">Active</span>
-            )}
-          </div>
-          <div className="text-xl font-extrabold text-red-600 mt-0.5">
-            {displayPendingFollowupsCount}
-          </div>
-          <div className="text-[11px] text-rose-600/80 mt-1">
-            Follow-up Exceeded
-          </div>
+                      {/* 5 Status Counters in a Clean Neutral Grid */}
+                      <div className="grid grid-cols-5 gap-1.5 mt-3 text-center">
+                        <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-1.5">
+                          <span className="text-[9px] text-slate-500 uppercase font-medium block truncate">
+                            Active
+                          </span>
+                          <span className="text-xs font-bold text-slate-900">
+                            {member.activeLeads || 0}
+                          </span>
+                        </div>
+
+                        <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-1.5">
+                          <span className="text-[9px] text-slate-500 uppercase font-medium block truncate">
+                            Hot
+                          </span>
+                          <span className="text-xs font-bold text-slate-900">
+                            {member.hotCount || 0}
+                          </span>
+                        </div>
+
+                        <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-1.5">
+                          <span className="text-[9px] text-slate-500 uppercase font-medium block truncate">
+                            Warm
+                          </span>
+                          <span className="text-xs font-bold text-slate-900">
+                            {member.warmCount || 0}
+                          </span>
+                        </div>
+
+                        <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-1.5">
+                          <span className="text-[9px] text-slate-500 uppercase font-medium block truncate">
+                            Lost
+                          </span>
+                          <span className="text-xs font-bold text-slate-600">
+                            {member.lostCount || 0}
+                          </span>
+                        </div>
+
+                        <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-1.5">
+                          <span className="text-[9px] text-slate-500 uppercase font-medium block truncate">
+                            Closed
+                          </span>
+                          <span className="text-xs font-bold text-slate-900">
+                            {member.closedCount || 0}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Detail Metrics: Meeting, Follow-up, EDC */}
+                      <div className="mt-3 space-y-1.5 text-xs border-t border-slate-100 pt-2.5">
+                        {/* Meeting */}
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="text-[10px] text-slate-400 font-medium uppercase flex items-center gap-1 shrink-0 mt-0.5">
+                            Meeting:
+                          </span>
+                          <div className="text-right">
+                            {member.nextMeetingLead ? (
+                              <div className="leading-snug">
+                                <span className="font-semibold text-slate-800 text-[11px]">
+                                  {member.nextMeetingLead.meetingDate
+                                    ? new Date(member.nextMeetingLead.meetingDate).toLocaleDateString('en-IN', {
+                                        day: '2-digit',
+                                        month: 'short',
+                                      })
+                                    : 'Scheduled'}
+                                </span>
+                                <span className="text-[10px] text-slate-500 block truncate max-w-[170px]" title={`${member.nextMeetingLead.meetingStatus} (${member.nextMeetingLead.companyName})`}>
+                                  {member.nextMeetingLead.meetingStatus} ({member.nextMeetingLead.companyName})
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-slate-400 italic">None scheduled</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Last Follow Up */}
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="text-[10px] text-slate-400 font-medium uppercase flex items-center gap-1 shrink-0 mt-0.5">
+                            Follow-up:
+                          </span>
+                          <div className="text-right">
+                            {member.lastFollowUp ? (
+                              <div className="leading-snug">
+                                <div className="flex items-center justify-end gap-1.5 text-[11px]">
+                                  <span className="font-semibold text-slate-800">
+                                    {new Date(member.lastFollowUp.date).toLocaleDateString('en-IN', {
+                                      day: '2-digit',
+                                      month: 'short',
+                                    })}
+                                  </span>
+                                  <span className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                                    {member.lastFollowUp.status}
+                                  </span>
+                                </div>
+                                <span className="text-[10px] text-slate-500 block truncate max-w-[170px]" title={member.lastFollowUp.companyName}>
+                                  {member.lastFollowUp.companyName}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-slate-400 italic">No follow-ups yet</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* EDC Target */}
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="text-[10px] text-slate-400 font-medium uppercase flex items-center gap-1 shrink-0 mt-0.5">
+                            EDC Target:
+                          </span>
+                          <div className="text-right">
+                            {member.nearestEdcLead?.expectedDateOfCloser ? (
+                              <div className="leading-snug">
+                                <span className="font-semibold text-slate-800 text-[11px]">
+                                  {new Date(member.nearestEdcLead.expectedDateOfCloser).toLocaleDateString('en-IN', {
+                                    day: '2-digit',
+                                    month: 'short',
+                                  })}
+                                </span>
+                                <span className="text-[10px] text-slate-500 block truncate max-w-[170px]" title={member.nearestEdcLead.companyName}>
+                                  {member.nearestEdcLead.companyName}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-slate-400 italic">Not set</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Overdue Follow-ups */}
+                        {member.pendingFollowupsCount > 0 && (
+                          <div className="pt-1 flex items-center justify-between text-[11px] font-semibold text-rose-700 bg-rose-50/60 border border-rose-200/70 px-2 py-0.5 rounded">
+                            <span>Overdue Follow-ups:</span>
+                            <span>{member.pendingFollowupsCount} Leads</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Card Action Buttons */}
+                    <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedBdmDetailModal(member);
+                        }}
+                        className="flex-1 py-1.5 bg-white hover:bg-slate-50 text-slate-700 font-semibold rounded-lg text-xs flex items-center justify-center gap-1 border border-slate-300 transition cursor-pointer"
+                        title="Click to view detailed info and leads dossier"
+                      >
+                        <Eye className="w-3.5 h-3.5 text-slate-500" />
+                        <span>View Details</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (selectedTeamMemberFilter.toLowerCase() === member.name.toLowerCase()) {
+                            setSelectedTeamMemberFilter('ALL');
+                          } else {
+                            setSelectedTeamMemberFilter(member.name);
+                          }
+                        }}
+                        className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-1 cursor-pointer ${
+                          isSelected
+                            ? 'bg-slate-900 text-white hover:bg-slate-800 shadow-xs'
+                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                        }`}
+                        title="Filter table below to this person's leads"
+                      >
+                        {isSelected ? (
+                          <>
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Filtered</span>
+                          </>
+                        ) : (
+                          <>
+                            <Filter className="w-3.5 h-3.5 text-slate-500" />
+                            <span>Filter Table</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* 2B. BDM FUNNEL LEADERBOARD (Collapsible breakdown for Admin & BDM) */}
       {showBdmLeaderboard && (
@@ -2118,7 +2686,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       )}
 
       {/* 4B. TEAM MEMBERS PIPELINE & PERFORMANCE CARDS - STRICTLY FOR TEAM LEADERS ONLY */}
-      {isLeader && (
+      {!isAdmin && isLeader && (
         <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3.5">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
             <div>
@@ -2157,7 +2725,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
               {teamMembersCards.map((member) => {
                 const isSelected = selectedTeamMemberFilter.toLowerCase() === member.name.toLowerCase();
                 const memberInitials = member.name
@@ -2175,100 +2743,93 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 return (
                   <div
                     key={member.name}
-                    className={`bg-white border rounded-xl p-4 transition shadow-xs flex flex-col justify-between gap-3 ${
+                    className={`bg-white border rounded-xl p-4 transition shadow-2xs flex flex-col justify-between gap-3 ${
                       isSelected
-                        ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/15'
-                        : 'border-slate-200 hover:border-indigo-300 hover:shadow-sm'
+                        ? 'border-slate-900 ring-2 ring-slate-900/10 bg-slate-50/30'
+                        : 'border-slate-200 hover:border-slate-400 hover:shadow-xs'
                     }`}
                   >
                     <div>
                       {/* Member Header */}
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs">
+                          <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center font-bold text-xs shrink-0">
                             {memberInitials}
                           </div>
                           <div>
                             <h4 className="text-xs font-bold text-slate-900 leading-tight">
                               {member.name}
                             </h4>
-                            <span className="text-[10px] text-slate-400 block font-medium">
-                              {member.isSelf
-                                ? 'Team Member (You)'
-                                : 'BDM Team Member'}
+                            <span className="text-[10px] text-slate-500 block font-normal">
+                              {member.isSelf ? 'Team Member (You)' : 'BDM Team Member'}
                             </span>
                           </div>
                         </div>
 
                         <div className="text-right">
-                          <span className="text-[11px] font-mono font-bold text-indigo-900 block">
+                          <span className="text-sm font-mono font-bold text-slate-900 block leading-tight">
                             ₹{Number(member.totalFunnel).toLocaleString('en-IN')}
                           </span>
-                          <span className="text-[9px] text-slate-400 uppercase font-semibold">
+                          <span className="text-[9px] text-slate-400 uppercase font-medium">
                             Funnel Value
                           </span>
                         </div>
                       </div>
 
-                      {/* Status Badges Row: Active Leads, Hot, Warm, Lost, Closed(outcome) */}
+                      {/* Status Badges Row in Clean Neutral Grid */}
                       <div className="grid grid-cols-5 gap-1.5 mt-3 text-center">
-                        {/* 1. Active Leads */}
-                        <div className="bg-slate-50 border border-slate-200/90 rounded p-1.5">
-                          <span className="text-[9px] text-slate-500 uppercase font-bold block truncate" title="Active Leads in pipeline">
+                        <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-1.5">
+                          <span className="text-[9px] text-slate-500 uppercase font-medium block truncate">
                             Active
                           </span>
-                          <span className="text-xs font-extrabold text-slate-800">
+                          <span className="text-xs font-bold text-slate-900">
                             {member.activeLeads}
                           </span>
                         </div>
 
-                        {/* 2. Hot */}
-                        <div className="bg-rose-50 border border-rose-200/90 rounded p-1.5">
-                          <span className="text-[9px] text-rose-700 uppercase font-bold block truncate">
-                            🔥 Hot
+                        <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-1.5">
+                          <span className="text-[9px] text-slate-500 uppercase font-medium block truncate">
+                            Hot
                           </span>
-                          <span className="text-xs font-extrabold text-rose-700">
+                          <span className="text-xs font-bold text-slate-900">
                             {member.hotCount}
                           </span>
                         </div>
 
-                        {/* 3. Warm */}
-                        <div className="bg-amber-50 border border-amber-200/90 rounded p-1.5">
-                          <span className="text-[9px] text-amber-800 uppercase font-bold block truncate">
-                            ☀️ Warm
+                        <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-1.5">
+                          <span className="text-[9px] text-slate-500 uppercase font-medium block truncate">
+                            Warm
                           </span>
-                          <span className="text-xs font-extrabold text-amber-800">
+                          <span className="text-xs font-bold text-slate-900">
                             {member.warmCount}
                           </span>
                         </div>
 
-                        {/* 4. Lost */}
-                        <div className="bg-slate-100 border border-slate-200 rounded p-1.5">
-                          <span className="text-[9px] text-slate-600 uppercase font-bold block truncate">
-                            ❄️ Lost
+                        <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-1.5">
+                          <span className="text-[9px] text-slate-500 uppercase font-medium block truncate">
+                            Lost
                           </span>
-                          <span className="text-xs font-extrabold text-slate-700">
+                          <span className="text-xs font-bold text-slate-600">
                             {member.lostCount}
                           </span>
                         </div>
 
-                        {/* 5. Closed (Outcome) */}
-                        <div className="bg-emerald-50 border border-emerald-200/90 rounded p-1.5">
-                          <span className="text-[9px] text-emerald-800 uppercase font-bold block truncate" title="Closed Won outcome">
-                            🏆 Closed
+                        <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-1.5">
+                          <span className="text-[9px] text-slate-500 uppercase font-medium block truncate">
+                            Closed
                           </span>
-                          <span className="text-xs font-extrabold text-emerald-800">
+                          <span className="text-xs font-bold text-slate-900">
                             {member.closedCount}
                           </span>
                         </div>
                       </div>
 
                       {/* Detail Metrics: Meeting, Last Follow-up, EDC */}
-                      <div className="mt-3 space-y-2 text-xs border-t border-slate-100 pt-2.5">
-                        {/* 6. Meeting */}
+                      <div className="mt-3 space-y-1.5 text-xs border-t border-slate-100 pt-2.5">
+                        {/* Meeting */}
                         <div className="flex items-start justify-between gap-2">
-                          <span className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1 shrink-0 mt-0.5">
-                            <Calendar className="w-3 h-3 text-indigo-500" /> Meeting:
+                          <span className="text-[10px] text-slate-400 font-medium uppercase flex items-center gap-1 shrink-0 mt-0.5">
+                            Meeting:
                           </span>
                           <div className="text-right">
                             {member.nextMeetingLead ? (
@@ -2292,38 +2853,27 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                           </div>
                         </div>
 
-                        {/* 7. Last Follow Up */}
+                        {/* Last Follow Up */}
                         <div className="flex items-start justify-between gap-2">
-                          <span className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1 shrink-0 mt-0.5">
-                            <Clock className="w-3 h-3 text-indigo-500" /> Last Follow-up:
+                          <span className="text-[10px] text-slate-400 font-medium uppercase flex items-center gap-1 shrink-0 mt-0.5">
+                            Follow-up:
                           </span>
                           <div className="text-right">
                             {member.lastFollowUp ? (
                               <div className="leading-snug">
-                                <div className="flex items-center justify-end gap-1 font-mono text-[11px]">
+                                <div className="flex items-center justify-end gap-1.5 text-[11px]">
                                   <span className="font-semibold text-slate-800">
                                     {new Date(member.lastFollowUp.date).toLocaleDateString('en-IN', {
                                       day: '2-digit',
                                       month: 'short',
                                     })}
                                   </span>
-                                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-tight">[Freeze]</span>
-                                  <span
-                                    className={`px-1 py-0.2 rounded text-[9px] font-extrabold border ${
-                                      member.lastFollowUp.status === 'Hot'
-                                        ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                        : member.lastFollowUp.status === 'Warm'
-                                        ? 'bg-amber-50 text-amber-800 border-amber-200'
-                                        : member.lastFollowUp.status === 'Closed'
-                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                        : 'bg-slate-100 text-slate-600 border-slate-300'
-                                    }`}
-                                  >
+                                  <span className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
                                     {member.lastFollowUp.status}
                                   </span>
                                 </div>
                                 <span className="text-[10px] text-slate-500 block truncate max-w-[170px]" title={member.lastFollowUp.companyName}>
-                                  For: {member.lastFollowUp.companyName}
+                                  {member.lastFollowUp.companyName}
                                 </span>
                               </div>
                             ) : (
@@ -2332,30 +2882,22 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                           </div>
                         </div>
 
-                        {/* 8. EDC (Expected Date of Closer) */}
+                        {/* EDC Target */}
                         <div className="flex items-start justify-between gap-2">
-                          <span className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1 shrink-0 mt-0.5">
-                            <Clock className="w-3 h-3 text-purple-500" /> EDC Target:
+                          <span className="text-[10px] text-slate-400 font-medium uppercase flex items-center gap-1 shrink-0 mt-0.5">
+                            EDC Target:
                           </span>
                           <div className="text-right">
                             {member.nearestEdcLead?.expectedDateOfCloser ? (
                               <div className="leading-snug">
-                                <div className="flex items-center justify-end gap-1.5">
-                                  <span className="font-semibold text-slate-800 text-[11px]">
-                                    {new Date(member.nearestEdcLead.expectedDateOfCloser).toLocaleDateString('en-IN', {
-                                      day: '2-digit',
-                                      month: 'short',
-                                      year: 'numeric',
-                                    })}
-                                  </span>
-                                  {edcBadge && (
-                                    <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${edcBadge.color}`}>
-                                      {edcBadge.label}
-                                    </span>
-                                  )}
-                                </div>
+                                <span className="font-semibold text-slate-800 text-[11px]">
+                                  {new Date(member.nearestEdcLead.expectedDateOfCloser).toLocaleDateString('en-IN', {
+                                    day: '2-digit',
+                                    month: 'short',
+                                  })}
+                                </span>
                                 <span className="text-[10px] text-slate-500 block truncate max-w-[170px]" title={member.nearestEdcLead.companyName}>
-                                  For: {member.nearestEdcLead.companyName}
+                                  {member.nearestEdcLead.companyName}
                                 </span>
                               </div>
                             ) : (
@@ -2366,34 +2908,51 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                       </div>
                     </div>
 
-                    {/* Filter Toggle Button */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (selectedTeamMemberFilter === member.name) {
-                          setSelectedTeamMemberFilter('ALL');
-                        } else {
-                          setSelectedTeamMemberFilter(member.name);
-                        }
-                      }}
-                      className={`w-full py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                        isSelected
-                          ? 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-xs'
-                          : 'bg-slate-50 text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 border border-slate-200'
-                      }`}
-                    >
-                      {isSelected ? (
-                        <>
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Showing {member.name}'s Leads (Click to Reset)</span>
-                        </>
-                      ) : (
-                        <>
-                          <Filter className="w-3.5 h-3.5" />
-                          <span>Filter Table to {member.name}'s Leads ({member.totalLeads})</span>
-                        </>
-                      )}
-                    </button>
+                    {/* Card Action Buttons */}
+                    <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedBdmDetailModal(member);
+                        }}
+                        className="flex-1 py-1.5 bg-white hover:bg-slate-50 text-slate-700 font-semibold rounded-lg text-xs flex items-center justify-center gap-1 border border-slate-300 transition cursor-pointer"
+                        title="Click to view detailed info and leads dossier"
+                      >
+                        <Eye className="w-3.5 h-3.5 text-slate-500" />
+                        <span>View Details</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (selectedTeamMemberFilter.toLowerCase() === member.name.toLowerCase()) {
+                            setSelectedTeamMemberFilter('ALL');
+                          } else {
+                            setSelectedTeamMemberFilter(member.name);
+                          }
+                        }}
+                        className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-1 cursor-pointer ${
+                          isSelected
+                            ? 'bg-slate-900 text-white hover:bg-slate-800 shadow-xs'
+                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                        }`}
+                        title="Filter table below to this person's leads"
+                      >
+                        {isSelected ? (
+                          <>
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Filtered</span>
+                          </>
+                        ) : (
+                          <>
+                            <Filter className="w-3.5 h-3.5 text-slate-500" />
+                            <span>Filter Table</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
                 );
               })}
@@ -2403,7 +2962,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       )}
 
       {/* 5. LEADS DATA TABLE */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+      <div id="lms-leads-table-container" className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         {/* LEADS LIST MONTH & TIMELINE FILTER TABS */}
         <div className="bg-white border-b border-slate-200 px-5 py-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 flex-wrap">
@@ -3258,6 +3817,437 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 title={`Preview of ${previewQuotationDoc.fileName}`}
                 className="w-full h-full border-0"
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 7. DETAILED BDM DOSSIER & PERFORMANCE MODAL */}
+      {selectedBdmDetailModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+            {/* Modal Header */}
+            <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-slate-800 text-white font-bold text-xs flex items-center justify-center shrink-0">
+                  {selectedBdmDetailModal.name
+                    .split(' ')
+                    .map((n) => n[0])
+                    .filter(Boolean)
+                    .slice(0, 2)
+                    .join('')
+                    .toUpperCase()}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base font-bold text-white">
+                      {selectedBdmDetailModal.name}
+                    </h3>
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                      {selectedBdmDetailModal.isLeader ? 'Team Leader' : 'BDM Member'}
+                    </span>
+                    {selectedBdmDetailModal.leaderName && (
+                      <span className="text-[10px] text-slate-400 font-normal">
+                        Team: {selectedBdmDetailModal.leaderName}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Performance Dossier • {selectedBdmDetailModal.totalLeads || 0} Total Leads Logged
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTeamMemberFilter(selectedBdmDetailModal.name);
+                    setSelectedBdmDetailModal(null);
+                    const el = document.getElementById('lms-leads-table-container');
+                    if (el) el.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-900 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+                >
+                  <Filter className="w-3.5 h-3.5" />
+                  <span>Filter Table</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedBdmDetailModal(null)}
+                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                  title="Close modal"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* KPI Highlights Row */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 bg-slate-50 border-b border-slate-200">
+              <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
+                <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wider block">
+                  Deal Funnel Value
+                </span>
+                <div className="text-lg font-bold font-mono text-slate-900 mt-0.5">
+                  ₹{Number(selectedBdmDetailModal.totalFunnel || 0).toLocaleString('en-IN')}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-1 flex items-center gap-1.5 font-medium">
+                  <span>Hot: ₹{Number(selectedBdmDetailModal.hotValue || 0).toLocaleString('en-IN')}</span>
+                  <span>•</span>
+                  <span>Warm: ₹{Number(selectedBdmDetailModal.warmValue || 0).toLocaleString('en-IN')}</span>
+                </div>
+              </div>
+
+              <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
+                <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wider block">
+                  Active in Pipeline
+                </span>
+                <div className="text-lg font-bold text-slate-900 mt-0.5">
+                  {selectedBdmDetailModal.activeLeads || 0} Leads
+                </div>
+                <div className="text-[10px] text-slate-500 mt-1">
+                  {selectedBdmDetailModal.totalLeads || 0} Total in Database
+                </div>
+              </div>
+
+              <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
+                <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wider block">
+                  Closed Won Deals
+                </span>
+                <div className="text-lg font-bold text-slate-900 mt-0.5">
+                  {selectedBdmDetailModal.closedCount || 0} Won
+                </div>
+                <div className="text-[10px] text-slate-500 mt-1 font-mono">
+                  Val: ₹{Number(selectedBdmDetailModal.closedValue || 0).toLocaleString('en-IN')}
+                </div>
+              </div>
+
+              <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
+                <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wider block">
+                  Overdue Follow-ups
+                </span>
+                <div className="text-lg font-bold text-slate-900 mt-0.5">
+                  {selectedBdmDetailModal.pendingFollowupsCount || 0} Overdue
+                </div>
+                <div className="text-[10px] text-slate-500 mt-1">
+                  Follow-up date exceeded
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Tabs Navigation */}
+            <div className="flex items-center gap-2 px-5 pt-3 border-b border-slate-200 bg-white">
+              <button
+                type="button"
+                onClick={() => setBdmDetailModalTab('LEADS')}
+                className={`pb-2.5 px-3 text-xs font-semibold border-b-2 transition cursor-pointer flex items-center gap-1.5 ${
+                  bdmDetailModalTab === 'LEADS'
+                    ? 'border-slate-900 text-slate-900 font-bold'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Briefcase className="w-3.5 h-3.5" />
+                <span>Leads Dossier ({selectedBdmDetailModal.leads?.length || 0})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setBdmDetailModalTab('FOLLOWUPS')}
+                className={`pb-2.5 px-3 text-xs font-semibold border-b-2 transition cursor-pointer flex items-center gap-1.5 ${
+                  bdmDetailModalTab === 'FOLLOWUPS'
+                    ? 'border-slate-900 text-slate-900 font-bold'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>Follow-ups & Meetings</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setBdmDetailModalTab('METRICS')}
+                className={`pb-2.5 px-3 text-xs font-semibold border-b-2 transition cursor-pointer flex items-center gap-1.5 ${
+                  bdmDetailModalTab === 'METRICS'
+                    ? 'border-slate-900 text-slate-900 font-bold'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Award className="w-3.5 h-3.5" />
+                <span>Conversion & Performance</span>
+              </button>
+            </div>
+
+            {/* Modal Body / Tab Contents */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5">
+              {/* TAB 1: LEADS DOSSIER */}
+              {bdmDetailModalTab === 'LEADS' && (
+                <div className="space-y-3">
+                  {!selectedBdmDetailModal.leads || selectedBdmDetailModal.leads.length === 0 ? (
+                    <div className="p-8 text-center text-xs text-slate-400 italic">
+                      No leads recorded for {selectedBdmDetailModal.name} in this period.
+                    </div>
+                  ) : (
+                    <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50 text-slate-600 font-semibold uppercase text-[10px] border-b border-slate-200">
+                            <th className="py-2.5 px-3">Company & Contact</th>
+                            <th className="py-2.5 px-3">Status</th>
+                            <th className="py-2.5 px-3 text-right">Deal Value</th>
+                            <th className="py-2.5 px-3">Meeting</th>
+                            <th className="py-2.5 px-3">Follow-up</th>
+                            <th className="py-2.5 px-3 text-center">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-medium">
+                          {selectedBdmDetailModal.leads.map((l) => (
+                            <tr key={l.id} className="hover:bg-slate-50 transition">
+                              <td className="py-2.5 px-3">
+                                <span className="font-bold text-slate-900 block">{l.companyName}</span>
+                                <span className="text-[10px] text-slate-500 block">
+                                  {l.directorName || 'N/A'} • {l.mobileNo || 'N/A'}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span
+                                    className="text-[10px] px-2 py-0.5 rounded font-semibold bg-slate-100 text-slate-700 border border-slate-200"
+                                  >
+                                    {l.clientStatus || 'Warm'}
+                                  </span>
+                                  {l.leadStatus === 'CLOSED_WON' && (
+                                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-900 text-white font-semibold">
+                                      Won
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
+                                ₹{Number(l.dealValue || 0).toLocaleString('en-IN')}
+                              </td>
+                              <td className="py-2.5 px-3 text-[11px] text-slate-700">
+                                {l.meetingDate ? (
+                                  <div>
+                                    <span className="font-semibold block">
+                                      {new Date(l.meetingDate).toLocaleDateString('en-IN', {
+                                        day: '2-digit',
+                                        month: 'short',
+                                      })}
+                                    </span>
+                                    <span className="text-[10px] text-slate-500">{l.meetingStatus}</span>
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-400 italic">None</span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-[11px]">
+                                {l.nextFollowUpDate ? (
+                                  <span className="font-semibold text-slate-800 block">
+                                    {new Date(l.nextFollowUpDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 italic">None</span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-center">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  {onConvertToDeal && l.leadStatus !== 'CONVERTED' && l.leadStatus !== 'CLOSED_WON' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedBdmDetailModal(null);
+                                        onConvertToDeal(l);
+                                      }}
+                                      className="px-2 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded text-[10px] font-semibold transition shadow-2xs"
+                                      title="Convert to Active Deal Dossier"
+                                    >
+                                      Convert
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedTeamMemberFilter(selectedBdmDetailModal.name);
+                                      setSelectedBdmDetailModal(null);
+                                      const rowEl = document.getElementById(`lead-row-${l.id}`);
+                                      if (rowEl) rowEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    }}
+                                    className="p-1 hover:bg-slate-200 rounded text-slate-600 transition"
+                                    title="View row in main table"
+                                  >
+                                    <Eye className="w-3.5 h-3.5 text-slate-500" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 2: FOLLOW-UPS & MEETINGS */}
+              {bdmDetailModalTab === 'FOLLOWUPS' && (
+                <div className="space-y-4">
+                  {/* Scheduled Meetings */}
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 mb-2 flex items-center gap-1.5">
+                      <Calendar className="w-4 h-4 text-slate-700" />
+                      <span>Scheduled Meetings</span>
+                    </h4>
+                    {selectedBdmDetailModal.leads?.filter((l) => l.meetingDate).length === 0 ? (
+                      <p className="text-xs text-slate-400 italic bg-slate-50 p-3 rounded-lg border border-slate-200">
+                        No scheduled meetings for this BDM.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {selectedBdmDetailModal.leads
+                          .filter((l) => l.meetingDate)
+                          .map((l) => (
+                            <div
+                              key={l.id}
+                              className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-start justify-between gap-2"
+                            >
+                              <div>
+                                <span className="font-bold text-slate-900 text-xs block">{l.companyName}</span>
+                                <span className="text-[10px] text-slate-500 block">
+                                  {l.directorName} • {l.mobileNo}
+                                </span>
+                                <span className="text-[10px] font-semibold text-slate-700 mt-1 inline-block bg-white border border-slate-200 px-1.5 py-0.2 rounded">
+                                  {l.meetingStatus}
+                                </span>
+                              </div>
+                              <span className="text-xs font-bold text-slate-900 font-mono">
+                                {new Date(l.meetingDate).toLocaleDateString('en-IN', {
+                                  day: '2-digit',
+                                  month: 'short',
+                                  year: 'numeric',
+                                })}
+                              </span>
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Frozen Follow-up Audit Trail */}
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 mb-2 flex items-center gap-1.5">
+                      <Clock className="w-4 h-4 text-slate-700" />
+                      <span>Follow-up Audit Trail</span>
+                    </h4>
+                    {(() => {
+                      const allFus = [];
+                      (selectedBdmDetailModal.leads || []).forEach((l) => {
+                        const fus = getFollowUpsList(l);
+                        fus.forEach((fu) => {
+                          allFus.push({ ...fu, companyName: l.companyName, leadId: l.id });
+                        });
+                      });
+                      allFus.sort(
+                        (a, b) =>
+                          new Date(b.addedAt || b.date).getTime() - new Date(a.addedAt || a.date).getTime()
+                      );
+
+                      if (allFus.length === 0) {
+                        return (
+                          <p className="text-xs text-slate-400 italic bg-slate-50 p-3 rounded-lg border border-slate-200">
+                            No follow-up history logged yet.
+                          </p>
+                        );
+                      }
+
+                      return (
+                        <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                          {allFus.map((fu, idx) => (
+                            <div
+                              key={idx}
+                              className="p-3 bg-white border border-slate-200 rounded-xl text-xs flex items-start justify-between gap-3 shadow-2xs"
+                            >
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-slate-900">{fu.companyName}</span>
+                                  <span
+                                    className="text-[9px] font-semibold px-1.5 py-0.2 rounded border bg-slate-100 text-slate-700 border-slate-200"
+                                  >
+                                    {fu.status}
+                                  </span>
+                                </div>
+                                {fu.remarks && (
+                                  <p className="text-[11px] text-slate-600 mt-1 italic">"{fu.remarks}"</p>
+                                )}
+                              </div>
+                              <span className="text-[10px] font-mono text-slate-500 shrink-0">
+                                {new Date(fu.date).toLocaleDateString('en-IN', {
+                                  day: '2-digit',
+                                  month: 'short',
+                                  year: 'numeric',
+                                })}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: PERFORMANCE & METRICS */}
+              {bdmDetailModalTab === 'METRICS' && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                      <span className="text-[10px] font-medium text-slate-500 uppercase block">Conversion Rate</span>
+                      <div className="text-2xl font-bold text-slate-900 mt-1">
+                        {selectedBdmDetailModal.totalLeads > 0
+                          ? `${((selectedBdmDetailModal.closedCount / selectedBdmDetailModal.totalLeads) * 100).toFixed(1)}%`
+                          : '0.0%'}
+                      </div>
+                      <span className="text-[11px] text-slate-500 mt-0.5 block">Closed Won / Total Logged</span>
+                    </div>
+
+                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                      <span className="text-[10px] font-medium text-slate-500 uppercase block">Hot Lead Ratio</span>
+                      <div className="text-2xl font-bold text-slate-900 mt-1">
+                        {selectedBdmDetailModal.totalLeads > 0
+                          ? `${((selectedBdmDetailModal.hotCount / selectedBdmDetailModal.totalLeads) * 100).toFixed(1)}%`
+                          : '0.0%'}
+                      </div>
+                      <span className="text-[11px] text-slate-500 mt-0.5 block">
+                        {selectedBdmDetailModal.hotCount || 0} Hot Deals
+                      </span>
+                    </div>
+
+                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                      <span className="text-[10px] font-medium text-slate-500 uppercase block">Average Deal Value</span>
+                      <div className="text-2xl font-bold font-mono text-slate-900 mt-1">
+                        ₹
+                        {selectedBdmDetailModal.totalLeads > 0
+                          ? Math.round(
+                              (selectedBdmDetailModal.totalFunnel || 0) /
+                                (selectedBdmDetailModal.activeLeads || 1)
+                            ).toLocaleString('en-IN')
+                          : '0'}
+                      </div>
+                      <span className="text-[11px] text-slate-500 mt-0.5 block">Per Active Opportunity</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+              <span className="text-xs text-slate-500">CorporateMart CRM • BDM Performance Cockpit</span>
+              <button
+                type="button"
+                onClick={() => setSelectedBdmDetailModal(null)}
+                className="px-4 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg text-xs font-semibold transition cursor-pointer"
+              >
+                Close Dossier
+              </button>
             </div>
           </div>
         </div>
