@@ -283,22 +283,27 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
 
     // RBAC: If BDM and scope is 'my' (or default for BDM), strictly restrict to:
     // 1. Their own leads (as BDM-1, BDM-2, or creator)
-    // 2. If user is an LMS Leader (myLeaderName provided), also include leads under their leadership
+    // 2. If user is an LMS Leader, also include team member leads where closerStatus is 'Lead Sharing' (NOT team member 'Self Closer' leads)
     if (isBdmOnly || scope === 'my') {
       const userFullName = (req.user.fullName || '').replace(/\s*\([^)]*\)/g, '').trim();
       const targetBdm = (!isBdmOnly && req.query.myBdmName && req.query.myBdmName.trim()) 
         ? req.query.myBdmName.trim() 
         : userFullName;
+      const matchedLeader = LEADERS_LIST.find((l) => {
+        const cl = l.toLowerCase().trim();
+        const cu = userFullName.toLowerCase().trim();
+        return cu.includes(cl) || cl.includes(cu);
+      });
       const targetLeader = req.query.myLeaderName && req.query.myLeaderName.trim()
         ? req.query.myLeaderName.trim()
-        : null;
+        : (matchedLeader || null);
 
       if (targetLeader) {
         conditions.push(`(
           "bdmName1" ILIKE $${paramIndex} 
           OR "bdmName2" ILIKE $${paramIndex}
           OR ("createdById" = $${paramIndex + 1} AND ("bdmName1" ILIKE $${paramIndex} OR "bdmName1" = '' OR "bdmName1" IS NULL))
-          OR ("leaderName" ILIKE $${paramIndex + 2})
+          OR ("leaderName" ILIKE $${paramIndex + 2} AND "closerStatus" ILIKE '%Lead Sharing%')
         )`);
         params.push(`%${targetBdm}%`, req.user.id, `%${targetLeader}%`);
         paramIndex += 3;
@@ -600,7 +605,7 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       }
 
       const isSharedWithMeAsLeader = !isOwnLead &&
-        l.closerStatus === 'Lead Sharing' &&
+        (l.closerStatus || '').toLowerCase().includes('lead sharing') &&
         leaderKey &&
         (leadLeaderLower.includes(leaderKey) || leaderKey.includes(leadLeaderLower));
 

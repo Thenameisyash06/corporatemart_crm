@@ -580,10 +580,13 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         (lead.createdById === currentUser?.id && (!lead.bdmName1 || bdm1.includes(myName) || myName.includes(bdm1)));
 
       // Check if lead belongs to a team member under the same leader
+      // In BDM Leader portal, team member leads are ONLY visible if closerStatus is 'Lead Sharing' (not 'Self Closer')
+      const closerStatus = (lead.closerStatus || '').toLowerCase().trim();
       const isTeamLead =
         !isOwnLead &&
         leaderKey &&
-        (leadLeader.includes(leaderKey) || leaderKey.includes(leadLeader));
+        (leadLeader.includes(leaderKey) || leaderKey.includes(leadLeader)) &&
+        closerStatus.includes('lead sharing');
 
       if (isOwnLead) {
         own.push(lead);
@@ -642,14 +645,16 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     const leaderKey = (matchedLeaderName || loggedInBdmName || '').toLowerCase().trim();
     const membersMap = {};
 
-    // Group leads belonging to team members under this leader
+    // Group leads belonging to team members under this leader (STRICTLY Lead Sharing leads only)
     const sourceLeads = (leads && leads.length > 0)
       ? leads.filter((l) => {
           const ldr = (l.leaderName || '').toLowerCase().trim();
           const bdm1 = (l.bdmName1 || '').toLowerCase().trim();
+          const closerStatus = (l.closerStatus || '').toLowerCase().trim();
           const isUnderLeader = ldr && (ldr.includes(leaderKey) || leaderKey.includes(ldr));
           const isLeaderSelf = bdm1 && (bdm1.includes(leaderKey) || leaderKey.includes(bdm1));
-          return isUnderLeader && !isLeaderSelf;
+          const isLeadSharing = closerStatus.includes('lead sharing');
+          return isUnderLeader && !isLeaderSelf && isLeadSharing;
         })
       : (sharedTeamLeads || []);
 
@@ -790,9 +795,9 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
 
   // Count of leads whose follow-up date exceeded the current date
   const calculatedPendingFollowups = useMemo(() => {
-    const targetLeads = isAdmin ? visibleLeads : ownDirectLeads;
+    const targetLeads = isAdmin ? visibleLeads : (isLeader ? visibleLeads : ownDirectLeads);
     return targetLeads.filter((l) => isLeadFollowUpExceeded(l)).length;
-  }, [isAdmin, visibleLeads, ownDirectLeads]);
+  }, [isAdmin, isLeader, visibleLeads, ownDirectLeads]);
 
   const displayPendingFollowupsCount = analytics?.pendingFollowupsCount ?? calculatedPendingFollowups;
 
