@@ -30,11 +30,11 @@ export default function DashboardStats({
 
   const bdmMetrics = stats.bdmMetrics || {
     target: currentUser?.salesTarget ? Number(currentUser.salesTarget) : 500000,
-    achievement: Number(financials?.totalCollected) || 0,
+    achievement: Number(financials.totalDealValue) || 0,
     pending: Math.max(
       0,
       (currentUser?.salesTarget ? Number(currentUser.salesTarget) : 500000) -
-        (Number(financials?.totalCollected) || 0)
+        (Number(financials.totalDealValue) || 0)
     ),
     progressPercent: 0,
   };

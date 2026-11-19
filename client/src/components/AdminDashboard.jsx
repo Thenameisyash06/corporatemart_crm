@@ -52,29 +52,12 @@ const STAGE_LABELS = {
   CLOSED: { label: 'Deal Closed', color: 'bg-emerald-100 text-emerald-900 border-emerald-300' },
 };
 
-function getDealVerifiedCollected(d) {
-  if (d.payments && Array.isArray(d.payments) && d.payments.length > 0) {
-    return d.payments
-      .filter((p) => p.status === 'VERIFIED')
-      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
-  }
-  if (d.isAccountsVerified || !['STAGE_04_ACCOUNTS_VERIFICATION', 'STAGE_04_ACCOUNTS_REJECTED'].includes(d.stage)) {
-    return Number(d.amountReceived || 0);
-  }
-  return 0;
-}
-
-function isDealAccountsVerified(d) {
-  return Boolean(d.isAccountsVerified || !['STAGE_04_ACCOUNTS_VERIFICATION', 'STAGE_04_ACCOUNTS_REJECTED'].includes(d.stage));
-}
-
 function buildOverviewFromDeals(deals = [], users = [], stats = null) {
   const totalDeals = deals.length;
-  const verifiedDeals = deals.filter(isDealAccountsVerified);
-  const totalRevenue = verifiedDeals.reduce((sum, d) => sum + Number(d.totalAmount || 0), 0);
-  const totalCollected = deals.reduce((sum, d) => sum + getDealVerifiedCollected(d), 0);
-  const totalPending = Math.max(0, totalRevenue - totalCollected);
-  const avgDealSize = verifiedDeals.length > 0 ? Math.round(totalRevenue / verifiedDeals.length) : 0;
+  const totalRevenue = deals.reduce((sum, d) => sum + Number(d.totalAmount || 0), 0);
+  const totalCollected = deals.reduce((sum, d) => sum + Number(d.amountReceived || 0), 0);
+  const totalPending = deals.reduce((sum, d) => sum + Number(d.pendingAmount || 0), 0);
+  const avgDealSize = totalDeals > 0 ? Math.round(totalRevenue / totalDeals) : 0;
   const collectionRate = totalRevenue > 0 ? Math.round((totalCollected / totalRevenue) * 100) : 0;
 
   // Extract unique clients
@@ -126,23 +109,21 @@ function buildOverviewFromDeals(deals = [], users = [], stats = null) {
         avgDealSize: 0,
         isActive: true,
       });
-    }
+    }//
     const b = bdmMap.get(bdmId);
     b.dealsCount += 1;
-    if (isDealAccountsVerified(d)) {
-      b.totalRevenue += Number(d.totalAmount || 0);
-    }
-    b.totalCollected += getDealVerifiedCollected(d);
+    b.totalRevenue += Number(d.totalAmount || 0);
+    b.totalCollected += Number(d.amountReceived || 0);
+    b.totalPending += Number(d.pendingAmount || 0);
     if (d.stage === 'CLOSED') b.closedDealsCount += 1;
     else b.activeDealsCount += 1;
   });
 
   const bdmPerformance = Array.from(bdmMap.values()).map((b) => {
     const target = b.salesTarget || 500000;
-    b.totalPending = Math.max(0, b.totalRevenue - b.totalCollected);
     return {
       ...b,
-      achievementPercent: target > 0 ? Math.round((b.totalCollected / target) * 100) : 0,
+      achievementPercent: target > 0 ? Math.round((b.totalRevenue / target) * 100) : 0,
       avgDealSize: b.dealsCount > 0 ? Math.round(b.totalRevenue / b.dealsCount) : 0,
     };
   });
