@@ -115,7 +115,7 @@ function userCanAccessLead(lead, user) {
   if (isCreator) return true;
   if (bdm1 && (bdm1.includes(userName) || userName.includes(bdm1))) return true;
   if (bdm2 && (bdm2.includes(userName) || userName.includes(bdm2))) return true;
-  if ((lead.closerStatus || '').includes('Lead Sharing') && (leader.includes(userName) || userName.includes(leader))) return true;
+  if ((lead.closerStatus || '').toUpperCase().includes('LEAD SHARING') && (leader.includes(userName) || userName.includes(leader))) return true;
 
   return false;
 }
@@ -1074,24 +1074,24 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
         "createdById", "nextFollowUpDate", "createdAt", "updatedAt"
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, NOW(), NOW())`,
       id,
-      companyName.trim(),
-      directorName ? directorName.trim() : null,
+      companyName.trim().toUpperCase(),
+      directorName ? directorName.trim().toUpperCase() : null,
       mobileNo.trim(),
-      emailId ? emailId.trim() : null,
-      leaderName,
-      bdmName1,
-      bdmName2 && bdmName2.trim() ? bdmName2.trim() : null,
-      closerStatus,
-      sourcingStatus,
-      meetingStatus,
+      emailId ? emailId.trim().toUpperCase() : null,
+      leaderName ? leaderName.trim().toUpperCase() : leaderName,
+      bdmName1 ? bdmName1.trim().toUpperCase() : bdmName1,
+      bdmName2 && bdmName2.trim() ? bdmName2.trim().toUpperCase() : null,
+      closerStatus ? closerStatus.trim().toUpperCase() : closerStatus,
+      sourcingStatus ? sourcingStatus.trim().toUpperCase() : sourcingStatus,
+      meetingStatus ? meetingStatus.trim().toUpperCase() : meetingStatus,
       parsedMeetingDate,
-      finalClientStatus,
+      finalClientStatus ? finalClientStatus.trim().toUpperCase() : 'WARM',
       edc,
-      finalStage,
+      finalStage ? finalStage.trim().toUpperCase() : 'OPEN',
       finalValue,
-      remarks ? remarks.trim() : null,
+      remarks ? remarks.trim().toUpperCase() : null,
       quotationFileUrl,
-      file.originalname,
+      file.originalname ? file.originalname.toUpperCase() : file.originalname,
       file.size,
       req.user.id,
       initialFollowUpDate
@@ -1220,11 +1220,11 @@ router.patch('/:id', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req
 
     if (companyName !== undefined) {
       updates.push(`"companyName" = $${pIdx++}`);
-      params.push(companyName.trim());
+      params.push(companyName.trim().toUpperCase());
     }
     if (directorName !== undefined) {
       updates.push(`"directorName" = $${pIdx++}`);
-      params.push(directorName ? directorName.trim() : null);
+      params.push(directorName ? directorName.trim().toUpperCase() : null);
     }
     if (mobileNo !== undefined) {
       const cleanPhone = mobileNo.trim();
@@ -1238,40 +1238,40 @@ router.patch('/:id', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req
     }
     if (emailId !== undefined) {
       updates.push(`"emailId" = $${pIdx++}`);
-      params.push(emailId ? emailId.trim() : null);
+      params.push(emailId ? emailId.trim().toUpperCase() : null);
     }
     if (leaderName !== undefined) {
       updates.push(`"leaderName" = $${pIdx++}`);
-      params.push(leaderName);
+      params.push(leaderName ? leaderName.trim().toUpperCase() : leaderName);
     }
     if (bdmName1 !== undefined) {
       updates.push(`"bdmName1" = $${pIdx++}`);
-      params.push(bdmName1);
+      params.push(bdmName1 ? bdmName1.trim().toUpperCase() : bdmName1);
     }
     if (bdmName2 !== undefined) {
       updates.push(`"bdmName2" = $${pIdx++}`);
-      params.push(bdmName2 ? bdmName2.trim() : null);
+      params.push(bdmName2 ? bdmName2.trim().toUpperCase() : null);
     }
     if (closerStatus !== undefined) {
       updates.push(`"closerStatus" = $${pIdx++}`);
-      params.push(closerStatus);
+      params.push(closerStatus ? closerStatus.trim().toUpperCase() : closerStatus);
     }
     if (clientStatus !== undefined) {
-      const raw = (clientStatus || 'Warm').trim().toLowerCase();
-      let norm = 'Warm';
-      if (raw === 'hot') norm = 'Hot';
-      else if (raw === 'lost') norm = 'Lost';
-      else if (raw === 'warm') norm = 'Warm';
+      const raw = (clientStatus || 'WARM').trim().toUpperCase();
+      let norm = 'WARM';
+      if (raw === 'HOT') norm = 'HOT';
+      else if (raw === 'LOST') norm = 'LOST';
+      else if (raw === 'WARM') norm = 'WARM';
       updates.push(`"clientStatus" = $${pIdx++}`);
       params.push(norm);
     }
     if (sourcingStatus !== undefined) {
       updates.push(`"sourcingStatus" = $${pIdx++}`);
-      params.push(sourcingStatus);
+      params.push(sourcingStatus ? sourcingStatus.trim().toUpperCase() : sourcingStatus);
     }
     if (meetingStatus !== undefined) {
       updates.push(`"meetingStatus" = $${pIdx++}`);
-      params.push(meetingStatus);
+      params.push(meetingStatus ? meetingStatus.trim().toUpperCase() : meetingStatus);
     }
     if (meetingDate !== undefined) {
       if (meetingDate && isBeforeToday(meetingDate)) {
@@ -1292,11 +1292,11 @@ router.patch('/:id', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req
       params.push(expectedDateOfCloser ? new Date(expectedDateOfCloser) : null);
     }
     if (leadStatus !== undefined) {
-      if (!LEAD_STAGES_LIST.includes(leadStatus)) {
+      if (!LEAD_STAGES_LIST.includes(leadStatus) && !LEAD_STAGES_LIST.includes(leadStatus.toUpperCase())) {
         return res.status(400).json({ error: `Invalid leadStatus "${leadStatus}". Allowed values: ${LEAD_STAGES_LIST.join(', ')}` });
       }
       updates.push(`"leadStatus" = $${pIdx++}`);
-      params.push(leadStatus);
+      params.push(leadStatus ? leadStatus.trim().toUpperCase() : leadStatus);
     }
     if (dealValue !== undefined) {
       updates.push(`"dealValue" = $${pIdx++}`);
@@ -1304,7 +1304,7 @@ router.patch('/:id', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req
     }
     if (remarks !== undefined) {
       updates.push(`"remarks" = $${pIdx++}`);
-      params.push(remarks ? remarks.trim() : null);
+      params.push(remarks ? remarks.trim().toUpperCase() : null);
     }
 
     updates.push(`"updatedAt" = NOW()`);
@@ -1364,20 +1364,20 @@ router.post('/:id/follow-up', authenticateToken, requireRoles('BDM', 'ADMIN'), a
     const newEntry = {
       id: crypto.randomUUID(),
       date: date,
-      status: matchedStatus,
-      remarks: remarks && remarks.trim() ? remarks.trim() : null,
+      status: matchedStatus.toUpperCase(),
+      remarks: remarks && remarks.trim() ? remarks.trim().toUpperCase() : null,
       addedAt: new Date().toISOString(),
       addedById: req.user.id,
-      addedByName: req.user.fullName,
+      addedByName: req.user.fullName ? req.user.fullName.toUpperCase() : 'BDM',
     };
 
     // Synchronize clientStatus and leadStatus accordingly
-    let finalClientStatus = lead.clientStatus || 'Warm';
-    let finalLeadStatus = lead.leadStatus || 'OPEN';
+    let finalClientStatus = (lead.clientStatus || 'WARM').toUpperCase();
+    let finalLeadStatus = (lead.leadStatus || 'OPEN').toUpperCase();
 
-    if (['Hot', 'Warm', 'Lost'].includes(matchedStatus)) {
-      finalClientStatus = matchedStatus;
-    } else if (matchedStatus === 'Closed') {
+    if (['HOT', 'WARM', 'LOST'].includes(matchedStatus.toUpperCase())) {
+      finalClientStatus = matchedStatus.toUpperCase();
+    } else if (matchedStatus.toUpperCase() === 'CLOSED') {
       finalLeadStatus = 'CLOSED_WON';
     }
 

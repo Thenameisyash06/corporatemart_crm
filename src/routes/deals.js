@@ -395,20 +395,20 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, re
       // 1. Create Client
       const client = await tx.client.create({
         data: {
-          companyName: companyName.trim(),
-          clientName: clientName.trim(),
-          email: clientEmail.trim(),
+          companyName: companyName.trim().toUpperCase(),
+          clientName: clientName.trim().toUpperCase(),
+          email: clientEmail.trim().toUpperCase(),
           phone: clientPhone.trim(),
           gstStatus: Boolean(gstStatus),
           gstin: gstin ? gstin.trim().toUpperCase() : null,
           panNumber: panNumber.trim().toUpperCase(),
-          billingAddress: (address || billingAddress || '').trim() || null,
-          city: city ? city.trim() : null,
-          state: state ? state.trim() : null,
+          billingAddress: (address || billingAddress || '').trim().toUpperCase() || null,
+          city: city ? city.trim().toUpperCase() : null,
+          state: state ? state.trim().toUpperCase() : null,
           pincode: pincode ? pincode.trim() : null,
-          consultantName: consultantName ? consultantName.trim() : null,
-          industry: industry ? industry.trim() : null,
-          sector: sector ? sector.trim() : null,
+          consultantName: consultantName ? consultantName.trim().toUpperCase() : null,
+          industry: industry ? industry.trim().toUpperCase() : null,
+          sector: sector ? sector.trim().toUpperCase() : null,
         },
       });
 
@@ -419,11 +419,11 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, re
             .filter((d) => d.name && d.name.trim().length > 0)
             .map((d) => ({
               clientId: client.id,
-              name: d.name.trim(),
-              din: d.din || null,
-              pan: d.pan || null,
-              email: d.email || null,
-              phone: d.phone || null,
+              name: d.name.trim().toUpperCase(),
+              din: d.din ? d.din.trim().toUpperCase() : null,
+              pan: d.pan ? d.pan.trim().toUpperCase() : null,
+              email: d.email ? d.email.trim().toUpperCase() : null,
+              phone: d.phone ? d.phone.trim() : null,
             })),
         });
       }
@@ -449,11 +449,11 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, re
           totalAmount: totalVal,
           amountReceived: receivedVal,
           pendingAmount: pendingVal,
-          receivingAccount: selectedAccount,
+          receivingAccount: selectedAccount.toUpperCase(),
           paymentType: paymentType || (pendingVal > 0 ? 'PART_PAYMENT' : 'FULL_PAYMENT'),
           isBdmEntryComplete: true,
           bdmHandoverAt: new Date(),
-          remarks: (paymentRemarks || remarks || '').trim() || null,
+          remarks: (paymentRemarks || remarks || '').trim().toUpperCase() || null,
           coBdms: validCoBdmIds.length > 0 ? { connect: validCoBdmIds.map((id) => ({ id })) } : undefined,
         },
       });
@@ -462,7 +462,7 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, re
       await tx.dealService.createMany({
         data: services.map((s) => ({
           dealId: deal.id,
-          serviceName: s.serviceName,
+          serviceName: s.serviceName ? s.serviceName.trim().toUpperCase() : s.serviceName,
           standardAmount: s.standardAmount ? parseFloat(s.standardAmount) : null,
           serviceFee: parseFloat(s.serviceFee || s.dealAmount) || 0,
           govtFee: s.govtFee ? parseFloat(s.govtFee) : null,
@@ -472,8 +472,8 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, re
 
       // 5. Create Payment record for initial tranche with payment remarks, account, and cash info
       const finalTxRef = isCashPayment
-        ? (transactionReference && transactionReference.trim() ? transactionReference.trim() : `Cash: Collected by ${cashCollectorName.trim()}`)
-        : (transactionReference && transactionReference.trim() ? transactionReference.trim() : `${paymentMode || 'Online'} - ${selectedAccount}`);
+        ? (transactionReference && transactionReference.trim() ? transactionReference.trim().toUpperCase() : `CASH: COLLECTED BY ${cashCollectorName.trim().toUpperCase()}`)
+        : (transactionReference && transactionReference.trim() ? transactionReference.trim().toUpperCase() : `${(paymentMode || 'Online').toUpperCase()} - ${selectedAccount.toUpperCase()}`);
 
       await tx.payment.create({
         data: {
@@ -484,10 +484,10 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, re
           paymentMode: paymentMode || 'UPI',
           transactionReference: finalTxRef,
           paymentProofUrl: isCashPayment ? null : '', // Empty string if awaiting proof upload, null if cash
-          accountName: selectedAccount,
-          cashCollectorName: isCashPayment ? cashCollectorName.trim() : null,
+          accountName: selectedAccount.toUpperCase(),
+          cashCollectorName: isCashPayment ? cashCollectorName.trim().toUpperCase() : null,
           status: 'PENDING_VERIFICATION',
-          remarks: (paymentRemarks || remarks || '').trim() || null,
+          remarks: (paymentRemarks || remarks || '').trim().toUpperCase() || null,
         },
       });
 
@@ -510,7 +510,7 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, re
     });
   } catch (error) {
     console.error('Deal creation error:', error);
-    return res.status(500).json({ error: 'Failed to create deal record.' });
+    return res.status(500).json({ error: error.message || 'Failed to create deal record.' });
   }
 });
 

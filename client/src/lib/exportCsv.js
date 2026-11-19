@@ -9,7 +9,7 @@ export function downloadCsv(filename, headers, rows) {
 
   const escapeCell = (val) => {
     if (val === null || val === undefined) return '""';
-    let str = String(val).replace(/"/g, '""');
+    let str = String(val).toUpperCase().replace(/"/g, '""');
     // Prevent CSV formula injection in Microsoft Excel / Google Sheets
     if (/^[=+@\-\t\r]/.test(str)) {
       str = "'" + str;
