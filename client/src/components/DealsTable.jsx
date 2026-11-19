@@ -53,17 +53,17 @@ export default function DealsTable({
   }
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+    <div className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-xs">
       <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-slate-50 border-b border-slate-200 text-xs uppercase font-semibold text-slate-500 tracking-wider">
+        <table className="w-full text-left text-sm border-collapse min-w-[1050px]">
+          <thead className="bg-slate-50/90 border-b border-slate-200 text-[11px] uppercase font-bold text-slate-500 tracking-wider">
             <tr>
-              <th className="py-3.5 px-4 font-semibold">Deal Code</th>
-              <th className="py-3.5 px-4 font-semibold">Client Company</th>
-              <th className="py-3.5 px-4 font-semibold">Services Scope</th>
-              <th className="py-3.5 px-4 font-semibold">Financials</th>
-              <th className="py-3.5 px-4 font-semibold">Status</th>
-              <th className="py-3.5 px-4 text-right font-semibold">Action</th>
+              <th className="py-3 px-4 font-bold">Deal Code</th>
+              <th className="py-3 px-4 font-bold">Client Company</th>
+              <th className="py-3 px-4 font-bold">Services Scope</th>
+              <th className="py-3 px-4 font-bold">Financials</th>
+              <th className="py-3 px-4 font-bold">Status</th>
+              <th className="py-3 px-4 text-right font-bold">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 text-sm">
@@ -80,18 +80,23 @@ export default function DealsTable({
                 <tr
                   key={deal.id}
                   onClick={() => onSelectDeal(deal.id)}
-                  className="hover:bg-slate-50/80 cursor-pointer transition"
+                  className="hover:bg-slate-50/80 cursor-pointer transition-colors"
                 >
-                  {/* Deal Code */}
-                  <td className="py-4 px-4">
-                    <span className="font-mono font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 text-xs">
-                      {deal.dealCode}
-                    </span>
-                    <div className="text-xs text-slate-500 mt-1">
-                      BDM: {deal.bdm?.fullName || 'N/A'}
+                  {/* Deal Code & BDM (Strict 2-Line Rhythm) */}
+                  <td className="py-3.5 px-4 align-middle whitespace-nowrap">
+                    <div>
+                      <span className="font-mono font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200 text-xs inline-block">
+                        {deal.dealCode}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1.5 whitespace-nowrap">
+                      <span>BDM:</span>
+                      <span className="font-semibold text-slate-800">
+                        {(deal.bdm?.fullName || 'N/A').replace(/\s*\(BDM\)/gi, '')}
+                      </span>
                       {deal.coBdms && deal.coBdms.length > 0 && (
                         <span
-                          className="ml-1.5 text-[11px] font-semibold text-slate-700 bg-slate-200/80 px-1.5 py-0.5 rounded cursor-help"
+                          className="text-[10px] font-bold text-slate-700 bg-slate-100 border border-slate-200 px-1.5 py-0.2 rounded-full cursor-help whitespace-nowrap"
                           title={`Co-BDMs: ${deal.coBdms.map((b) => b.fullName).join(', ')}`}
                         >
                           +{deal.coBdms.length} co-BDM{deal.coBdms.length === 1 ? '' : 's'}
@@ -101,26 +106,26 @@ export default function DealsTable({
                   </td>
 
                   {/* Company & Client */}
-                  <td className="py-4 px-4">
-                    <div className="font-semibold text-slate-900 text-sm flex items-center gap-1.5">
-                      <Building className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                  <td className="py-4 px-4 align-middle">
+                    <div className="font-bold text-slate-900 text-sm sm:text-base flex items-center gap-1.5">
+                      <Building className="w-4 h-4 text-slate-400 shrink-0" />
                       <span>{deal.client.companyName}</span>
                     </div>
-                    <div className="text-xs text-slate-500 flex items-center gap-1.5 mt-1">
-                      <User className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                      <span>{deal.client.clientName}</span>
+                    <div className="text-xs text-slate-500 flex items-center gap-1.5 mt-1 font-medium">
+                      <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span className="font-semibold text-slate-700">{deal.client.clientName}</span>
                       <span>•</span>
-                      <span>{deal.client.phone}</span>
+                      <span className="font-mono">{deal.client.phone}</span>
                     </div>
                   </td>
 
                   {/* Services */}
-                  <td className="py-4 px-4">
+                  <td className="py-4 px-4 align-middle">
                     <div className="flex flex-wrap gap-1.5 max-w-sm">
                       {deal.services?.map((s, idx) => (
                         <span
                           key={s.id || idx}
-                          className="text-xs px-2.5 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200 font-medium"
+                          className="text-xs px-2.5 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200/80 font-medium"
                         >
                           {s.serviceName}
                         </span>
@@ -129,60 +134,76 @@ export default function DealsTable({
                   </td>
 
                   {/* Financials */}
-                  <td className="py-4 px-4">
-                    <div className="font-bold text-slate-900 text-sm">
-                      Deal: ₹{Number(deal.totalAmount).toLocaleString('en-IN')}
-                    </div>
-                    <div className="text-[11px] text-slate-500 font-mono">
-                      Std: ₹{Number(deal.standardAmount || deal.totalAmount).toLocaleString('en-IN')}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1.5 mt-1 text-xs">
-                      <span className="text-emerald-700 font-semibold">
-                        Recv: ₹{Number(deal.amountReceived).toLocaleString('en-IN')}
+                  <td className="py-4 px-4 align-middle">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-xs font-semibold text-slate-500">Deal:</span>
+                      <span className="font-extrabold text-slate-900 text-sm sm:text-base font-mono tabular-nums">
+                        ₹{Number(deal.totalAmount).toLocaleString('en-IN')}
                       </span>
-                      {pending > 0 && (
-                        <span className="text-amber-700 font-semibold bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
-                          Due: ₹{pending.toLocaleString('en-IN')}
+                      {deal.standardAmount && Number(deal.standardAmount) !== Number(deal.totalAmount) && (
+                        <span className="text-xs text-slate-400 font-mono tabular-nums line-through" title="Standard Fee">
+                          ₹{Number(deal.standardAmount).toLocaleString('en-IN')}
                         </span>
                       )}
                     </div>
+
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                        <span className="text-[10px] text-emerald-600 font-medium">Recv:</span>
+                        <span className="font-mono tabular-nums font-bold">₹{Number(deal.amountReceived).toLocaleString('en-IN')}</span>
+                      </span>
+
+                      {pending > 0 ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-900 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                          <span className="text-[10px] text-amber-700 font-medium">Due:</span>
+                          <span className="font-mono tabular-nums font-bold">₹{pending.toLocaleString('en-IN')}</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center text-[10px] font-bold text-emerald-700 bg-emerald-100/70 px-1.5 py-0.5 rounded">
+                          ✓ Settled
+                        </span>
+                      )}
+                    </div>
+
                     {deal.receivingAccount && (
-                      <div className="mt-1 text-[10px] text-slate-600 truncate max-w-[170px]" title={deal.receivingAccount}>
-                        🏦 {deal.receivingAccount}
+                      <div className="mt-1.5 text-xs text-slate-500 flex items-center gap-1.5 truncate max-w-[210px]" title={deal.receivingAccount}>
+                        <span className="text-slate-400 shrink-0">🏦</span>
+                        <span className="truncate">{deal.receivingAccount}</span>
                       </div>
                     )}
                   </td>
 
                   {/* Current Stage */}
-                  <td className="py-4 px-4">
-                    <span
-                      className={`inline-flex items-center gap-1.5 text-xs px-3 py-1 rounded-full border font-medium ${stageConf.color}`}
-                    >
-                      {isRejected && <AlertCircle className="w-3.5 h-3.5 text-rose-600" />}
-                      <span>{stageConf.label}</span>
-                    </span>
-                    {pending > 0 && (
-                      <div className="mt-1.5">
-                        {deal.payments?.some((p) => p.status === 'PENDING_VERIFICATION') ? (
-                          <span className="inline-block text-xs text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-300 font-medium">
-                            Balance Verification Pending
+                  <td className="py-3.5 px-4 align-middle whitespace-nowrap">
+                    <div className="inline-flex flex-col items-start gap-1">
+                      <span
+                        className={`inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full border font-semibold whitespace-nowrap ${stageConf.color}`}
+                      >
+                        {isRejected && <AlertCircle className="w-3 h-3 text-rose-600 shrink-0" />}
+                        <span>{stageConf.label}</span>
+                      </span>
+                      {pending > 0 && (
+                        deal.payments?.some((p) => p.status === 'PENDING_VERIFICATION') ? (
+                          <span className="inline-flex items-center gap-1.5 text-[10px] text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-300 font-bold whitespace-nowrap">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                            <span>Bal Verify Pending</span>
                           </span>
                         ) : (
-                          <span className="inline-block text-xs text-slate-500 font-medium">
+                          <span className="inline-flex items-center text-[10px] text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200 font-medium whitespace-nowrap">
                             Part Payment
                           </span>
-                        )}
-                      </div>
-                    )}
+                        )
+                      )}
+                    </div>
                     {deal.currentDiscrepancy && (
-                      <div className="text-xs text-rose-600 mt-1 max-w-xs font-medium" title={deal.currentDiscrepancy}>
+                      <div className="text-[11px] text-rose-600 mt-1 max-w-xs font-medium truncate" title={deal.currentDiscrepancy}>
                         Query: {deal.currentDiscrepancy}
                       </div>
                     )}
                   </td>
 
                   {/* Action */}
-                  <td className="py-4 px-4 text-right">
+                  <td className="py-4 px-4 text-right align-middle">
                     <div className="inline-flex items-center gap-2 justify-end">
                       {(currentUser?.role === 'BDM' || currentUser?.role === 'ADMIN') && pending > 0 && onCollectBalance && (
                         <button
@@ -190,7 +211,7 @@ export default function DealsTable({
                             e.stopPropagation();
                             onCollectBalance(deal);
                           }}
-                          className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 rounded-lg border border-amber-300 text-xs font-semibold inline-flex items-center gap-1.5 transition shadow-sm"
+                          className="h-8.5 px-3 bg-amber-50 hover:bg-amber-100 text-amber-900 rounded-lg border border-amber-300 text-xs font-bold inline-flex items-center gap-1.5 transition-colors shadow-2xs"
                           title="Collect balance payment and submit proof to Accounts"
                         >
                           <IndianRupee className="w-3.5 h-3.5 text-amber-700" />
@@ -203,7 +224,7 @@ export default function DealsTable({
                           e.stopPropagation();
                           onSelectDeal(deal.id);
                         }}
-                        className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-800 rounded-lg border border-slate-300 text-xs font-medium inline-flex items-center gap-1 transition shadow-sm"
+                        className="h-8.5 px-3 bg-white hover:bg-slate-100 text-slate-800 rounded-lg border border-slate-300 text-xs font-semibold inline-flex items-center gap-1 transition-colors shadow-2xs"
                       >
                         <span>View</span>
                         <ChevronRight className="w-3.5 h-3.5 text-slate-400" />

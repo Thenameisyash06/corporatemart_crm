@@ -465,10 +465,10 @@ export default function RmWorkbench({ currentUser, onRefreshParent, onOpenDossie
                   <div
                     key={d.id}
                     onClick={() => setSelectedDeal(d)}
-                    className={`p-3 rounded-lg cursor-pointer transition border text-left ${
+                    className={`p-3.5 rounded-xl cursor-pointer transition-all border text-left ${
                       isSelected
-                        ? 'bg-slate-50 border-slate-800 shadow-xs ring-1 ring-slate-800/20'
-                        : 'bg-white border-slate-200/70 hover:bg-slate-50 hover:border-slate-300'
+                        ? 'bg-slate-50 border-slate-900 shadow-xs ring-1 ring-slate-900'
+                        : 'bg-white border-slate-200/90 hover:bg-slate-50/80 hover:border-slate-300'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">

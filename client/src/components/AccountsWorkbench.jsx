@@ -264,16 +264,13 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
 
       {feedback && (
         <div
-          className={`p-3 rounded-lg text-xs flex items-center justify-between border ${feedback.type === 'success'
+          className={`p-3 rounded-lg text-xs flex items-center justify-between border ${
+            feedback.type === 'success'
               ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
               : feedback.type === 'warning'
                 ? 'bg-amber-50 border-amber-200 text-amber-800'
                 : 'bg-rose-50 border-rose-200 text-rose-800'
-            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-            : feedback.type === 'warning'
-              ? 'bg-amber-50 border-amber-200 text-amber-800'
-              : 'bg-rose-50 border-rose-200 text-rose-800'
-            }`}
+          }`}
         >
           <span>{feedback.message}</span>
           <button onClick={() => setFeedback(null)} className="font-bold ml-2">✕</button>
@@ -313,39 +310,38 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
                   <div
                     key={d.id}
                     onClick={() => setSelectedDeal(d)}
-                    className={`p-3.5 rounded-lg cursor-pointer transition border text-left ${isSelected
-                        ? 'bg-slate-50 border-slate-800 shadow-sm ring-1 ring-slate-800/20'
-                        : 'bg-white border-slate-200/70 hover:bg-slate-50 hover:border-slate-300'
-                      ? 'bg-slate-50 border-slate-800 shadow-sm ring-1 ring-slate-800/20'
-                      : 'bg-white border-slate-200/70 hover:bg-slate-50 hover:border-slate-300'
-                      }`}
+                    className={`p-3.5 rounded-xl cursor-pointer transition-all border text-left ${
+                      isSelected
+                        ? 'bg-slate-50 border-slate-900 shadow-xs ring-1 ring-slate-900'
+                        : 'bg-white border-slate-200/90 hover:bg-slate-50/80 hover:border-slate-300'
+                    }`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-mono text-xs font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
                         {d.dealCode}
                       </span>
                       <span
-                        className={`text-xs font-medium px-2 py-0.5 rounded border ${
+                        className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${
                           isRejected
-                            ? 'bg-rose-50 text-rose-700 border-rose-200 font-semibold'
+                            ? 'bg-rose-50 text-rose-700 border-rose-200'
                             : hasBalancePending
                               ? 'bg-amber-100 text-amber-900 border-amber-300 font-bold'
-                              : 'bg-amber-50 text-amber-700 border-amber-200'
+                              : 'bg-amber-50 text-amber-800 border-amber-200'
                         }`}
                       >
                         {isRejected ? 'Discrepancy' : hasBalancePending ? 'Balance Pending' : 'Stage 04 Entry'}
                       </span>
                     </div>
 
-                    <div className="font-semibold text-sm text-slate-900 mt-2 truncate">
+                    <div className="font-bold text-sm text-slate-900 mt-2 truncate">
                       {d.client.companyName}
                     </div>
 
                     <div className="text-xs text-slate-500 flex items-center justify-between mt-2 pt-1.5 border-t border-slate-100">
-                      <span className="text-emerald-700 font-semibold">
+                      <span className="text-emerald-700 font-bold font-mono tabular-nums">
                         Recv: ₹{Number(d.amountReceived).toLocaleString('en-IN')}
                       </span>
-                      <span className="text-slate-500 font-mono font-medium">
+                      <span className="text-slate-500 font-mono text-[11px]">
                         {firstPayment?.paymentMode || 'NEFT'}
                       </span>
                     </div>
