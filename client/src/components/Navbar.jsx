@@ -9,6 +9,7 @@ import {
   UserPlus,
 } from 'lucide-react';
 import api from '../lib/api';
+import { toast } from '../context/ToastContext';
 import MeetingNotificationDropdown from './MeetingNotificationDropdown';
 
 const QUICK_ROLES = [
@@ -41,7 +42,7 @@ export default function Navbar({
       localStorage.setItem('cm_crm_user', JSON.stringify(res.data.user));
       onUserChange(res.data.user);
     } catch (err) {
-      alert('Failed to switch role: ' + (err.response?.data?.error || err.message));
+      toast.error('Failed to switch role: ' + (err.response?.data?.error || err.message));
     } finally {
       setSwitching(false);
     }

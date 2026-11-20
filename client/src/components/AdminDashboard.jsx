@@ -33,6 +33,7 @@ import {
   Layers,
 } from 'lucide-react';
 import api from '../lib/api';
+import { toast } from '../context/ToastContext';
 import {
   exportDealsToCsv,
   exportClientsToCsv,
@@ -479,10 +480,11 @@ export default function AdminDashboard({
       await api.patch(`/users/${userId}/sales-target`, {
         salesTarget: parseFloat(targetInputValue),
       });
+      toast.success('Sales target updated successfully!');
       setEditingTargetUserId(null);
       await fetchAdminData();
     } catch (err) {
-      alert('Failed to update sales target: ' + (err.response?.data?.error || err.message));
+      toast.error('Failed to update sales target: ' + (err.response?.data?.error || err.message));
     } finally {
       setSavingTarget(false);
     }

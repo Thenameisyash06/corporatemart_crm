@@ -38,6 +38,17 @@ api.interceptors.response.use(
       }
     }
 
+    // Automatically trigger an error popup for any mutating request failure unless explicitly bypassed
+    const method = error.config?.method?.toLowerCase();
+    if (['post', 'put', 'patch', 'delete'].includes(method) && !error.config?.skipGlobalErrorToast) {
+      const msg = error.response?.data?.error || error.response?.data?.message || error.message || 'Operation failed. Please try again.';
+      window.dispatchEvent(
+        new CustomEvent('cm_toast_event', {
+          detail: { type: 'error', title: 'Operation Failed', message: String(msg) },
+        })
+      );
+    }
+
     return Promise.reject(error);
   }
 );

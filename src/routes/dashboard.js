@@ -3,6 +3,10 @@ const router = express.Router();
 const prisma = require('../lib/prisma');
 const { authenticateToken, requireRoles } = require('../middleware/auth');
 
+// Lightweight TTL cache for dashboard stats (15 seconds)
+const statsCache = new Map();
+const STATS_CACHE_TTL_MS = 15000;
+
 /**
  * GET /api/dashboard/stats
  * Aggregate department-wise active queues, total deal values, and counts
@@ -10,67 +14,124 @@ const { authenticateToken, requireRoles } = require('../middleware/auth');
 router.get('/stats', authenticateToken, async (req, res) => {
   try {
     const isBdmUser = req.user.role === 'BDM';
-    const dealWhere = isBdmUser
-      ? {
-          OR: [
-            { bdmId: req.user.id },
-            { coBdms: { some: { id: req.user.id } } },
-          ],
-        }
-      : {};
+    const cacheKey = `stats:${req.user.id}:${req.user.role}`;
+    const cached = statsCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp < STATS_CACHE_TTL_MS)) {
+      return res.json(cached.data);
+    }
 
-    const [
-      totalDeals,
-      pendingAccounts,
-      accountsRejected,
-      pendingLegal,
-      legalRejected,
-      inOperations,
-      completedServices,
-      pendingRmHandover,
-      closedDeals,
-      pendingBalanceVerifications,
-      financialAggregates,
-      verifiedPaymentsAgg,
-    ] = await Promise.all([
-      prisma.deal.count({ where: dealWhere }),
-      prisma.deal.count({ where: { ...dealWhere, stage: 'STAGE_04_ACCOUNTS_VERIFICATION' } }),
-      prisma.deal.count({ where: { ...dealWhere, stage: 'STAGE_04_ACCOUNTS_REJECTED' } }),
-      prisma.deal.count({ where: { ...dealWhere, stage: 'STAGE_05_LEGAL_VERIFICATION' } }),
-      prisma.deal.count({ where: { ...dealWhere, stage: 'STAGE_05_LEGAL_REJECTED' } }),
-      prisma.deal.count({ where: { ...dealWhere, stage: 'STAGE_06_OPERATIONS_PROCESSING' } }),
-      prisma.deal.count({ where: { ...dealWhere, stage: 'STAGE_07_SERVICE_COMPLETED' } }),
-      prisma.deal.count({ where: { ...dealWhere, stage: 'STAGE_08_FINAL_DOCS_DELIVERED' } }),
-      prisma.deal.count({ where: { ...dealWhere, stage: 'CLOSED' } }),
-      prisma.payment.count({
-        where: {
-          status: 'PENDING_VERIFICATION',
-          trancheNumber: { gt: 1 },
-          ...(isBdmUser ? { deal: dealWhere } : {}),
-        },
-      }),
-      prisma.deal.aggregate({
-        where: dealWhere,
-        _sum: {
-          totalAmount: true,
-          amountReceived: true,
-          pendingAmount: true,
-        },
-      }),
-      prisma.payment.aggregate({
-        where: {
-          status: 'VERIFIED',
-          ...(isBdmUser ? { deal: dealWhere } : {}),
-        },
-        _sum: { amount: true },
-      }),
-    ]);
+    let statsRow;
+    if (isBdmUser) {
+      const rows = await prisma.$queryRawUnsafe(`
+        WITH bdm_deals AS (
+          SELECT d.id, d.stage, d."totalAmount", d."amountReceived", d."pendingAmount"
+          FROM "deals" d
+          WHERE d."bdmId" = $1 OR d.id IN (SELECT "A" FROM "_DealCoBdms" WHERE "B" = $1)
+        ),
+        deal_stats AS (
+          SELECT
+            COUNT(*)::int as total_deals,
+            COUNT(*) FILTER (WHERE stage = 'STAGE_04_ACCOUNTS_VERIFICATION')::int as pending_accounts,
+            COUNT(*) FILTER (WHERE stage = 'STAGE_04_ACCOUNTS_REJECTED')::int as accounts_rejected,
+            COUNT(*) FILTER (WHERE stage = 'STAGE_05_LEGAL_VERIFICATION')::int as pending_legal,
+            COUNT(*) FILTER (WHERE stage = 'STAGE_05_LEGAL_REJECTED')::int as legal_rejected,
+            COUNT(*) FILTER (WHERE stage = 'STAGE_06_OPERATIONS_PROCESSING')::int as in_operations,
+            COUNT(*) FILTER (WHERE stage = 'STAGE_07_SERVICE_COMPLETED')::int as completed_services,
+            COUNT(*) FILTER (WHERE stage = 'STAGE_08_FINAL_DOCS_DELIVERED')::int as pending_rm_handover,
+            COUNT(*) FILTER (WHERE stage = 'CLOSED')::int as closed_deals,
+            COALESCE(SUM("totalAmount"), 0)::float as total_deal_value,
+            COALESCE(SUM("amountReceived"), 0)::float as amount_received,
+            COALESCE(SUM("pendingAmount"), 0)::float as pending_amount
+          FROM bdm_deals
+        ),
+        payment_stats AS (
+          SELECT
+            COUNT(*) FILTER (WHERE p.status = 'PENDING_VERIFICATION' AND p."trancheNumber" > 1)::int as pending_balance_verifications,
+            COALESCE(SUM(p.amount) FILTER (WHERE p.status = 'VERIFIED'), 0)::float as total_collected
+          FROM "payments" p
+          WHERE p."dealId" IN (SELECT id FROM bdm_deals)
+        )
+        SELECT 
+          d.*,
+          p.pending_balance_verifications,
+          p.total_collected,
+          u."salesTarget",
+          u."fullName"
+        FROM deal_stats d
+        CROSS JOIN payment_stats p
+        LEFT JOIN "users" u ON u.id = $1;
+      `, req.user.id);
+      statsRow = rows[0] || {};
+    } else {
+      const rows = await prisma.$queryRawUnsafe(`
+        WITH all_deals AS (
+          SELECT d.id, d.stage, d."totalAmount", d."amountReceived", d."pendingAmount"
+          FROM "deals" d
+        ),
+        deal_stats AS (
+          SELECT
+            COUNT(*)::int as total_deals,
+            COUNT(*) FILTER (WHERE stage = 'STAGE_04_ACCOUNTS_VERIFICATION')::int as pending_accounts,
+            COUNT(*) FILTER (WHERE stage = 'STAGE_04_ACCOUNTS_REJECTED')::int as accounts_rejected,
+            COUNT(*) FILTER (WHERE stage = 'STAGE_05_LEGAL_VERIFICATION')::int as pending_legal,
+            COUNT(*) FILTER (WHERE stage = 'STAGE_05_LEGAL_REJECTED')::int as legal_rejected,
+            COUNT(*) FILTER (WHERE stage = 'STAGE_06_OPERATIONS_PROCESSING')::int as in_operations,
+            COUNT(*) FILTER (WHERE stage = 'STAGE_07_SERVICE_COMPLETED')::int as completed_services,
+            COUNT(*) FILTER (WHERE stage = 'STAGE_08_FINAL_DOCS_DELIVERED')::int as pending_rm_handover,
+            COUNT(*) FILTER (WHERE stage = 'CLOSED')::int as closed_deals,
+            COALESCE(SUM("totalAmount"), 0)::float as total_deal_value,
+            COALESCE(SUM("amountReceived"), 0)::float as amount_received,
+            COALESCE(SUM("pendingAmount"), 0)::float as pending_amount
+          FROM all_deals
+        ),
+        payment_stats AS (
+          SELECT
+            COUNT(*) FILTER (WHERE p.status = 'PENDING_VERIFICATION' AND p."trancheNumber" > 1)::int as pending_balance_verifications,
+            COALESCE(SUM(p.amount) FILTER (WHERE p.status = 'VERIFIED'), 0)::float as total_collected
+          FROM "payments" p
+        )
+        SELECT 
+          d.*,
+          p.pending_balance_verifications,
+          p.total_collected
+        FROM deal_stats d
+        CROSS JOIN payment_stats p;
+      `);
+      statsRow = rows[0] || {};
+    }
 
-    const totalCollected = Number(verifiedPaymentsAgg._sum.amount || 0);
-    const totalDealValue = Number(financialAggregates._sum.totalAmount || 0);
+    const totalDeals = statsRow.total_deals || 0;
+    const pendingAccounts = statsRow.pending_accounts || 0;
+    const accountsRejected = statsRow.accounts_rejected || 0;
+    const pendingLegal = statsRow.pending_legal || 0;
+    const legalRejected = statsRow.legal_rejected || 0;
+    const inOperations = statsRow.in_operations || 0;
+    const completedServices = statsRow.completed_services || 0;
+    const pendingRmHandover = statsRow.pending_rm_handover || 0;
+    const closedDeals = statsRow.closed_deals || 0;
+    const pendingBalanceVerifications = statsRow.pending_balance_verifications || 0;
+
+    const totalCollected = Number(statsRow.total_collected || 0);
+    const totalDealValue = Number(statsRow.total_deal_value || 0);
     const totalPending = Math.max(0, totalDealValue - totalCollected);
 
-    return res.json({
+    let bdmMetrics = null;
+    if (isBdmUser) {
+      const target = parseFloat(statsRow.salesTarget) || 500000;
+      const achievement = totalCollected;
+      const pending = Math.max(0, target - achievement);
+      const progressPercent = target > 0 ? Math.min(100, Math.round((achievement / target) * 100)) : 0;
+      bdmMetrics = {
+        target,
+        achievement,
+        pending,
+        received: achievement,
+        progressPercent,
+        totalDeals,
+      };
+    }
+
+    const payload = {
       counts: {
         totalDeals,
         pendingBdmHandover: 0,
@@ -89,63 +150,11 @@ router.get('/stats', authenticateToken, async (req, res) => {
         totalCollected,
         totalPending,
       },
-      bdmMetrics: await (async () => {
-        if (req.user.role === 'BDM') {
-          const bdmUser = await prisma.user.findUnique({
-            where: { id: req.user.id },
-            select: { id: true, fullName: true, salesTarget: true },
-          });
+      bdmMetrics,
+    };
 
-          // Only accounts-verified payments (initial payment after accounts verify and balance payments after accounts verify) count towards achievement
-          const bdmVerifiedPaymentsAgg = await prisma.payment.aggregate({
-            where: {
-              status: 'VERIFIED',
-              deal: {
-                OR: [
-                  { bdmId: req.user.id },
-                  { coBdms: { some: { id: req.user.id } } },
-                ],
-              },
-            },
-            _sum: {
-              amount: true,
-            },
-          });
-
-          const bdmDealsAgg = await prisma.deal.aggregate({
-            where: {
-              OR: [
-                { bdmId: req.user.id },
-                { coBdms: { some: { id: req.user.id } } },
-              ],
-            },
-            _sum: {
-              totalAmount: true,
-              amountReceived: true,
-              pendingAmount: true,
-            },
-            _count: {
-              id: true,
-            },
-          });
-
-          const target = parseFloat(bdmUser?.salesTarget) || 500000;
-          const achievement = parseFloat(bdmVerifiedPaymentsAgg._sum.amount) || 0;
-          const pending = Math.max(0, target - achievement);
-          const progressPercent = target > 0 ? Math.min(100, Math.round((achievement / target) * 100)) : 0;
-
-          return {
-            target,
-            achievement,
-            pending,
-            received: achievement,
-            progressPercent,
-            totalDeals: bdmDealsAgg._count.id || 0,
-          };
-        }
-        return null;
-      })(),
-    });
+    statsCache.set(cacheKey, { timestamp: Date.now(), data: payload });
+    return res.json(payload);
   } catch (error) {
     console.error('Dashboard stats error:', error);
     return res.status(500).json({ error: error.message || 'Failed to aggregate dashboard metrics.' });

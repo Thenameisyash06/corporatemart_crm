@@ -32,6 +32,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import api from '../lib/api';
+import { toast } from '../context/ToastContext';
 
 const DEFAULT_RENEWAL_TEMPLATES = [
   { name: 'DIR-3 KYC Annual Filing (Director KYC)', dueMonths: 11, desc: 'Mandatory annual filing before September 30' },
@@ -103,17 +104,17 @@ export default function RmWorkbench({ currentUser, onRefreshParent, onOpenDossie
     try {
       const newTotal = parseFloat(editingTotalDealAmount);
       if (isNaN(newTotal) || newTotal <= 0) {
-        alert('Please enter a valid deal amount.');
+        toast.warning('Please enter a valid deal amount.');
         return;
       }
       await api.patch(`/deals/${selectedDeal.id}/deal-amount`, {
         totalAmount: newTotal,
       });
-      setFeedback({ type: 'success', message: `Total deal amount updated to ₹${newTotal.toLocaleString('en-IN')}` });
+      toast.success(`Total deal amount updated to ₹${newTotal.toLocaleString('en-IN')}`);
       setEditingTotalDealId(null);
       await fetchRmQueue();
     } catch (err) {
-      setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to update deal amount.' });
+      toast.error(err.response?.data?.error || 'Failed to update deal amount.');
     }
   };
 
@@ -122,17 +123,17 @@ export default function RmWorkbench({ currentUser, onRefreshParent, onOpenDossie
     try {
       const newFee = parseFloat(amount);
       if (isNaN(newFee) || newFee < 0) {
-        alert('Please enter a valid service amount.');
+        toast.warning('Please enter a valid service amount.');
         return;
       }
       await api.patch(`/deals/${selectedDeal.id}/services/${serviceId}`, {
         serviceFee: newFee,
       });
-      setFeedback({ type: 'success', message: `Service deal amount updated to ₹${newFee.toLocaleString('en-IN')}` });
+      toast.success(`Service deal amount updated to ₹${newFee.toLocaleString('en-IN')}`);
       setEditingSvcId(null);
       await fetchRmQueue();
     } catch (err) {
-      setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to update service deal amount.' });
+      toast.error(err.response?.data?.error || 'Failed to update service deal amount.');
     }
   };
 

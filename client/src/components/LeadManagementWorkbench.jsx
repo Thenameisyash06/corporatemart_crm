@@ -41,6 +41,7 @@ import {
   Check,
 } from 'lucide-react';
 import api from '../lib/api';
+import { toast } from '../context/ToastContext';
 import { exportLeadsToCsv } from '../lib/exportCsv';
 
 // -----------------------------------------------------------------------------
@@ -383,12 +384,12 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     if (e) e.preventDefault();
     if (!followUpModalLead) return;
     if (!followUpForm.date) {
-      alert('Please select a follow-up date.');
+      toast.warning('Please select a follow-up date.');
       return;
     }
     const currentToday = getTodayDateStr();
     if (followUpForm.date < currentToday) {
-      alert('Follow-up date cannot be in the past. Please select today or an upcoming date.');
+      toast.warning('Follow-up date cannot be in the past. Please select today or an upcoming date.');
       return;
     }
     try {
@@ -398,10 +399,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         status: followUpForm.status,
         remarks: followUpForm.remarks,
       });
-      setFeedback({
-        type: 'success',
-        message: `Follow-up on ${followUpForm.date} (${followUpForm.status}) recorded and frozen for "${followUpModalLead.companyName}".`,
-      });
+      toast.success(`Follow-up on ${followUpForm.date} (${followUpForm.status}) recorded for "${followUpModalLead.companyName}".`);
       setFollowUpModalLead(null);
       setFollowUpForm({
         date: getTodayDateStr(),
@@ -410,7 +408,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       });
       fetchLeads();
     } catch (err) {
-      alert('Failed to save follow-up: ' + (err.response?.data?.error || err.message));
+      toast.error('Failed to save follow-up: ' + (err.response?.data?.error || err.message));
     } finally {
       setSavingFollowUp(false);
     }
@@ -420,15 +418,15 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     if (e) e.preventDefault();
     if (!reassignModalLead) return;
     if (!reassignForm.newBdmName) {
-      alert('Please select a new BDM to assign this lead to.');
+      toast.warning('Please select a new BDM to assign this lead to.');
       return;
     }
     if (reassignForm.newBdmName.trim().toUpperCase() === (reassignModalLead.bdmName1 || '').trim().toUpperCase()) {
-      alert('New BDM must be different from current assigned BDM.');
+      toast.warning('New BDM must be different from current assigned BDM.');
       return;
     }
     if (!reassignForm.reason.trim()) {
-      alert('Please provide a reason for revoking and reassigning this lead.');
+      toast.warning('Please provide a reason for revoking and reassigning this lead.');
       return;
     }
 
@@ -442,10 +440,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         handoverNotes: reassignForm.handoverNotes,
       });
 
-      setFeedback({
-        type: 'success',
-        message: res.data?.message || `Lead "${reassignModalLead.companyName}" successfully revoked and reassigned.`,
-      });
+      toast.success(res.data?.message || `Lead "${reassignModalLead.companyName}" successfully revoked and reassigned.`);
 
       // Dispatch notification event for navbar & listeners
       window.dispatchEvent(new CustomEvent('lead_notifications_changed'));
@@ -460,7 +455,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       }
       fetchLeads(1, limit);
     } catch (err) {
-      alert('Failed to revoke and reassign lead: ' + (err.response?.data?.error || err.message));
+      toast.error('Failed to revoke and reassign lead: ' + (err.response?.data?.error || err.message));
     } finally {
       setIsSubmittingReassign(false);
     }
@@ -1479,20 +1474,17 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
   const handleCreateLead = async (e) => {
     e.preventDefault();
     if (!form.companyName.trim()) {
-      setFeedback({ type: 'error', message: 'Company Name is required.' });
+      toast.warning('Company Name is required.');
       return;
     }
     const cleanPhone = form.mobileNo.trim();
     if (!cleanPhone) {
-      setFeedback({ type: 'error', message: 'Mobile Number is required.' });
+      toast.warning('Mobile Number is required.');
       return;
     }
     const exact10DigitPhoneRegex = /^[6-9]\d{9}$/;
     if (!exact10DigitPhoneRegex.test(cleanPhone)) {
-      setFeedback({
-        type: 'error',
-        message: 'Invalid phone number. Must be exactly 10 digits without symbols, spaces, or country code (starting with 6-9).',
-      });
+      toast.warning('Invalid phone number. Must be exactly 10 digits without symbols, spaces, or country code (starting with 6-9).');
       return;
     }
     if (duplicatePhoneLead) {
@@ -1502,30 +1494,23 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       return;
     }
     if (!quotationFile) {
-      setFeedback({ type: 'error', message: 'Quotation file is mandatory! Please upload a PDF or Word quotation document.' });
+      toast.warning('Quotation file is mandatory! Please upload a PDF or Word quotation document.');
       setFileError('Quotation document (PDF or Word) is mandatory.');
       return;
     }
 
     const currentToday = getTodayDateStr();
     if (form.meetingDate && form.meetingDate < currentToday) {
-      setFeedback({
-        type: 'error',
-        message: 'Meeting date cannot be in the past. Please select today or an upcoming date.',
-      });
+      toast.warning('Meeting date cannot be in the past. Please select today or an upcoming date.');
       return;
     }
     if (form.expectedDateOfCloser && form.expectedDateOfCloser < currentToday) {
-      setFeedback({
-        type: 'error',
-        message: 'Expected Date of Closer (EDC) cannot be in the past. Please select today or an upcoming date.',
-      });
+      toast.warning('Expected Date of Closer (EDC) cannot be in the past. Please select today or an upcoming date.');
       return;
     }
 
     try {
       setSubmitting(true);
-      setFeedback(null);
 
       const targetBdm = loggedInBdmName || form.bdmName1;
 
@@ -1556,10 +1541,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       });
 
       const addedValueMsg = form.dealValue ? ` with deal value of ₹${Number(form.dealValue).toLocaleString('en-IN')}` : '';
-      setFeedback({
-        type: 'success',
-        message: `Lead for "${form.companyName}" successfully logged into your LMS${addedValueMsg}! Your pipeline deal funnel has been updated.`,
-      });
+      toast.success(`Lead for "${form.companyName}" successfully logged into your LMS${addedValueMsg}! Your pipeline deal funnel has been updated.`);
 
       // Reset form (keep BDM & Leader locked appropriately)
       setForm({
@@ -1582,7 +1564,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       ) {
         showDuplicatePhonePopup(errMsg);
       } else {
-        setFeedback({ type: 'error', message: errMsg });
+        toast.error(errMsg);
       }
     } finally {
       setSubmitting(false);
@@ -1608,7 +1590,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Failed to download quotation:', err);
-      alert('Failed to download quotation file: ' + (err.response?.data?.error || err.message));
+      toast.error('Failed to download quotation file: ' + (err.response?.data?.error || err.message));
     } finally {
       setDownloadingId(null);
     }
@@ -1667,25 +1649,19 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     try {
       const currentToday = getTodayDateStr();
       if (updates.meetingDate && updates.meetingDate < currentToday) {
-        setFeedback({
-          type: 'error',
-          message: 'Meeting date cannot be in the past. Please select today or an upcoming date.',
-        });
+        toast.warning('Meeting date cannot be in the past. Please select today or an upcoming date.');
         return;
       }
       if (updates.expectedDateOfCloser && updates.expectedDateOfCloser < currentToday) {
-        setFeedback({
-          type: 'error',
-          message: 'Expected Date of Closer (EDC) cannot be in the past. Please select today or an upcoming date.',
-        });
+        toast.warning('Expected Date of Closer (EDC) cannot be in the past. Please select today or an upcoming date.');
         return;
       }
       await api.patch(`/leads/${leadId}`, updates);
-      setFeedback({ type: 'success', message: 'Lead updated successfully.' });
+      toast.success('Lead updated successfully.');
       fetchLeads();
       window.dispatchEvent(new Event('lms_leads_changed'));
     } catch (err) {
-      setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to update lead.' });
+      toast.error(err.response?.data?.error || 'Failed to update lead.');
     }
   };
 
@@ -1694,11 +1670,11 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     if (!window.confirm('Are you sure you want to delete this lead?')) return;
     try {
       await api.delete(`/leads/${leadId}`);
-      setFeedback({ type: 'success', message: 'Lead deleted.' });
+      toast.success('Lead deleted.');
       fetchLeads();
       window.dispatchEvent(new Event('lms_leads_changed'));
     } catch (err) {
-      setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to delete lead.' });
+      toast.error(err.response?.data?.error || 'Failed to delete lead.');
     }
   };
 
@@ -1819,17 +1795,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         </div>
       </div>
 
-      {feedback && (
-        <div
-          className={`p-3 rounded-xl text-xs flex items-center justify-between border ${feedback.type === 'success'
-            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-            : 'bg-rose-50 border-rose-200 text-rose-800'
-            }`}
-        >
-          <span>{typeof feedback.message === 'object' ? feedback.message?.message || JSON.stringify(feedback.message) : String(feedback.message || '')}</span>
-          <button onClick={() => setFeedback(null)} className="font-bold ml-2">✕</button>
-        </div>
-      )}
+
 
       {/* 2A. BDM PERSONAL KPI TILES (HERO FUNNEL VALUE CARD + STATUS COUNTERS - HIDDEN FOR ADMIN) */}
       {!isAdmin && (
@@ -3898,7 +3864,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                                         const val = e.target.value;
                                         const currentToday = getTodayDateStr();
                                         if (val && val < currentToday) {
-                                          alert('Meeting date cannot be in the past. Please select today or an upcoming date.');
+                                          toast.warning('Meeting date cannot be in the past. Please select today or an upcoming date.');
                                           return;
                                         }
                                         handleQuickUpdateLead(lead.id, { meetingDate: val || null });

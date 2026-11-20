@@ -21,6 +21,7 @@ import {
   MapPin,
 } from 'lucide-react';
 import api from '../lib/api';
+import { toast } from '../context/ToastContext';
 import { STAGE_CONFIG } from './DealsTable';
 import CollectBalanceModal from './CollectBalanceModal';
 import DealFinancialMetrics from './DealFinancialMetrics';
@@ -43,8 +44,6 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [actionLoading, setActionLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState(null);
-  const [successMsg, setSuccessMsg] = useState(null);
 
   const [queryModal, setQueryModal] = useState({ open: false, type: '', notes: '' });
   const [previewDoc, setPreviewDoc] = useState(null);
@@ -66,7 +65,7 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
       const res = await api.get(`/deals/${dealId}`);
       setDeal(res.data.deal);
     } catch (err) {
-      setErrorMsg('Failed to load deal record.');
+      toast.error('Failed to load deal record.');
     } finally {
       setLoading(false);
     }
@@ -79,13 +78,12 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
   const handleResubmit = async () => {
     try {
       setActionLoading(true);
-      setErrorMsg(null);
       await api.post(`/deals/${deal.id}/resubmit`);
-      setSuccessMsg('File successfully resubmitted to Accounts for verification!');
+      toast.success('File successfully resubmitted to Accounts for verification!');
       await fetchDeal();
       onRefreshParent();
     } catch (err) {
-      setErrorMsg(err.response?.data?.error || 'Resubmission failed.');
+      toast.error(err.response?.data?.error || 'Resubmission failed.');
     } finally {
       setActionLoading(false);
     }
@@ -94,14 +92,13 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
   const handleAccountsVerify = async (action, notes) => {
     try {
       setActionLoading(true);
-      setErrorMsg(null);
       await api.post(`/deals/${deal.id}/accounts-verify`, { action, notes });
-      setSuccessMsg(action === 'APPROVE' ? 'Accounts approved and forwarded to Legal!' : 'Discrepancy returned to BDM.');
+      toast.success(action === 'APPROVE' ? 'Accounts approved and forwarded to Legal!' : 'Discrepancy returned to BDM.');
       setQueryModal({ open: false, type: '', notes: '' });
       await fetchDeal();
       onRefreshParent();
     } catch (err) {
-      setErrorMsg(err.response?.data?.error || 'Accounts action failed.');
+      toast.error(err.response?.data?.error || 'Accounts action failed.');
     } finally {
       setActionLoading(false);
     }
@@ -110,17 +107,16 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
   const handleVerifyBalance = async (action, paymentId) => {
     try {
       setActionLoading(true);
-      setErrorMsg(null);
       const res = await api.post(`/deals/${deal.id}/verify-balance-payment`, {
         paymentId,
         action,
         notes: action === 'APPROVE' ? 'Balance payment verified in bank credit.' : 'Bank credit not reflecting.',
       });
-      setSuccessMsg(res.data.message || 'Balance payment processed successfully.');
+      toast.success(res.data.message || 'Balance payment processed successfully.');
       await fetchDeal();
       onRefreshParent();
     } catch (err) {
-      setErrorMsg(err.response?.data?.error || 'Balance verification failed.');
+      toast.error(err.response?.data?.error || 'Balance verification failed.');
     } finally {
       setActionLoading(false);
     }
@@ -129,14 +125,13 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
   const handleLegalVerify = async (action, notes) => {
     try {
       setActionLoading(true);
-      setErrorMsg(null);
       await api.post(`/deals/${deal.id}/legal-verify`, { action, notes });
-      setSuccessMsg(action === 'APPROVE' ? 'Legal scrutiny cleared and forwarded to Operations!' : 'Deficiency raised.');
+      toast.success(action === 'APPROVE' ? 'Legal scrutiny cleared and forwarded to Operations!' : 'Deficiency raised.');
       setQueryModal({ open: false, type: '', notes: '' });
       await fetchDeal();
       onRefreshParent();
     } catch (err) {
-      setErrorMsg(err.response?.data?.error || 'Legal action failed.');
+      toast.error(err.response?.data?.error || 'Legal action failed.');
     } finally {
       setActionLoading(false);
     }
@@ -149,9 +144,10 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
         status,
         govApplicationNumber: govRef,
       });
+      toast.success('Service status updated successfully!');
       await fetchDeal();
     } catch (err) {
-      setErrorMsg('Failed to update service milestone.');
+      toast.error('Failed to update service milestone.');
     } finally {
       setActionLoading(false);
     }
@@ -160,15 +156,14 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
   const handleUpdateServiceFee = async (serviceId, newFee) => {
     try {
       setActionLoading(true);
-      setErrorMsg(null);
       await api.patch(`/deals/${deal.id}/services/${serviceId}`, {
         serviceFee: parseFloat(newFee) || 0,
       });
-      setSuccessMsg('Service deal amount updated successfully.');
+      toast.success('Service deal amount updated successfully.');
       await fetchDeal();
       if (onRefreshParent) onRefreshParent();
     } catch (err) {
-      setErrorMsg(err.response?.data?.error || 'Failed to update service deal amount.');
+      toast.error(err.response?.data?.error || 'Failed to update service deal amount.');
     } finally {
       setActionLoading(false);
     }
@@ -177,15 +172,14 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
   const handleUpdateTotalDealAmount = async (newTotal) => {
     try {
       setActionLoading(true);
-      setErrorMsg(null);
       await api.patch(`/deals/${deal.id}/deal-amount`, {
         totalAmount: parseFloat(newTotal) || 0,
       });
-      setSuccessMsg('Total deal amount updated successfully.');
+      toast.success('Total deal amount updated successfully.');
       await fetchDeal();
       if (onRefreshParent) onRefreshParent();
     } catch (err) {
-      setErrorMsg(err.response?.data?.error || 'Failed to update total deal amount.');
+      toast.error(err.response?.data?.error || 'Failed to update total deal amount.');
     } finally {
       setActionLoading(false);
     }
@@ -194,7 +188,6 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
   const handleCompleteService = async () => {
     try {
       setActionLoading(true);
-      setErrorMsg(null);
 
       if (deliverableFile) {
         const formData = new FormData();
@@ -208,11 +201,11 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
       }
 
       await api.post(`/deals/${deal.id}/service-complete`, { outcomeNotes: 'All filings completed and verified.' });
-      setSuccessMsg('Service completed successfully!');
+      toast.success('Service completed successfully!');
       await fetchDeal();
       onRefreshParent();
     } catch (err) {
-      setErrorMsg(err.response?.data?.error || 'Failed to complete service.');
+      toast.error(err.response?.data?.error || 'Failed to complete service.');
     } finally {
       setActionLoading(false);
     }
@@ -221,15 +214,14 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
   const handleFinalDelivery = async () => {
     try {
       setActionLoading(true);
-      setErrorMsg(null);
       await api.post(`/deals/${deal.id}/final-delivery`, {
         deliveryProof: 'Delivered via Email Portal & WhatsApp notification',
       });
-      setSuccessMsg('Deliverables marked as delivered to client!');
+      toast.success('Deliverables marked as delivered to client!');
       await fetchDeal();
       onRefreshParent();
     } catch (err) {
-      setErrorMsg(err.response?.data?.error || 'Failed to record delivery.');
+      toast.error(err.response?.data?.error || 'Failed to record delivery.');
     } finally {
       setActionLoading(false);
     }
@@ -238,16 +230,15 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
   const handleRmHandover = async () => {
     try {
       setActionLoading(true);
-      setErrorMsg(null);
       await api.post(`/deals/${deal.id}/rm-handover`, {
         notes: 'Client confirmed receipt of all deliverables. Renewals scheduled in CRM calendar.',
         renewals: [renewalForm],
       });
-      setSuccessMsg('Client handover complete! Workflow closed successfully.');
+      toast.success('Client handover complete! Workflow closed successfully.');
       await fetchDeal();
       onRefreshParent();
     } catch (err) {
-      setErrorMsg(err.response?.data?.error || 'RM handover failed.');
+      toast.error(err.response?.data?.error || 'RM handover failed.');
     } finally {
       setActionLoading(false);
     }
@@ -258,7 +249,7 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
       const res = await api.get(`/documents/${docId}/signed-url`);
       setPreviewDoc(res.data);
     } catch (err) {
-      alert('Failed to generate document preview link.');
+      toast.error('Failed to generate document preview link.');
     }
   };
 
@@ -357,25 +348,6 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
           </div>
         </div>
 
-        {/* Status Alerts */}
-        {errorMsg && (
-          <div className="mx-6 mt-4 p-4 bg-rose-50 border border-rose-200 text-rose-800 text-sm rounded-xl flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-rose-600 flex-shrink-0" />
-              <span>{errorMsg}</span>
-            </div>
-            <button onClick={() => setErrorMsg(null)} className="font-bold text-sm ml-2">✕</button>
-          </div>
-        )}
-        {successMsg && (
-          <div className="mx-6 mt-4 p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm rounded-xl flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
-              <span>{successMsg}</span>
-            </div>
-            <button onClick={() => setSuccessMsg(null)} className="font-bold text-sm ml-2">✕</button>
-          </div>
-        )}
 
         {/* STAGE ACTION GATE BANNER */}
         <div className="p-4.5 mt-4 bg-slate-50 border border-slate-200 rounded-xl shadow-xs">
@@ -1139,17 +1111,17 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
         </div>
       )}
 
-      {/* COLLECT BALANCE PAYMENT MODAL */}
-      <CollectBalanceModal
-        deal={deal}
-        isOpen={isCollectBalanceOpen}
-        onClose={() => setIsCollectBalanceOpen(false)}
-        onSuccess={async () => {
-          setSuccessMsg('Balance payment logged! Sent to Accounts for verification.');
-          await fetchDeal();
-          onRefreshParent();
-        }}
-      />
+        {/* COLLECT BALANCE PAYMENT MODAL */}
+        <CollectBalanceModal
+          deal={deal}
+          isOpen={isCollectBalanceOpen}
+          onClose={() => setIsCollectBalanceOpen(false)}
+          onSuccess={async () => {
+            toast.success('Balance payment logged! Sent to Accounts for verification.');
+            await fetchDeal();
+            onRefreshParent();
+          }}
+        />
     </div>
   );
 }
