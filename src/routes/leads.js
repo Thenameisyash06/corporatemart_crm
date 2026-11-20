@@ -32,8 +32,8 @@ const LEADERS_LIST = [
   'Jayesh Rohit',
   'Neel Boda',
   'Shashank Singhal',
+  'Vishishta Dixit',
   'Yash Rathod',
-  'Vishishtta Dixit',
   'Management',
 ];
 
@@ -54,13 +54,66 @@ const BDMS_LIST = [
   'Vairagi Shah',
   'Pandya Parimal',
   'Rathod Mehul',
-  'Neeraj Trivedi',
-  'Parikh Kirtikumar Bhogilal',
   'Panchal Kunal',
   'Yash Rathod',
   'Pankaj Solanki',
-  'Rahul Sharma',
+  'Rishi Hemnani',
+  'Vinay Raj',
+  'Himanshu Goswami',
+  'Jimit Panchal',
 ];
+
+const BDM_LEADER_MAP = {
+  'Sarika Jayesh': 'Jayesh Rohit',
+  'Jayesh Rohit': 'Jayesh Rohit',
+  'Neel Boda': 'Neel Boda',
+  'Shashank Singhal': 'Shashank Singhal',
+  'Krishna Parmar': 'Vishishta Dixit',
+  'Akash Chauhan': 'Vishishta Dixit',
+  'Bhavin Manghani': 'Shashank Singhal',
+  'Mauli Koshti': 'Shashank Singhal',
+  'Vishishta Dixit': 'Vishishta Dixit',
+  'Mitali Shah': 'Management',
+  'Akash Rawal': 'Jayesh Rohit',
+  'Darshak Fichadiya': 'Jayesh Rohit',
+  'Manish Chauhan': 'Vishishta Dixit',
+  'Vairagi Shah': 'Yash Rathod',
+  'Pandya Parimal': 'Yash Rathod',
+  'Rathod Mehul': 'Yash Rathod',
+  'Panchal Kunal': 'Shashank Singhal',
+  'Yash Rathod': 'Yash Rathod',
+  'Pankaj Solanki': 'Management',
+  'Rishi Hemnani': 'Yash Rathod',
+  'Vinay Raj': 'Vishishta Dixit',
+  'Himanshu Goswami': 'Vishishta Dixit',
+  'Jimit Panchal': 'Shashank Singhal',
+};
+
+const BDM_TARGET_MAP = {
+  'Sarika Jayesh': 180000,
+  'Jayesh Rohit': 200000,
+  'Neel Boda': 1271,
+  'Shashank Singhal': 240000,
+  'Krishna Parmar': 140000,
+  'Akash Chauhan': 148000,
+  'Bhavin Manghani': 100000,
+  'Mauli Koshti': 100000,
+  'Vishishta Dixit': 240000,
+  'Mitali Shah': 80000,
+  'Akash Rawal': 2000,
+  'Darshak Fichadiya': 60000,
+  'Manish Chauhan': 100000,
+  'Vairagi Shah': 280000,
+  'Pandya Parimal': 105000,
+  'Rathod Mehul': 3750,
+  'Panchal Kunal': 96000,
+  'Yash Rathod': 300000,
+  'Pankaj Solanki': 200000,
+  'Rishi Hemnani': 75000,
+  'Vinay Raj': 62500,
+  'Himanshu Goswami': 57500,
+  'Jimit Panchal': 25000,
+};
 
 const CLOSER_STATUS_LIST = [
   'Self Closer',
@@ -753,53 +806,31 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
     analytics.teamMembersOverview = teamMembersOverview;
 
     // Compute comprehensive BDM & Leader performance cards for Admin and Executive Tracking
-    const LMS_LEADERS_LIST = [
-      'Jayesh Rohit',
-      'Neel Boda',
-      'Shashank Singhal',
-      'Yash Rathod',
-      'Vishishtta Dixit',
-      'Management',
-    ];
-
-    const LMS_BDMS_LIST = [
-      'Sarika Jayesh',
-      'Jayesh Rohit',
-      'Neel Boda',
-      'Shashank Singhal',
-      'Krishna Parmar',
-      'Akash Chauhan',
-      'Bhavin Manghani',
-      'Mauli Koshti',
-      'Vishishta Dixit',
-      'Mitali Shah',
-      'Akash Rawal',
-      'Darshak Fichadiya',
-      'Manish Chauhan',
-      'Vairagi Shah',
-      'Pandya Parimal',
-      'Rathod Mehul',
-      'Neeraj Trivedi',
-      'Parikh Kirtikumar Bhogilal',
-      'Panchal Kunal',
-      'Yash Rathod',
-      'Pankaj Solanki',
-      'Rahul Sharma',
-    ];
-
     const allBdmMap = {};
 
     // 1. Initialize all known leaders and BDMs
-    LMS_LEADERS_LIST.forEach((ldr) => {
+    LEADERS_LIST.forEach((ldr) => {
       if (!allBdmMap[ldr]) {
-        allBdmMap[ldr] = { name: ldr, isLeader: true, leads: [], leaderName: null };
+        allBdmMap[ldr] = {
+          name: ldr,
+          isLeader: true,
+          leads: [],
+          leaderName: BDM_LEADER_MAP[ldr] || ldr,
+          salesTarget: BDM_TARGET_MAP[ldr] || 0,
+        };
       }
     });
 
-    LMS_BDMS_LIST.forEach((bdm) => {
-      const isLdr = LMS_LEADERS_LIST.some((l) => l.toLowerCase() === bdm.toLowerCase());
+    BDMS_LIST.forEach((bdm) => {
+      const isLdr = LEADERS_LIST.some((l) => l.toLowerCase() === bdm.toLowerCase());
       if (!allBdmMap[bdm]) {
-        allBdmMap[bdm] = { name: bdm, isLeader: isLdr, leads: [], leaderName: null };
+        allBdmMap[bdm] = {
+          name: bdm,
+          isLeader: isLdr,
+          leads: [],
+          leaderName: BDM_LEADER_MAP[bdm] || null,
+          salesTarget: BDM_TARGET_MAP[bdm] || 0,
+        };
       }
     });
 
@@ -981,6 +1012,7 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
         name: entry.name,
         isLeader: Boolean(entry.isLeader),
         leaderName: entry.leaderName,
+        salesTarget: entry.salesTarget || BDM_TARGET_MAP[entry.name] || 0,
         totalLeads: mLeads.length,
         activeLeads,
         hotCount,

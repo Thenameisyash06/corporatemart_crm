@@ -50,8 +50,8 @@ export const LMS_LEADERS = [
   'Jayesh Rohit',
   'Neel Boda',
   'Shashank Singhal',
+  'Vishishta Dixit',
   'Yash Rathod',
-  'Vishishtta Dixit',
   'Management',
 ];
 
@@ -72,13 +72,66 @@ export const LMS_BDMS = [
   'Vairagi Shah',
   'Pandya Parimal',
   'Rathod Mehul',
-  'Neeraj Trivedi',
-  'Parikh Kirtikumar Bhogilal',
   'Panchal Kunal',
   'Yash Rathod',
   'Pankaj Solanki',
-  'Rahul Sharma',
+  'Rishi Hemnani',
+  'Vinay Raj',
+  'Himanshu Goswami',
+  'Jimit Panchal',
 ];
+
+export const BDM_LEADER_MAP = {
+  'Sarika Jayesh': 'Jayesh Rohit',
+  'Jayesh Rohit': 'Jayesh Rohit',
+  'Neel Boda': 'Neel Boda',
+  'Shashank Singhal': 'Shashank Singhal',
+  'Krishna Parmar': 'Vishishta Dixit',
+  'Akash Chauhan': 'Vishishta Dixit',
+  'Bhavin Manghani': 'Shashank Singhal',
+  'Mauli Koshti': 'Shashank Singhal',
+  'Vishishta Dixit': 'Vishishta Dixit',
+  'Mitali Shah': 'Management',
+  'Akash Rawal': 'Jayesh Rohit',
+  'Darshak Fichadiya': 'Jayesh Rohit',
+  'Manish Chauhan': 'Vishishta Dixit',
+  'Vairagi Shah': 'Yash Rathod',
+  'Pandya Parimal': 'Yash Rathod',
+  'Rathod Mehul': 'Yash Rathod',
+  'Panchal Kunal': 'Shashank Singhal',
+  'Yash Rathod': 'Yash Rathod',
+  'Pankaj Solanki': 'Management',
+  'Rishi Hemnani': 'Yash Rathod',
+  'Vinay Raj': 'Vishishta Dixit',
+  'Himanshu Goswami': 'Vishishta Dixit',
+  'Jimit Panchal': 'Shashank Singhal',
+};
+
+export const BDM_TARGET_MAP = {
+  'Sarika Jayesh': 180000,
+  'Jayesh Rohit': 200000,
+  'Neel Boda': 1271,
+  'Shashank Singhal': 240000,
+  'Krishna Parmar': 140000,
+  'Akash Chauhan': 148000,
+  'Bhavin Manghani': 100000,
+  'Mauli Koshti': 100000,
+  'Vishishta Dixit': 240000,
+  'Mitali Shah': 80000,
+  'Akash Rawal': 2000,
+  'Darshak Fichadiya': 60000,
+  'Manish Chauhan': 100000,
+  'Vairagi Shah': 280000,
+  'Pandya Parimal': 105000,
+  'Rathod Mehul': 3750,
+  'Panchal Kunal': 96000,
+  'Yash Rathod': 300000,
+  'Pankaj Solanki': 200000,
+  'Rishi Hemnani': 75000,
+  'Vinay Raj': 62500,
+  'Himanshu Goswami': 57500,
+  'Jimit Panchal': 25000,
+};
 
 export const LMS_CLOSER_STATUSES = [
   'Self Closer',
@@ -1072,6 +1125,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         map[ldr] = {
           name: ldr,
           isLeader: true,
+          leaderName: BDM_LEADER_MAP[ldr] || ldr,
+          salesTarget: BDM_TARGET_MAP[ldr] || 0,
           leads: [],
           totalLeads: 0,
           activeLeads: 0,
@@ -1095,6 +1150,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
           map[b] = {
             name: b,
             isLeader: isLdr,
+            leaderName: BDM_LEADER_MAP[b] || null,
+            salesTarget: BDM_TARGET_MAP[b] || 0,
             leads: [],
             totalLeads: 0,
             activeLeads: 0,
@@ -2043,6 +2100,11 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                           <span className="text-[9px] text-slate-400 uppercase font-medium">
                             Funnel Value
                           </span>
+                          {(member.salesTarget || BDM_TARGET_MAP[member.name]) ? (
+                            <span className="text-[10px] text-slate-600 block font-medium mt-0.5">
+                              Target: ₹{Number(member.salesTarget || BDM_TARGET_MAP[member.name]).toLocaleString('en-IN')}
+                            </span>
+                          ) : null}
                         </div>
                       </div>
 
@@ -4201,6 +4263,9 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5">
                     Performance Dossier • {selectedBdmDetailModal.totalLeads || 0} Total Leads Logged
+                    {(selectedBdmDetailModal.salesTarget || BDM_TARGET_MAP[selectedBdmDetailModal.name]) ? (
+                      <span className="text-slate-300 font-medium"> • Sales Target: ₹{Number(selectedBdmDetailModal.salesTarget || BDM_TARGET_MAP[selectedBdmDetailModal.name]).toLocaleString('en-IN')}</span>
+                    ) : null}
                   </p>
                 </div>
               </div>
@@ -4758,9 +4823,11 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                     value={reassignForm.newBdmName}
                     onChange={(e) => {
                       const newBdm = e.target.value;
+                      const mappedLeader = BDM_LEADER_MAP[newBdm] || reassignForm.newLeaderName;
                       setReassignForm((prev) => ({
                         ...prev,
                         newBdmName: newBdm,
+                        newLeaderName: mappedLeader || prev.newLeaderName,
                       }));
                     }}
                     required
