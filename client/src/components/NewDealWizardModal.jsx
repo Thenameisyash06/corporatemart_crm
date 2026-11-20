@@ -17,17 +17,9 @@ import {
 import api from '../lib/api';
 import DealFinancialMetrics, { RECEIVING_ACCOUNTS } from './DealFinancialMetrics';
 
-export const DEFAULT_SERVICES = [
-  { name: 'Private Limited Company Incorporation', standardAmount: '18000', govtFee: '3000' },
-  { name: 'Limited Liability Partnership (LLP) Registration', standardAmount: '12000', govtFee: '2000' },
-  { name: 'One Person Company (OPC) Registration', standardAmount: '14000', govtFee: '2000' },
-  { name: 'GST Registration & Filing', standardAmount: '5000', govtFee: '0' },
-  { name: 'Trademark Application & Search', standardAmount: '9000', govtFee: '4500' },
-  { name: 'Import Export Code (IEC)', standardAmount: '4000', govtFee: '500' },
-  { name: 'MSME / Udyam Registration', standardAmount: '3000', govtFee: '0' },
-  { name: 'Annual ROC Compliance & Filing', standardAmount: '15000', govtFee: '0' },
-  { name: 'FSSAI Food License', standardAmount: '7500', govtFee: '2000' },
-];
+import { CORPORATEMART_SERVICES_CATALOG, SERVICES_BY_CATEGORY } from '../constants/servicesCatalog';
+
+export const DEFAULT_SERVICES = CORPORATEMART_SERVICES_CATALOG;
 
 export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initialData }) {
   if (!isOpen) return null;
@@ -86,12 +78,12 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
             {
               serviceName: DEFAULT_SERVICES[0].name,
               standardAmount: DEFAULT_SERVICES[0].standardAmount,
-              dealAmount: '15000',
+              dealAmount: DEFAULT_SERVICES[0].standardAmount,
               govtFee: DEFAULT_SERVICES[0].govtFee,
             },
           ],
-          standardAmount: '18000',
-          totalAmount: '18000',
+          standardAmount: DEFAULT_SERVICES[0].standardAmount,
+          totalAmount: DEFAULT_SERVICES[0].standardAmount,
           amountReceived: '10000',
           paymentType: 'PART_PAYMENT',
           paymentMode: 'UPI',
@@ -136,13 +128,13 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
       {
         serviceName: DEFAULT_SERVICES[0].name,
         standardAmount: DEFAULT_SERVICES[0].standardAmount,
-        dealAmount: '15000',
+        dealAmount: DEFAULT_SERVICES[0].standardAmount,
         govtFee: DEFAULT_SERVICES[0].govtFee,
       },
     ],
 
-    standardAmount: '18000',
-    totalAmount: '18000',
+    standardAmount: DEFAULT_SERVICES[0].standardAmount,
+    totalAmount: DEFAULT_SERVICES[0].standardAmount,
     amountReceived: '10000',
     paymentType: 'PART_PAYMENT',
     paymentMode: 'UPI',
@@ -246,18 +238,16 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
   const handleServiceNameChange = (index, serviceName) => {
     const updated = [...form.services];
     updated[index].serviceName = serviceName;
+    const trimmed = serviceName.trim().toLowerCase();
     const catalogMatch = DEFAULT_SERVICES.find(
-      (d) => d.name.toLowerCase() === serviceName.trim().toLowerCase()
+      (d) => d.name.toLowerCase() === trimmed || trimmed.startsWith(d.name.toLowerCase())
     );
     if (catalogMatch) {
       updated[index].standardAmount = catalogMatch.standardAmount;
-      updated[index].govtFee = catalogMatch.govtFee;
-      const stdVal = parseFloat(catalogMatch.standardAmount) || 0;
-      const currentDeal = parseFloat(updated[index].dealAmount) || 0;
-      if (currentDeal > stdVal) {
-        updated[index].dealAmount = catalogMatch.standardAmount;
-        updated[index].serviceFee = catalogMatch.standardAmount;
-      }
+      updated[index].govtFee = catalogMatch.govtFee || '0';
+      // By default the deal amount will be same as standard amount
+      updated[index].dealAmount = catalogMatch.standardAmount;
+      updated[index].serviceFee = catalogMatch.standardAmount;
     }
     const { std, tot } = calculateTotals(updated);
     setForm({
@@ -963,18 +953,25 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
                         <label className="text-[11px] text-slate-600 font-semibold block mb-1">
                           Service Line Item
                         </label>
-                        <input
-                          type="text"
-                          list="services-list"
+                        <select
                           value={s.serviceName}
                           onChange={(e) => handleServiceNameChange(index, e.target.value)}
-                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-slate-800"
-                        />
-                        <datalist id="services-list">
-                          {DEFAULT_SERVICES.map((item) => (
-                            <option key={item.name} value={item.name} />
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-slate-800 font-medium cursor-pointer"
+                        >
+                          <option value="">-- Select a Particular Service --</option>
+                          {s.serviceName && !DEFAULT_SERVICES.some((item) => item.name === s.serviceName) && (
+                            <option value={s.serviceName}>{s.serviceName}</option>
+                          )}
+                          {Object.entries(SERVICES_BY_CATEGORY).map(([categoryName, items]) => (
+                            <optgroup key={categoryName} label={categoryName}>
+                              {items.map((item) => (
+                                <option key={item.name} value={item.name}>
+                                  {item.name} — ₹{Number(item.standardAmount).toLocaleString('en-IN')}
+                                </option>
+                              ))}
+                            </optgroup>
                           ))}
-                        </datalist>
+                        </select>
                       </div>
 
                       <div className="md:col-span-2">

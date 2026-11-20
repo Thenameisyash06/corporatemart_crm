@@ -510,7 +510,7 @@ export default function App() {
               </div>
 
               <div className="text-xs sm:text-sm text-slate-500 font-medium self-end sm:self-auto">
-                Showing <strong className="text-slate-900 font-bold font-mono tabular-nums">{deals.length}</strong> {currentUser?.role === 'BDM' ? 'personal deals' : 'active deals'}
+                Showing <strong className="text-slate-900 font-bold font-mono tabular-nums">{currentUser?.role === 'BDM' ? (dealsPagination?.total ?? deals.length) : deals.length}</strong> {currentUser?.role === 'BDM' ? 'personal deals' : 'active deals'}
               </div>
             </div>
 

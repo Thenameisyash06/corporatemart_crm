@@ -61,9 +61,9 @@ export default function DashboardStats({
   const cards = [
     {
       id: 'ALL',
-      title: 'Total Deals',
+      title: isBdm ? 'Personal Deals' : 'Total Deals',
       count: counts.totalDeals,
-      subtext: 'All pipelines',
+      subtext: isBdm ? 'My personal pipeline' : 'All pipelines',
       icon: FileText,
     },
     {
@@ -72,7 +72,7 @@ export default function DashboardStats({
       title: 'Accounts Queue',
       count: counts.pendingAccounts,
       alertCount: counts.accountsRejected,
-      subtext: counts.accountsRejected ? `${counts.accountsRejected} returned` : 'Awaiting verify',
+      subtext: counts.accountsRejected ? `${counts.accountsRejected} returned` : (isBdm ? 'My deals in Accounts' : 'Awaiting verify'),
       icon: BadgeAlert,
     },
     {
@@ -81,7 +81,7 @@ export default function DashboardStats({
       title: 'Legal Scrutiny',
       count: counts.pendingLegal,
       alertCount: counts.legalRejected,
-      subtext: counts.legalRejected ? `${counts.legalRejected} deficiencies` : 'Doc verification',
+      subtext: counts.legalRejected ? `${counts.legalRejected} deficiencies` : (isBdm ? 'My deals in Legal' : 'Doc verification'),
       icon: Scale,
     },
     {
@@ -89,7 +89,7 @@ export default function DashboardStats({
       stageKey: 'STAGE_06_OPERATIONS_PROCESSING',
       title: 'Operations Desk',
       count: counts.inOperations,
-      subtext: 'Active filing',
+      subtext: isBdm ? 'My deals in Ops' : 'Active filing',
       icon: Cog,
     },
     {
@@ -97,7 +97,7 @@ export default function DashboardStats({
       stageKey: 'STAGE_08_FINAL_DOCS_DELIVERED',
       title: 'RM Handover',
       count: counts.pendingRmHandover,
-      subtext: 'Client handover',
+      subtext: isBdm ? 'My deals in Handover' : 'Client handover',
       icon: Send,
     },
     {
@@ -105,7 +105,7 @@ export default function DashboardStats({
       stageKey: 'CLOSED',
       title: 'Closed Deals',
       count: counts.closedDeals,
-      subtext: 'Completed',
+      subtext: isBdm ? 'My closed deals' : 'Completed',
       icon: CheckCircle2,
     },
   ];

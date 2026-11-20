@@ -9,6 +9,16 @@ const { authenticateToken, requireRoles } = require('../middleware/auth');
  */
 router.get('/stats', authenticateToken, async (req, res) => {
   try {
+    const isBdmUser = req.user.role === 'BDM';
+    const dealWhere = isBdmUser
+      ? {
+          OR: [
+            { bdmId: req.user.id },
+            { coBdms: { some: { id: req.user.id } } },
+          ],
+        }
+      : {};
+
     const [
       totalDeals,
       pendingAccounts,
@@ -23,17 +33,24 @@ router.get('/stats', authenticateToken, async (req, res) => {
       financialAggregates,
       verifiedPaymentsAgg,
     ] = await Promise.all([
-      prisma.deal.count(),
-      prisma.deal.count({ where: { stage: 'STAGE_04_ACCOUNTS_VERIFICATION' } }),
-      prisma.deal.count({ where: { stage: 'STAGE_04_ACCOUNTS_REJECTED' } }),
-      prisma.deal.count({ where: { stage: 'STAGE_05_LEGAL_VERIFICATION' } }),
-      prisma.deal.count({ where: { stage: 'STAGE_05_LEGAL_REJECTED' } }),
-      prisma.deal.count({ where: { stage: 'STAGE_06_OPERATIONS_PROCESSING' } }),
-      prisma.deal.count({ where: { stage: 'STAGE_07_SERVICE_COMPLETED' } }),
-      prisma.deal.count({ where: { stage: 'STAGE_08_FINAL_DOCS_DELIVERED' } }),
-      prisma.deal.count({ where: { stage: 'CLOSED' } }),
-      prisma.payment.count({ where: { status: 'PENDING_VERIFICATION', trancheNumber: { gt: 1 } } }),
+      prisma.deal.count({ where: dealWhere }),
+      prisma.deal.count({ where: { ...dealWhere, stage: 'STAGE_04_ACCOUNTS_VERIFICATION' } }),
+      prisma.deal.count({ where: { ...dealWhere, stage: 'STAGE_04_ACCOUNTS_REJECTED' } }),
+      prisma.deal.count({ where: { ...dealWhere, stage: 'STAGE_05_LEGAL_VERIFICATION' } }),
+      prisma.deal.count({ where: { ...dealWhere, stage: 'STAGE_05_LEGAL_REJECTED' } }),
+      prisma.deal.count({ where: { ...dealWhere, stage: 'STAGE_06_OPERATIONS_PROCESSING' } }),
+      prisma.deal.count({ where: { ...dealWhere, stage: 'STAGE_07_SERVICE_COMPLETED' } }),
+      prisma.deal.count({ where: { ...dealWhere, stage: 'STAGE_08_FINAL_DOCS_DELIVERED' } }),
+      prisma.deal.count({ where: { ...dealWhere, stage: 'CLOSED' } }),
+      prisma.payment.count({
+        where: {
+          status: 'PENDING_VERIFICATION',
+          trancheNumber: { gt: 1 },
+          ...(isBdmUser ? { deal: dealWhere } : {}),
+        },
+      }),
       prisma.deal.aggregate({
+        where: dealWhere,
         _sum: {
           totalAmount: true,
           amountReceived: true,
@@ -41,7 +58,10 @@ router.get('/stats', authenticateToken, async (req, res) => {
         },
       }),
       prisma.payment.aggregate({
-        where: { status: 'VERIFIED' },
+        where: {
+          status: 'VERIFIED',
+          ...(isBdmUser ? { deal: dealWhere } : {}),
+        },
         _sum: { amount: true },
       }),
     ]);
@@ -472,15 +492,32 @@ router.get('/clients', authenticateToken, requireRoles('ADMIN', 'BDM', 'RM'), as
   try {
     const { search } = req.query;
     const where = {};
+    if (req.user.role === 'BDM') {
+      where.deals = {
+        some: {
+          OR: [
+            { bdmId: req.user.id },
+            { coBdms: { some: { id: req.user.id } } },
+          ],
+        },
+      };
+    }
+
     if (search) {
-      where.OR = [
-        { companyName: { contains: search, mode: 'insensitive' } },
-        { clientName: { contains: search, mode: 'insensitive' } },
-        { email: { contains: search, mode: 'insensitive' } },
-        { phone: { contains: search, mode: 'insensitive' } },
-        { gstin: { contains: search, mode: 'insensitive' } },
-        { panNumber: { contains: search, mode: 'insensitive' } },
+      where.AND = [
+        ...(where.deals ? [{ deals: where.deals }] : []),
+        {
+          OR: [
+            { companyName: { contains: search, mode: 'insensitive' } },
+            { clientName: { contains: search, mode: 'insensitive' } },
+            { email: { contains: search, mode: 'insensitive' } },
+            { phone: { contains: search, mode: 'insensitive' } },
+            { gstin: { contains: search, mode: 'insensitive' } },
+            { panNumber: { contains: search, mode: 'insensitive' } },
+          ],
+        },
       ];
+      delete where.deals;
     }
 
     const clients = await prisma.client.findMany({
