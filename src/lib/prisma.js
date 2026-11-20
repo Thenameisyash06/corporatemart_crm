@@ -1,8 +1,17 @@
 const { PrismaClient } = require('@prisma/client');
 
-const prisma = new PrismaClient({
-  log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
-});
+// Global singleton to reuse connection pools across warm serverless invocations on Vercel
+const globalForPrisma = globalThis;
+
+const prisma =
+  globalForPrisma.__prisma ||
+  new PrismaClient({
+    log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+  });
+
+if (!globalForPrisma.__prisma) {
+  globalForPrisma.__prisma = prisma;
+}
 
 // Fields to preserve original case (IDs, passwords, URLs, storage paths, mime types, UUIDs)
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

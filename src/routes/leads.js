@@ -1292,20 +1292,14 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
     }
 
     const cleanFileName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const localDir = path.join(__dirname, '../../uploads/quotations');
-    if (!fs.existsSync(localDir)) {
-      fs.mkdirSync(localDir, { recursive: true });
-    }
     const localFileName = `${Date.now()}_${cleanFileName}`;
-    const localFilePath = path.join(localDir, localFileName);
-    fs.writeFileSync(localFilePath, file.buffer);
+    const storagePath = `leads/quotations/${localFileName}`;
+    const mimeType = ext === '.pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-    let quotationFileUrl = `/uploads/quotations/${localFileName}`;
+    let quotationFileUrl = storagePath;
 
-    // Also attempt Supabase Storage upload
+    // 1. Primary: Upload directly to Supabase Object Storage
     try {
-      const storagePath = `leads/quotations/${localFileName}`;
-      const mimeType = ext === '.pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
       const { data, error } = await supabase.storage
         .from(BUCKET_NAME)
         .upload(storagePath, file.buffer, {
@@ -1317,7 +1311,22 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
         quotationFileUrl = data.path;
       }
     } catch (e) {
-      console.warn('[LMS] Supabase storage upload skipped/failed, using local fallback:', e.message);
+      console.warn('[LMS] Supabase storage upload notice:', e.message);
+    }
+
+    // 2. Safe local filesystem caching (will not throw on read-only environments like Vercel Lambda)
+    try {
+      const localDir = path.join(__dirname, '../../uploads/quotations');
+      if (!fs.existsSync(localDir)) {
+        fs.mkdirSync(localDir, { recursive: true });
+      }
+      const localFilePath = path.join(localDir, localFileName);
+      fs.writeFileSync(localFilePath, file.buffer);
+      if (!quotationFileUrl) {
+        quotationFileUrl = `/uploads/quotations/${localFileName}`;
+      }
+    } catch (fsErr) {
+      // Gracefully ignored on read-only serverless filesystems (e.g. AWS Lambda / Vercel EROFS)
     }
 
     const rawClientStatus = (clientStatus || 'Warm').trim().toLowerCase();
