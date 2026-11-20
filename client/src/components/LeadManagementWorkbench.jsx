@@ -759,6 +759,15 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     const own = [];
     const shared = [];
 
+    const leaderTeamMembers = (analytics?.dbTeamMembers && analytics.dbTeamMembers.length > 0)
+      ? analytics.dbTeamMembers
+      : Object.entries(BDM_LEADER_MAP)
+          .filter(([_, ldr]) => {
+            const cl = ldr.toLowerCase().trim();
+            return cl.includes(leaderKey) || leaderKey.includes(cl);
+          })
+          .map(([bdm]) => bdm);
+
     leads.forEach((lead) => {
       const bdm1 = (lead.bdmName1 || '').toLowerCase().trim();
       const bdm2 = (lead.bdmName2 || '').toLowerCase().trim();
@@ -771,14 +780,17 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         bdm2.includes(myName) ||
         (lead.createdById === currentUser?.id && (!lead.bdmName1 || bdm1.includes(myName) || myName.includes(bdm1)));
 
-      // Check if lead belongs to a team member under the same leader
-      // In BDM Leader portal, team member leads are ONLY visible if closerStatus is 'Lead Sharing' (not 'Self Closer')
-      const closerStatus = (lead.closerStatus || '').toLowerCase().trim();
-      const isTeamLead =
-        !isOwnLead &&
-        leaderKey &&
-        (leadLeader.includes(leaderKey) || leaderKey.includes(leadLeader)) &&
-        closerStatus.includes('lead sharing');
+      // Check if lead belongs to a team member under this leader (from DB or mapping)
+      const assignedLeader = (analytics?.dbLeaderMap?.[lead.bdmName1] || BDM_LEADER_MAP[lead.bdmName1] || '').toLowerCase().trim();
+      const isMemberOfMyTeam = leaderTeamMembers.some((m) => {
+        const mc = m.toLowerCase().trim();
+        return bdm1.includes(mc) || mc.includes(bdm1) || bdm2.includes(mc) || mc.includes(bdm2);
+      }) || (assignedLeader && (assignedLeader.includes(leaderKey) || leaderKey.includes(assignedLeader)));
+
+      const isTeamLead = !isOwnLead && leaderKey && (
+        (leadLeader && (leadLeader.includes(leaderKey) || leaderKey.includes(leadLeader))) ||
+        isMemberOfMyTeam
+      );
 
       if (isOwnLead) {
         own.push(lead);
@@ -792,7 +804,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       sharedTeamLeads: shared,
       visibleLeads: [...own, ...shared],
     };
-  }, [leads, isAdmin, loggedInBdmName, effectiveLeaderName, matchedLeaderName, isLeader, currentUser]);
+  }, [leads, isAdmin, loggedInBdmName, effectiveLeaderName, matchedLeaderName, isLeader, currentUser, analytics]);
 
   // BDM's Personal Deal Funnel Value (calculated STRICTLY on own direct leads, excluding team member leads)
   const bdmPersonalFunnel = useMemo(() => {
@@ -837,18 +849,35 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     const leaderKey = (matchedLeaderName || loggedInBdmName || '').toLowerCase().trim();
     const membersMap = {};
 
-    // Group leads belonging to team members under this leader (STRICTLY Lead Sharing leads only)
-    const sourceLeads = (leads && leads.length > 0)
-      ? leads.filter((l) => {
-        const ldr = (l.leaderName || '').toLowerCase().trim();
-        const bdm1 = (l.bdmName1 || '').toLowerCase().trim();
-        const closerStatus = (l.closerStatus || '').toLowerCase().trim();
-        const isUnderLeader = ldr && (ldr.includes(leaderKey) || leaderKey.includes(ldr));
-        const isLeaderSelf = bdm1 && (bdm1.includes(leaderKey) || leaderKey.includes(bdm1));
-        const isLeadSharing = closerStatus.includes('lead sharing');
-        return isUnderLeader && !isLeaderSelf && isLeadSharing;
-      })
-      : (sharedTeamLeads || []);
+    // 1. Get all team member names for this leader from DB analytics (or BDM_LEADER_MAP fallback)
+    const teamMemberNames = (analytics?.dbTeamMembers && analytics.dbTeamMembers.length > 0)
+      ? analytics.dbTeamMembers
+      : Object.entries(BDM_LEADER_MAP)
+          .filter(([_, ldr]) => {
+            const cl = ldr.toLowerCase().trim();
+            return cl.includes(leaderKey) || leaderKey.includes(cl);
+          })
+          .map(([bdm]) => bdm);
+
+    // Initialize every team member from DB so their card is ALWAYS present!
+    teamMemberNames.forEach((name) => {
+      const cleanName = name.trim();
+      if (!cleanName || cleanName.toLowerCase() === leaderKey) return;
+      membersMap[cleanName] = {
+        name: cleanName,
+        salesTarget: analytics?.dbTargetMap?.[cleanName] || BDM_TARGET_MAP[cleanName] || 0,
+        leads: [],
+      };
+    });
+
+    // 2. Group leads belonging to team members under this leader
+    const sourceLeads = (sharedTeamLeads && sharedTeamLeads.length > 0)
+      ? sharedTeamLeads
+      : (leads || []).filter((l) => {
+          const bdm1 = (l.bdmName1 || '').toLowerCase().trim();
+          const isLeaderSelf = bdm1 && (bdm1.includes(leaderKey) || leaderKey.includes(bdm1));
+          return !isLeaderSelf;
+        });
 
     sourceLeads.forEach((lead) => {
       let memberName = (lead.bdmName1 || '').trim();
@@ -857,48 +886,50 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       }
       if (!memberName || memberName.toLowerCase() === leaderKey || memberName === '-- None (Single BDM) --') return;
 
-      // Exclude other leaders
-      const isOtherLeader = LMS_LEADERS.some((l) => l.toLowerCase().trim() === memberName.toLowerCase().trim());
-      if (isOtherLeader) return;
-
-      if (!membersMap[memberName]) {
-        membersMap[memberName] = {
-          name: memberName,
-          leads: [],
-        };
+      const cleanLower = memberName.toLowerCase().trim();
+      // Match to an existing member of this leader's team
+      const matchKey = Object.keys(membersMap).find(
+        (k) => k.toLowerCase() === cleanLower || cleanLower.includes(k.toLowerCase()) || k.toLowerCase().includes(cleanLower)
+      );
+      if (matchKey) {
+        membersMap[matchKey].leads.push(lead);
       }
-      membersMap[memberName].leads.push(lead);
     });
+
+    // 3. Map into card objects (supplementing with analytics.teamMembersOverview if available)
+    const backendOverviewMap = {};
+    if (analytics?.teamMembersOverview && Array.isArray(analytics.teamMembersOverview)) {
+      analytics.teamMembersOverview.forEach((bo) => {
+        if (bo?.name) backendOverviewMap[bo.name.toLowerCase().trim()] = bo;
+      });
+    }
 
     const cards = Object.values(membersMap).map((member) => {
       const mLeads = member.leads;
+      const cleanNameLower = member.name.toLowerCase().trim();
+      const bo = backendOverviewMap[cleanNameLower] || Object.entries(backendOverviewMap).find(([k]) => k.includes(cleanNameLower) || cleanNameLower.includes(k))?.[1];
 
-      // 1. Active Leads: not CLOSED_WON and not CLOSED_LOST
-      const activeLeads = mLeads.filter(
-        (l) => l.leadStatus !== 'CLOSED_WON' && l.leadStatus !== 'CLOSED_LOST'
-      ).length;
+      // If local leads slice is partial or empty, use the richer backend counts
+      const activeLeads = mLeads.length > 0
+        ? mLeads.filter((l) => l.leadStatus !== 'CLOSED_WON' && l.leadStatus !== 'CLOSED_LOST').length
+        : (bo?.activeLeads ?? 0);
 
-      // 2. Hot
-      const hotCount = mLeads.filter(
-        (l) => (l.clientStatus || '').toLowerCase() === 'hot'
-      ).length;
+      const hotCount = mLeads.length > 0
+        ? mLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'hot').length
+        : (bo?.hotCount ?? 0);
 
-      // 3. Warm
-      const warmCount = mLeads.filter(
-        (l) => (l.clientStatus || 'warm').toLowerCase() === 'warm'
-      ).length;
+      const warmCount = mLeads.length > 0
+        ? mLeads.filter((l) => (l.clientStatus || 'warm').toLowerCase() === 'warm').length
+        : (bo?.warmCount ?? 0);
 
-      // 4. Lost
-      const lostCount = mLeads.filter(
-        (l) => (l.clientStatus || '').toLowerCase() === 'lost' || l.leadStatus === 'CLOSED_LOST'
-      ).length;
+      const lostCount = mLeads.length > 0
+        ? mLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'lost' || l.leadStatus === 'CLOSED_LOST').length
+        : (bo?.lostCount ?? 0);
 
-      // 5. Closed (Outcome)
-      const closedCount = mLeads.filter(
-        (l) => l.leadStatus === 'CLOSED_WON' || (l.clientStatus || '').toLowerCase() === 'closed'
-      ).length;
+      const closedCount = mLeads.length > 0
+        ? mLeads.filter((l) => l.leadStatus === 'CLOSED_WON' || (l.clientStatus || '').toLowerCase() === 'closed').length
+        : (bo?.closedCount ?? 0);
 
-      // 6. Meeting (leads with meeting scheduled, upcoming/recent meeting date & status)
       const meetingLeads = mLeads.filter(
         (l) => l.meetingDate || (l.meetingStatus && l.meetingStatus !== 'None')
       );
@@ -907,9 +938,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         const db = b.meetingDate ? new Date(b.meetingDate).getTime() : 0;
         return db - da;
       });
-      const nextMeetingLead = sortedMeetings[0] || null;
+      const nextMeetingLead = sortedMeetings[0] || bo?.nextMeetingLead || null;
 
-      // 7. Last Follow Up: gather all frozen follow-ups from all leads of this member and find the latest
       const allFollowUps = [];
       mLeads.forEach((l) => {
         const fus = getFollowUpsList(l);
@@ -926,29 +956,32 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         const tb = new Date(b.addedAt || b.date).getTime();
         return tb - ta;
       });
-      const lastFollowUp = allFollowUps[0] || null;
+      const lastFollowUp = allFollowUps[0] || bo?.lastFollowUp || null;
 
-      // 8. EDC (Expected Date of Closer): find the nearest upcoming EDC target among active leads
       const activeLeadsWithEdc = mLeads.filter(
         (l) => l.expectedDateOfCloser && l.leadStatus !== 'CLOSED_WON' && l.leadStatus !== 'CLOSED_LOST'
       );
       activeLeadsWithEdc.sort((a, b) => new Date(a.expectedDateOfCloser) - new Date(b.expectedDateOfCloser));
-      const nearestEdcLead = activeLeadsWithEdc[0] || mLeads.find((l) => l.expectedDateOfCloser) || null;
+      const nearestEdcLead = activeLeadsWithEdc[0] || mLeads.find((l) => l.expectedDateOfCloser) || bo?.nearestEdcLead || null;
 
-      // Total Deal Funnel value for this member's leads
-      const totalFunnel = mLeads.reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
+      const totalFunnel = mLeads.length > 0
+        ? mLeads.reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0)
+        : (bo?.totalFunnel ?? 0);
+
+      const totalLeads = mLeads.length > 0 ? mLeads.length : (bo?.totalLeads ?? 0);
 
       return {
         name: member.name,
+        salesTarget: member.salesTarget || bo?.salesTarget || 0,
         isLeaderMember: false,
         isSelf: false,
-        totalLeads: mLeads.length,
+        totalLeads,
         activeLeads,
         hotCount,
         warmCount,
         lostCount,
         closedCount,
-        meetingCount: meetingLeads.length,
+        meetingCount: meetingLeads.length > 0 ? meetingLeads.length : (bo?.meetingCount ?? 0),
         nextMeetingLead,
         lastFollowUp,
         nearestEdcLead,
@@ -956,8 +989,10 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       };
     });
 
+    cards.sort((a, b) => (b.totalFunnel || 0) - (a.totalFunnel || 0) || (b.totalLeads || 0) - (a.totalLeads || 0) || a.name.localeCompare(b.name));
+
     return cards;
-  }, [isLeader, matchedLeaderName, loggedInBdmName, leads, sharedTeamLeads]);
+  }, [isLeader, matchedLeaderName, loggedInBdmName, leads, sharedTeamLeads, analytics]);
 
   // Leads actually displayed in the table below (supports filtering to a selected team member, selected month, and pending follow-ups)
   const displayedLeads = useMemo(() => {
@@ -1079,7 +1114,30 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       }
     }
 
-    // 4. Also ensure current logged in user is in the map
+    // 4. For Leader: Ensure ALL of this Leader's team members from DB are in map (even with 0 leads / ₹0 funnel)
+    if (isLeader) {
+      const leaderTeamMembers = (analytics?.dbTeamMembers && analytics.dbTeamMembers.length > 0)
+        ? analytics.dbTeamMembers
+        : Object.entries(BDM_LEADER_MAP)
+            .filter(([_, ldr]) => {
+              const cl = ldr.toLowerCase().trim();
+              const lk = (matchedLeaderName || loggedInBdmName || '').toLowerCase().trim();
+              return cl.includes(lk) || lk.includes(cl);
+            })
+            .map(([bdm]) => bdm);
+
+      leaderTeamMembers.forEach((member) => {
+        const cleanMember = member.trim();
+        const existingKey = Object.keys(map).find(
+          (k) => k.toLowerCase().trim() === cleanMember.toLowerCase()
+        );
+        if (!existingKey) {
+          map[cleanMember] = { count: 0, totalValue: 0, hotValue: 0, warmValue: 0, lostValue: 0 };
+        }
+      });
+    }
+
+    // 5. Also ensure current logged in user is in the map
     if (loggedInBdmName && !Object.keys(map).some((k) => k.toLowerCase().trim() === loggedInBdmName.toLowerCase().trim())) {
       map[loggedInBdmName] = { count: 0, totalValue: 0, hotValue: 0, warmValue: 0, lostValue: 0 };
     }
@@ -1099,37 +1157,40 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       };
     });
 
-    // 5. Filter for BDM / Leader views:
-    // - Leader: can see himself and all the team members (first leader then members)
-    // - BDM member: should NOT see the leader in leaderboard; can only see other team members and himself
+    // 6. Filter for BDM / Leader views:
+    // - Leader: can see himself (#1) and all of his team members (and ONLY his team members)
+    // - BDM member: should NOT see the leader; can only see themselves
     if (!isAdmin) {
       const cleanLeader = (teamLeader || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
       const cleanSelf = (loggedInBdmName || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
 
       if (isLeader) {
-        // Leader sees himself and all team members
+        const myTeamSet = new Set(
+          ((analytics?.dbTeamMembers && analytics.dbTeamMembers.length > 0)
+            ? analytics.dbTeamMembers
+            : Object.entries(BDM_LEADER_MAP)
+                .filter(([_, ldr]) => {
+                  const cl = ldr.toLowerCase().trim();
+                  return cl.includes(cleanLeader) || cleanLeader.includes(cl);
+                })
+                .map(([bdm]) => bdm)
+          ).map((m) => m.toLowerCase().trim())
+        );
+
         list = list.filter((item) => {
           const itemClean = item.bdmName.replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
           const isCurrentTeamLeader = cleanLeader && (itemClean === cleanLeader || itemClean.includes(cleanLeader) || cleanLeader.includes(itemClean));
-          const isSelf = cleanSelf && (itemClean === cleanSelf || itemClean.includes(cleanSelf) || cleanSelf.includes(itemClean));
+          const isMyMember = myTeamSet.has(itemClean) || Array.from(myTeamSet).some((tm) => tm.includes(itemClean) || itemClean.includes(tm));
 
-          // Exclude any outside leaders
-          if (item.isLeader && !isCurrentTeamLeader && !isSelf) {
-            return false;
-          }
-
-          // Always show leader himself; show team members who have activity or are logged-in
-          return isCurrentTeamLeader || isSelf || item.totalValue > 0 || item.count > 0;
+          // Strictly Leader himself and all his team members (even with 0 leads / ₹0 funnel)
+          return isCurrentTeamLeader || isMyMember;
         });
       } else {
-        // BDM member: strictly exclude any leader; only show other team members and himself
+        // Regular BDM member: only themselves
         list = list.filter((item) => {
-          if (item.isLeader) {
-            return false;
-          }
+          if (item.isLeader) return false;
           const itemClean = item.bdmName.replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
-          const isSelf = cleanSelf && (itemClean === cleanSelf || itemClean.includes(cleanSelf) || cleanSelf.includes(itemClean));
-          return isSelf || item.totalValue > 0 || item.count > 0;
+          return cleanSelf && (itemClean === cleanSelf || itemClean.includes(cleanSelf) || cleanSelf.includes(itemClean));
         });
       }
     } else {
@@ -1137,11 +1198,11 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       list = list.filter((b) => b.isLeader || b.totalValue > 0 || b.count > 0);
     }
 
-    // Sequence by role ascending: first Leader, then Member (within each group, sorted by totalValue descending)
+    // Sequence by role ascending: first Leader, then Member (within members, sorted by totalValue descending, then count, then name)
     list.sort((a, b) => {
       if (a.isLeader && !b.isLeader) return -1;
       if (!a.isLeader && b.isLeader) return 1;
-      return (b.totalValue || 0) - (a.totalValue || 0) || (b.count || 0) - (a.count || 0);
+      return (b.totalValue || 0) - (a.totalValue || 0) || (b.count || 0) - (a.count || 0) || a.bdmName.localeCompare(b.bdmName);
     });
 
     return list;
@@ -1721,17 +1782,19 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
 
         {/* Header Action Buttons */}
         <div className="flex items-center gap-2 self-stretch md:self-auto justify-end flex-wrap">
-          {/* Deal Funnel Leaderboard Toggle (For Admin & BDM) */}
-          <button
-            onClick={() => setShowBdmLeaderboard(!showBdmLeaderboard)}
-            className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition border ${showBdmLeaderboard
-              ? 'bg-indigo-900 text-white border-indigo-900 shadow-xs'
-              : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'
-              }`}
-          >
-            <Award className="w-3.5 h-3.5" />
-            <span>{showBdmLeaderboard ? 'Hide BDM Funnels' : 'BDM Funnel Breakdown'}</span>
-          </button>
+          {/* Deal Funnel Leaderboard Toggle (For Admin & Team Leaders ONLY) */}
+          {(isAdmin || isLeader) && (
+            <button
+              onClick={() => setShowBdmLeaderboard(!showBdmLeaderboard)}
+              className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition border ${showBdmLeaderboard
+                ? 'bg-indigo-900 text-white border-indigo-900 shadow-xs'
+                : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'
+                }`}
+            >
+              <Award className="w-3.5 h-3.5" />
+              <span>{showBdmLeaderboard ? 'Hide BDM Funnels' : 'BDM Funnel Breakdown'}</span>
+            </button>
+          )}
 
           <button
             onClick={handleExportCsv}
@@ -2364,8 +2427,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         </div>
       )}
 
-      {/* 2B. BDM FUNNEL LEADERBOARD (Collapsible breakdown for Admin & BDM) */}
-      {showBdmLeaderboard && (
+      {/* 2B. BDM FUNNEL LEADERBOARD (Collapsible breakdown for Admin & Leader ONLY) */}
+      {(isAdmin || isLeader) && showBdmLeaderboard && (
         <div className="bg-white border border-indigo-200 rounded-2xl p-5 shadow-xs space-y-3">
           <div className="flex items-center justify-between">
             <div>

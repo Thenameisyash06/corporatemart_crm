@@ -168,7 +168,12 @@ function userCanAccessLead(lead, user) {
   if (isCreator) return true;
   if (bdm1 && (bdm1.includes(userName) || userName.includes(bdm1))) return true;
   if (bdm2 && (bdm2.includes(userName) || userName.includes(bdm2))) return true;
-  if ((lead.closerStatus || '').toUpperCase().includes('LEAD SHARING') && (leader.includes(userName) || userName.includes(leader))) return true;
+  if (leader && (leader.includes(userName) || userName.includes(leader))) return true;
+  const bdm1Key = Object.keys(BDM_LEADER_MAP).find((b) => b.toLowerCase() === bdm1);
+  if (bdm1Key && BDM_LEADER_MAP[bdm1Key]) {
+    const ldrClean = BDM_LEADER_MAP[bdm1Key].toLowerCase();
+    if (ldrClean.includes(userName) || userName.includes(ldrClean)) return true;
+  }
 
   return false;
 }
@@ -314,6 +319,14 @@ async function ensureLeadsTable() {
       // Index might already exist
     }
 
+    try {
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "leaderName" TEXT;
+      `);
+    } catch (e) {
+      // Column might already exist
+    }
+
     tableReady = true;
   } catch (err) {
     console.error('[LMS] Warning: Could not ensure leads table via raw SQL:', err.message);
@@ -373,37 +386,99 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
     const startOfNextMonth = new Date(nextYear, nextMonth, 1, 0, 0, 0, 0);
     const endOfNextMonth = new Date(nextYear, nextMonth + 1, 0, 23, 59, 59, 999);
 
+    // Fetch all BDM and Leader data directly from the DB users table
+    let dbUsers = [];
+    try {
+      dbUsers = await prisma.$queryRawUnsafe(`
+        SELECT "id", "fullName", "leaderName", "salesTarget"::float as "salesTarget"
+        FROM "users"
+        WHERE "role" = 'BDM' AND "isActive" = true
+      `);
+    } catch (e) {
+      console.warn('[LMS] Warning: could not query users table for BDMs:', e.message);
+    }
+
+    const dbBdmLeaderMap = {};
+    const dbBdmTargetMap = {};
+    const dbBdmsList = [];
+    const dbLeadersSet = new Set(LEADERS_LIST);
+
+    dbUsers.forEach((u) => {
+      const cleanName = (u.fullName || '').replace(/\s*\([^)]*\)/g, '').trim();
+      if (!cleanName) return;
+      dbBdmsList.push(cleanName);
+      if (u.salesTarget) dbBdmTargetMap[cleanName] = parseFloat(u.salesTarget);
+      if (u.leaderName) {
+        const cleanLeader = u.leaderName.replace(/\s*\([^)]*\)/g, '').trim();
+        dbBdmLeaderMap[cleanName] = cleanLeader;
+        dbLeadersSet.add(cleanLeader);
+      }
+    });
+
+    const activeLeadersList = Array.from(dbLeadersSet);
+
+    const userFullName = (req.user.fullName || '').replace(/\s*\([^)]*\)/g, '').trim();
+    const matchedLeader = activeLeadersList.find((l) => {
+      const cl = l.toLowerCase().trim();
+      const cu = userFullName.toLowerCase().trim();
+      return cu.includes(cl) || cl.includes(cu);
+    });
+    const targetLeader = req.query.myLeaderName && req.query.myLeaderName.trim()
+      ? req.query.myLeaderName.trim()
+      : (matchedLeader || null);
+
+    // Get team members for targetLeader directly from the DB users table
+    let myTeamMemberNames = [];
+    if (targetLeader) {
+      const tl = targetLeader.toLowerCase().trim();
+      myTeamMemberNames = dbUsers
+        .filter((u) => {
+          const uLeader = (u.leaderName || dbBdmLeaderMap[u.fullName] || BDM_LEADER_MAP[u.fullName] || '').toLowerCase().trim();
+          const uName = (u.fullName || '').replace(/\s*\([^)]*\)/g, '').toLowerCase().trim();
+          return (uLeader === tl || uLeader.includes(tl) || tl.includes(uLeader)) && uName !== tl;
+        })
+        .map((u) => (u.fullName || '').replace(/\s*\([^)]*\)/g, '').trim());
+
+      // Fallback to static mapping if needed
+      if (myTeamMemberNames.length === 0) {
+        Object.entries(BDM_LEADER_MAP).forEach(([bdm, ldr]) => {
+          const cl = ldr.toLowerCase().trim();
+          const cb = bdm.toLowerCase().trim();
+          if ((cl === tl || cl.includes(tl) || tl.includes(cl)) && cb !== tl) {
+            myTeamMemberNames.push(bdm);
+          }
+        });
+      }
+    }
+
     // Build SQL Query conditions (Separated into Scope vs Table Filters)
     const scopeConditions = [];
     const scopeParams = [];
     let scopeParamIndex = 1;
 
-    // RBAC: If BDM and scope is 'my' (or default for BDM), strictly restrict to:
+    // RBAC: If BDM and scope is 'my' (or default for BDM):
     // 1. Their own leads (as BDM-1, BDM-2, or creator)
-    // 2. If user is an LMS Leader, also include team member leads where closerStatus is 'Lead Sharing' (NOT team member 'Self Closer' leads)
+    // 2. If user is an LMS Leader, include all team member leads from DB
     if (isBdmOnly || scope === 'my') {
-      const userFullName = (req.user.fullName || '').replace(/\s*\([^)]*\)/g, '').trim();
       const targetBdm = (!isBdmOnly && req.query.myBdmName && req.query.myBdmName.trim()) 
         ? req.query.myBdmName.trim() 
         : userFullName;
-      const matchedLeader = LEADERS_LIST.find((l) => {
-        const cl = l.toLowerCase().trim();
-        const cu = userFullName.toLowerCase().trim();
-        return cu.includes(cl) || cl.includes(cu);
-      });
-      const targetLeader = req.query.myLeaderName && req.query.myLeaderName.trim()
-        ? req.query.myLeaderName.trim()
-        : (matchedLeader || null);
 
       if (targetLeader) {
+        let teamMemberSql = '';
+        if (myTeamMemberNames.length > 0) {
+          const placeholders = myTeamMemberNames.map((_, i) => `$${scopeParamIndex + 3 + i}`).join(', ');
+          teamMemberSql = ` OR "bdmName1" IN (${placeholders}) OR "bdmName2" IN (${placeholders})`;
+        }
+
         scopeConditions.push(`(
           "bdmName1" ILIKE $${scopeParamIndex} 
           OR "bdmName2" ILIKE $${scopeParamIndex}
           OR ("createdById" = $${scopeParamIndex + 1} AND ("bdmName1" ILIKE $${scopeParamIndex} OR "bdmName1" = '' OR "bdmName1" IS NULL))
-          OR ("leaderName" ILIKE $${scopeParamIndex + 2} AND "closerStatus" ILIKE '%Lead Sharing%')
+          OR "leaderName" ILIKE $${scopeParamIndex + 2}${teamMemberSql}
         )`);
-        scopeParams.push(`%${targetBdm}%`, req.user.id, `%${targetLeader}%`);
-        scopeParamIndex += 3;
+        scopeParams.push(`%${targetBdm}%`, req.user.id, `%${targetLeader}%`, ...myTeamMemberNames);
+        scopeParamIndex += 3 + myTeamMemberNames.length;
       } else {
         // Regular BDM: strictly their own leads only
         scopeConditions.push(`(
@@ -476,13 +551,22 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
     MEETING_STATUS_LIST.forEach((s) => (analytics.byMeetingStatus[s] = 0));
     SOURCING_STATUS_LIST.forEach((s) => (analytics.bySourcingStatus[s] = 0));
     CLOSER_STATUS_LIST.forEach((s) => (analytics.byCloserStatus[s] = 0));
-    LEADERS_LIST.forEach((l) => (analytics.byLeader[l] = 0));
-    BDMS_LIST.forEach((b) => {
-      analytics.bdmFunnel[b] = { count: 0, totalValue: 0, hotValue: 0, warmValue: 0, lostValue: 0 };
+    const activeLeaders = activeLeadersList.length > 0 ? activeLeadersList : LEADERS_LIST;
+    const activeBdms = dbBdmsList.length > 0 ? dbBdmsList : BDMS_LIST;
+    activeLeaders.forEach((l) => {
+      analytics.byLeader[l] = 0;
+      if (!analytics.bdmFunnel[l]) {
+        analytics.bdmFunnel[l] = { count: 0, totalValue: 0, hotValue: 0, warmValue: 0, lostValue: 0 };
+      }
+    });
+    activeBdms.forEach((b) => {
+      if (!analytics.bdmFunnel[b]) {
+        analytics.bdmFunnel[b] = { count: 0, totalValue: 0, hotValue: 0, warmValue: 0, lostValue: 0 };
+      }
     });
 
     const userFullNameClean = (req.user.fullName || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
-    const targetLeaderClean = (req.query.myLeaderName || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+    const targetLeaderClean = (targetLeader || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
     const leaderKey = targetLeaderClean || userFullNameClean;
 
     let myDirectCount = 0;
@@ -491,6 +575,17 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
     let myDirectWarm = 0;
     const teamMembersMap = {};
     const activeSummaryRows = [];
+
+    // Initialize ONLY this leader's team members from DB in teamMembersMap
+    if (targetLeader) {
+      myTeamMemberNames.forEach((bdm) => {
+        teamMembersMap[bdm] = {
+          name: bdm,
+          salesTarget: dbBdmTargetMap[bdm] || BDM_TARGET_MAP[bdm] || 0,
+          leads: [],
+        };
+      });
+    }
 
     summaryRows.forEach((l) => {
       const val = l.dealValue ? parseFloat(l.dealValue) || 0 : 0;
@@ -535,6 +630,19 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
             (l.createdById === req.user.id && (!l.bdmName1 || bdm1Lower.includes(userFullNameClean) || userFullNameClean.includes(bdm1Lower)))
           );
 
+      // Check if lead belongs to a team member under this leader
+      const assignedLeader = (dbBdmLeaderMap[l.bdmName1] || BDM_LEADER_MAP[l.bdmName1] || '').toLowerCase().trim();
+      const isTeamLeadUnderMe = Boolean(
+        targetLeader &&
+        leaderKey &&
+        (
+          (leadLeaderLower.includes(leaderKey) || leaderKey.includes(leadLeaderLower)) ||
+          (assignedLeader && (assignedLeader.includes(leaderKey) || leaderKey.includes(assignedLeader))) ||
+          myTeamMemberNames.some((m) => m.toLowerCase() === bdm1Lower || m.toLowerCase() === bdm2Lower)
+        )
+      );
+      const isCountedInMyFunnel = isAdmin || isOwnLead || isTeamLeadUnderMe;
+
       // Monthly categorization (This Month vs Next Month)
       const effDate = l.nextFollowUpDate
         ? new Date(l.nextFollowUpDate)
@@ -546,7 +654,7 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       if (isThisMonth) {
         analytics.thisMonthCount++;
         analytics.thisMonthFunnel += val;
-        if (isOwnLead) {
+        if (isCountedInMyFunnel) {
           analytics.myThisMonthCount++;
           analytics.myThisMonthFunnel += val;
           if (rawCs === 'hot') analytics.myThisMonthHot += val;
@@ -555,7 +663,7 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       } else if (isNextMonth) {
         analytics.nextMonthCount++;
         analytics.nextMonthFunnel += val;
-        if (isOwnLead) {
+        if (isCountedInMyFunnel) {
           analytics.myNextMonthCount++;
           analytics.myNextMonthFunnel += val;
           if (rawCs === 'hot') analytics.myNextMonthHot += val;
@@ -698,7 +806,7 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
           }
         }
 
-        if (isOwnLead) {
+        if (isCountedInMyFunnel) {
           myDirectCount++;
           myDirectFunnel += val;
           if (rawCs === 'hot') myDirectHot += val;
@@ -706,20 +814,21 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
         }
       }
 
-      const isSharedWithMeAsLeader = !isOwnLead &&
-        (l.closerStatus || '').toLowerCase().includes('lead sharing') &&
-        leaderKey &&
-        (leadLeaderLower.includes(leaderKey) || leaderKey.includes(leadLeaderLower));
+      const isSharedWithMeAsLeader = !isOwnLead && isTeamLeadUnderMe;
 
       if (isSharedWithMeAsLeader) {
-        const memberName = (l.bdmName1 || 'Unknown Team Member').trim();
-        if (!teamMembersMap[memberName]) {
-          teamMembersMap[memberName] = {
-            name: memberName,
-            leads: [],
-          };
+        let memberName = (l.bdmName1 || '').trim();
+        if (!memberName || memberName.toLowerCase() === leaderKey || memberName === '-- None (Single BDM) --') {
+          memberName = (l.bdmName2 || '').trim();
         }
-        teamMembersMap[memberName].leads.push(l);
+        const cleanMemberName = memberName.toLowerCase();
+        const matchKey = Object.keys(teamMembersMap).find((k) => {
+          const kl = k.toLowerCase();
+          return kl === cleanMemberName || kl.includes(cleanMemberName) || cleanMemberName.includes(kl);
+        });
+        if (matchKey) {
+          teamMembersMap[matchKey].leads.push(l);
+        }
       }
     });
 
@@ -793,6 +902,7 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
 
       return {
         name: member.name,
+        salesTarget: member.salesTarget || dbBdmTargetMap[member.name] || BDM_TARGET_MAP[member.name] || 0,
         totalLeads: mLeads.length,
         activeLeads,
         hotCount,
@@ -807,37 +917,50 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       };
     });
 
+    teamMembersOverview.sort((a, b) => {
+      if ((b.totalFunnel || 0) !== (a.totalFunnel || 0)) {
+        return (b.totalFunnel || 0) - (a.totalFunnel || 0);
+      }
+      if ((b.totalLeads || 0) !== (a.totalLeads || 0)) {
+        return (b.totalLeads || 0) - (a.totalLeads || 0);
+      }
+      return a.name.localeCompare(b.name);
+    });
+
     analytics.myDirectFunnel = myDirectFunnel;
     analytics.myDirectHot = myDirectHot;
     analytics.myDirectWarm = myDirectWarm;
     analytics.myDirectCount = myDirectCount;
     analytics.teamMembersOverview = teamMembersOverview;
+    analytics.dbTeamMembers = myTeamMemberNames;
+    analytics.dbLeaderMap = dbBdmLeaderMap;
+    analytics.dbTargetMap = dbBdmTargetMap;
 
     // Compute comprehensive BDM & Leader performance cards for Admin and Executive Tracking
     const allBdmMap = {};
 
-    // 1. Initialize all known leaders and BDMs
-    LEADERS_LIST.forEach((ldr) => {
+    // 1. Initialize all known leaders and BDMs from DB
+    activeLeaders.forEach((ldr) => {
       if (!allBdmMap[ldr]) {
         allBdmMap[ldr] = {
           name: ldr,
           isLeader: true,
           leads: [],
-          leaderName: BDM_LEADER_MAP[ldr] || ldr,
-          salesTarget: BDM_TARGET_MAP[ldr] || 0,
+          leaderName: dbBdmLeaderMap[ldr] || BDM_LEADER_MAP[ldr] || ldr,
+          salesTarget: dbBdmTargetMap[ldr] || BDM_TARGET_MAP[ldr] || 0,
         };
       }
     });
 
-    BDMS_LIST.forEach((bdm) => {
-      const isLdr = LEADERS_LIST.some((l) => l.toLowerCase() === bdm.toLowerCase());
+    activeBdms.forEach((bdm) => {
+      const isLdr = activeLeaders.some((l) => l.toLowerCase() === bdm.toLowerCase());
       if (!allBdmMap[bdm]) {
         allBdmMap[bdm] = {
           name: bdm,
           isLeader: isLdr,
           leads: [],
-          leaderName: BDM_LEADER_MAP[bdm] || null,
-          salesTarget: BDM_TARGET_MAP[bdm] || 0,
+          leaderName: dbBdmLeaderMap[bdm] || BDM_LEADER_MAP[bdm] || null,
+          salesTarget: dbBdmTargetMap[bdm] || BDM_TARGET_MAP[bdm] || 0,
         };
       }
     });
