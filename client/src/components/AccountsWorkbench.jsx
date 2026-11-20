@@ -22,6 +22,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import api from '../lib/api';
+import { toast } from '../context/ToastContext';
 import DealFinancialMetrics, { calculateGst } from './DealFinancialMetrics';
 
 const COMMON_DISCREPANCY_REASONS = [
@@ -101,11 +102,11 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
         notes: approvalNotes,
         transactionRemark: transactionRemark.trim() || undefined,
       });
-      setFeedback({ type: 'success', message: `Deal ${selectedDeal.dealCode} approved and forwarded to Legal!` });
+      toast.success(`Deal ${selectedDeal.dealCode} approved and forwarded to Legal!`);
       await fetchAccountsQueue();
       onRefreshParent();
     } catch (err) {
-      setFeedback({ type: 'error', message: err.response?.data?.error || 'Approval failed.' });
+      toast.error(err.response?.data?.error || 'Approval failed.');
     } finally {
       setActionLoading(false);
     }
@@ -119,11 +120,11 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
       await api.patch(`/deals/${selectedDeal.id}/transaction-remark`, {
         transactionRemark,
       });
-      setFeedback({ type: 'success', message: 'Transaction remark updated successfully for accounts records!' });
+      toast.success('Transaction remark updated successfully for accounts records!');
       await fetchAccountsQueue();
       onRefreshParent?.();
     } catch (err) {
-      setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to update transaction remark.' });
+      toast.error(err.response?.data?.error || 'Failed to update transaction remark.');
     } finally {
       setSavingRemark(false);
     }
@@ -137,12 +138,12 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
       await api.patch(`/deals/${selectedDeal.id}/pan`, {
         panNumber: panInput.trim().toUpperCase(),
       });
-      setFeedback({ type: 'success', message: `Company PAN updated to ${panInput.trim().toUpperCase()}` });
+      toast.success(`Company PAN updated to ${panInput.trim().toUpperCase()}`);
       setIsEditingPan(false);
       await fetchAccountsQueue();
       onRefreshParent?.();
     } catch (err) {
-      setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to update PAN number.' });
+      toast.error(err.response?.data?.error || 'Failed to update PAN number.');
     } finally {
       setSavingPan(false);
     }
@@ -156,14 +157,15 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
         isVerified,
         deficiencyNotes: isVerified ? null : 'Flagged during accounts verification',
       });
-      setFeedback({
-        type: isVerified ? 'success' : 'warning',
-        message: isVerified ? 'Company PAN document verified by Accounts!' : 'PAN verification status updated.',
-      });
+      if (isVerified) {
+        toast.success('Company PAN document verified by Accounts!');
+      } else {
+        toast.warning('PAN verification status updated.');
+      }
       await fetchAccountsQueue();
       onRefreshParent?.();
     } catch (err) {
-      setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to verify PAN document.' });
+      toast.error(err.response?.data?.error || 'Failed to verify PAN document.');
     } finally {
       setVerifyingPan(false);
     }
@@ -178,12 +180,12 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
         action: 'REJECT',
         notes: discrepancyNote.trim(),
       });
-      setFeedback({ type: 'warning', message: `Deal ${selectedDeal.dealCode} returned to BDM for correction.` });
+      toast.warning(`Deal ${selectedDeal.dealCode} returned to BDM for correction.`);
       setDiscrepancyNote('');
       await fetchAccountsQueue();
       onRefreshParent();
     } catch (err) {
-      setFeedback({ type: 'error', message: err.response?.data?.error || 'Rejection failed.' });
+      toast.error(err.response?.data?.error || 'Rejection failed.');
     } finally {
       setActionLoading(false);
     }
@@ -199,15 +201,16 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
         action,
         notes: action === 'APPROVE' ? 'Balance payment verified in bank account.' : discrepancyNote.trim(),
       });
-      setFeedback({
-        type: action === 'APPROVE' ? 'success' : 'warning',
-        message: res.data.message || (action === 'APPROVE' ? 'Balance payment verified!' : 'Payment rejected.'),
-      });
+      if (action === 'APPROVE') {
+        toast.success(res.data.message || 'Balance payment verified!');
+      } else {
+        toast.warning('Payment rejected.');
+      }
       if (action === 'REJECT') setDiscrepancyNote('');
       await fetchAccountsQueue();
       onRefreshParent();
     } catch (err) {
-      setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to verify balance payment.' });
+      toast.error(err.response?.data?.error || 'Failed to verify balance payment.');
     } finally {
       setActionLoading(false);
     }
@@ -218,7 +221,7 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
       const res = await api.get(`/documents/${docId}/signed-url`);
       setPreviewDoc(res.data);
     } catch (err) {
-      alert('Failed to generate preview link: ' + (err.response?.data?.error || err.message));
+      toast.error('Failed to generate preview link: ' + (err.response?.data?.error || err.message));
     }
   };
 

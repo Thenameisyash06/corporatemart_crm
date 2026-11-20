@@ -11,6 +11,7 @@ import {
   Building,
 } from 'lucide-react';
 import api from '../lib/api';
+import { toast } from '../context/ToastContext';
 import { RECEIVING_ACCOUNTS, calculateGst } from './DealFinancialMetrics';
 
 const PAYMENT_MODES = [
@@ -51,23 +52,31 @@ export default function CollectBalanceModal({ deal, isOpen, onClose, onSuccess }
 
     const val = parseFloat(amount);
     if (isNaN(val) || val <= 0) {
-      setErrorMsg('Please enter a valid balance payment amount.');
+      const msg = 'Please enter a valid balance payment amount.';
+      setErrorMsg(msg);
+      toast.warning(msg);
       return;
     }
 
     if (val > currentPending) {
-      setErrorMsg(`Amount cannot exceed the pending balance of ₹${currentPending.toLocaleString('en-IN')}.`);
+      const msg = `Amount cannot exceed the pending balance of ₹${currentPending.toLocaleString('en-IN')}.`;
+      setErrorMsg(msg);
+      toast.warning(msg);
       return;
     }
 
     if (!file) {
-      setErrorMsg('Payment screenshot / proof is mandatory. Please attach the payment screenshot.');
+      const msg = 'Payment screenshot / proof is mandatory. Please attach the payment screenshot.';
+      setErrorMsg(msg);
+      toast.warning(msg);
       return;
     }
 
     if (isCash) {
       if (!cashCollectorName || !cashCollectorName.trim()) {
-        setErrorMsg('Please enter the name of the person who collected the cash payment.');
+        const msg = 'Please enter the name of the person who collected the cash payment.';
+        setErrorMsg(msg);
+        toast.warning(msg);
         return;
       }
     }
@@ -98,11 +107,14 @@ export default function CollectBalanceModal({ deal, isOpen, onClose, onSuccess }
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
+      toast.success('Balance payment recorded successfully! Sent to Accounts for verification.');
       if (onSuccess) onSuccess();
       onClose();
     } catch (err) {
       console.error('Collect balance error:', err);
-      setErrorMsg(err.response?.data?.error || 'Failed to submit balance payment.');
+      const msg = err.response?.data?.error || 'Failed to submit balance payment.';
+      setErrorMsg(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }

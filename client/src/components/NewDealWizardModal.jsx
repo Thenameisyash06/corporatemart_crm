@@ -15,6 +15,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import api from '../lib/api';
+import { toast } from '../context/ToastContext';
 import DealFinancialMetrics, { RECEIVING_ACCOUNTS } from './DealFinancialMetrics';
 
 import { CORPORATEMART_SERVICES_CATALOG, SERVICES_BY_CATEGORY } from '../constants/servicesCatalog';
@@ -329,23 +330,33 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
 
   const validateStep1 = () => {
     if (!form.companyName.trim()) {
-      setError('Company Name is required.');
+      const msg = 'Company Name is required.';
+      setError(msg);
+      toast.warning(msg);
       return false;
     }
     if (!form.clientName.trim()) {
-      setError('Primary Client Name is required.');
+      const msg = 'Primary Client Name is required.';
+      setError(msg);
+      toast.warning(msg);
       return false;
     }
     if (!form.clientEmail.trim()) {
-      setError('Client Email is required.');
+      const msg = 'Client Email is required.';
+      setError(msg);
+      toast.warning(msg);
       return false;
     }
     if (!form.clientPhone.trim()) {
-      setError('Client Phone Number is required.');
+      const msg = 'Client Phone Number is required.';
+      setError(msg);
+      toast.warning(msg);
       return false;
     }
     if (!form.panNumber.trim()) {
-      setError('Company PAN Number is mandatory.');
+      const msg = 'Company PAN Number is mandatory.';
+      setError(msg);
+      toast.warning(msg);
       return false;
     }
 
@@ -355,31 +366,39 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
 
   const validateStep2 = () => {
     if (totalVal <= 0) {
-      setError('Total Deal Amount must be greater than zero.');
+      const msg = 'Total Deal Amount must be greater than zero.';
+      setError(msg);
+      toast.warning(msg);
       return false;
     }
     if (receivedVal <= 0) {
-      setError('Amount received must be greater than zero.');
+      const msg = 'Amount received must be greater than zero.';
+      setError(msg);
+      toast.warning(msg);
       return false;
     }
     for (const s of form.services) {
       const std = parseFloat(s.standardAmount) || 0;
       const deal = parseFloat(s.dealAmount !== undefined ? s.dealAmount : s.serviceFee) || 0;
       if (std > 0 && deal > std) {
-        setError(
-          `Deal amount (₹${deal.toLocaleString('en-IN')}) cannot be greater than Standard Amount (₹${std.toLocaleString('en-IN')}) for "${s.serviceName}".`
-        );
+        const msg = `Deal amount (₹${deal.toLocaleString('en-IN')}) cannot be greater than Standard Amount (₹${std.toLocaleString('en-IN')}) for "${s.serviceName}".`;
+        setError(msg);
+        toast.warning(msg);
         return false;
       }
     }
     if (form.paymentMode === 'CASH') {
       if (!form.cashCollectorName || !form.cashCollectorName.trim()) {
-        setError('Please enter the name of the person who collected the cash.');
+        const msg = 'Please enter the name of the person who collected the cash.';
+        setError(msg);
+        toast.warning(msg);
         return false;
       }
     } else {
       if (!paymentProofFile) {
-        setError('Payment proof / screenshot is mandatory. Please attach the payment screenshot.');
+        const msg = 'Payment proof / screenshot is mandatory. Please attach the payment screenshot.';
+        setError(msg);
+        toast.warning(msg);
         return false;
       }
     }
@@ -458,6 +477,7 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
         });
       }
 
+      toast.success('New deal created successfully! Dispatched to Accounts Desk.');
       onSuccess(dealId);
       onClose();
     } catch (err) {
@@ -466,6 +486,7 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
         ? err.response.data.error
         : (err.response?.data?.message || err.message || 'Failed to submit deal.');
       setError(String(errMsg));
+      toast.error(String(errMsg));
     } finally {
       setSubmitting(false);
     }

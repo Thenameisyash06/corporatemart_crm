@@ -29,6 +29,7 @@ import {
   X,
 } from 'lucide-react';
 import api from '../lib/api';
+import { toast } from '../context/ToastContext';
 import DealFinancialMetrics from './DealFinancialMetrics';
 
 const COMMON_LEGAL_DEFICIENCIES = [
@@ -186,7 +187,7 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
       setSelectedDeal(res.data.deal);
       setDeals((prev) => prev.map((d) => (d.id === selectedDeal.id ? res.data.deal : d)));
     } catch (err) {
-      alert('Failed to update document status.');
+      toast.error('Failed to update document status.');
     }
   };
 
@@ -195,7 +196,7 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
       const res = await api.get(`/documents/${docId}/signed-url`);
       setPreviewDoc(res.data);
     } catch (err) {
-      alert('Failed to preview document.');
+      toast.error('Failed to preview document.');
     }
   };
 
