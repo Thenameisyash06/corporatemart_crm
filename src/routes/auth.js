@@ -24,15 +24,21 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials or inactive account.' });
     }
 
-    // In production with bcrypt hashes; allows plain matches for default seed during initial setup
-    const isPasswordValid = user.passwordHash === password;
+    // Support bcrypt hashes with fallback to direct match for initial seed data
+    let isPasswordValid = false;
+    if (user.passwordHash && (user.passwordHash.startsWith('$2a$') || user.passwordHash.startsWith('$2b$'))) {
+      const bcrypt = require('bcryptjs');
+      isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+    } else {
+      isPasswordValid = user.passwordHash === password;
+    }
 
     if (!isPasswordValid) {
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
 
     const token = jwt.sign(
-      { userId: user.id, role: user.role, email: user.email },
+      { userId: user.id, role: user.role, email: user.email, fullName: user.fullName },
       JWT_SECRET,
       { expiresIn: '30d' }
     );

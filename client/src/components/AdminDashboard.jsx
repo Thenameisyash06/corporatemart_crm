@@ -369,21 +369,20 @@ export default function AdminDashboard({
   const fetchAdminData = async () => {
     try {
       setLoading(true);
-      let overviewData = null;
-      let clientsData = [];
 
-      try {
-        const overviewRes = await api.get('/dashboard/admin-overview');
-        overviewData = overviewRes.data;
-      } catch (err) {
-        console.warn('admin-overview API error, falling back:', err);
-      }
+      // Parallelize admin overview, clients, and leads requests
+      const [overviewResult, clientsResult, leadsResult] = await Promise.allSettled([
+        api.get('/dashboard/admin-overview'),
+        api.get('/dashboard/clients'),
+        api.get('/leads'),
+      ]);
 
-      try {
-        const clientsRes = await api.get('/dashboard/clients');
-        clientsData = clientsRes.data.clients || [];
-      } catch (err) {
-        console.warn('clients API error:', err);
+      const overviewData = overviewResult.status === 'fulfilled' ? overviewResult.value.data : null;
+      const clientsData = clientsResult.status === 'fulfilled' ? clientsResult.value.data?.clients || [] : [];
+      
+      if (leadsResult.status === 'fulfilled' && leadsResult.value.data) {
+        setLmsCount((leadsResult.value.data.leads || []).length);
+        setLmsAnalytics(leadsResult.value.data.analytics || null);
       }
 
       // If backend returned complete overview, use it
@@ -422,11 +421,6 @@ export default function AdminDashboard({
         extractClientsFromDeals(initialDeals);
       }
     } finally {
-      try {
-        const leadsRes = await api.get('/leads');
-        setLmsCount((leadsRes.data.leads || []).length);
-        setLmsAnalytics(leadsRes.data.analytics || null);
-      } catch (err) {}
       setLoading(false);
     }
   };

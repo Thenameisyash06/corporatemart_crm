@@ -50,12 +50,21 @@ export default function App() {
   const [activeFilterId, setActiveFilterId] = useState('ALL');
   const [activeStageKey, setActiveStageKey] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [dealsPage, setDealsPage] = useState(1);
   const [dealsLimit, setDealsLimit] = useState(10);
   const [dealsPagination, setDealsPagination] = useState({ page: 1, limit: 10, total: 0, totalPages: 1 });
   const [previousCrmTab, setPreviousCrmTab] = useState('pipeline');
   const [isLeadAlertShowing, setIsLeadAlertShowing] = useState(false);
   const currentMode = activeTab === 'lms' ? 'LMS' : 'CRM';
+
+  // 350ms Debounce search input to prevent query hammering
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 350);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
 
   const handleSwitchMode = (targetMode) => {
     if (targetMode === 'LMS') {
@@ -147,8 +156,8 @@ export default function App() {
       if (activeStageKey) {
         params.stage = activeStageKey;
       }
-      if (searchQuery.trim()) {
-        params.search = searchQuery.trim();
+      if (debouncedSearchQuery.trim()) {
+        params.search = debouncedSearchQuery.trim();
       }
 
       const [statsRes, dealsRes] = await Promise.all([
@@ -213,13 +222,13 @@ export default function App() {
     };
   }, [currentUser]);
 
-  // Re-fetch deals when stage filter or search changes
+  // Re-fetch deals when stage filter or debounced search changes
   useEffect(() => {
     if (currentUser) {
       setDealsPage(1);
       fetchData(1, dealsLimit);
     }
-  }, [activeStageKey, searchQuery]);
+  }, [activeStageKey, debouncedSearchQuery]);
 
   const handleNavigateToLms = (lead) => {
     setActiveTab('lms');

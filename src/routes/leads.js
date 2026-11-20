@@ -198,7 +198,7 @@ function isBeforeToday(dateInput) {
 // -----------------------------------------------------------------------------
 // AUTOMATIC TABLE INITIALIZATION (PostgreSQL)
 // -----------------------------------------------------------------------------
-let tableReady = false;
+let tableReady = true; // Table schema is established via Prisma and DB migrations
 async function ensureLeadsTable() {
   if (tableReady) return;
   try {
