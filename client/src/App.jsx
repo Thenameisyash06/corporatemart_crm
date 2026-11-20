@@ -290,7 +290,7 @@ export default function App() {
   };
 
   const visibleTabs = getVisibleTabs();
-  const canCreateDeals = currentUser?.role === 'BDM' || currentUser?.role === 'ADMIN';
+  const canCreateDeals = currentUser?.role === 'BDM';
 
   // LOGIN SCREEN (if user logged out)
   if (!currentUser) {
@@ -415,67 +415,73 @@ export default function App() {
 
       {/* Main Container */}
       <main className="flex-1 px-4 sm:px-6 py-5 max-w-7xl mx-auto w-full space-y-5">
-        {/* WORKBENCH SEGMENTED CONTROL BAR */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between border-b border-slate-200 pb-3 gap-3">
-          <div className="flex flex-wrap items-center gap-1 bg-white p-1 rounded-xl border border-slate-200/90 shadow-xs">
-            {visibleTabs.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center space-x-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg text-xs sm:text-sm transition-all ${
-                    isActive
-                      ? 'bg-slate-900 text-white shadow-xs font-bold'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium'
-                  }`}
-                >
-                  <Icon className="w-4 h-4 shrink-0" />
-                  <span>{tab.label}</span>
-                  {tab.badge !== undefined && tab.badge > 0 && (
-                    <span
-                      className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold ${
-                        isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
-                      }`}
-                    >
-                      {tab.badge}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+        {/* WORKBENCH SEGMENTED CONTROL BAR (Hidden for Admin as Admin uses the Command Center Navigation) */}
+        {currentUser?.role !== 'ADMIN' && (
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between border-b border-slate-200 pb-3 gap-3">
+            <div className="flex flex-wrap items-center gap-1 bg-white p-1 rounded-xl border border-slate-200/90 shadow-xs">
+              {visibleTabs.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex items-center space-x-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg text-xs sm:text-sm transition-all ${
+                      isActive
+                        ? 'bg-slate-900 text-white shadow-xs font-bold'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium'
+                    }`}
+                  >
+                    <Icon className="w-4 h-4 shrink-0" />
+                    <span>{tab.label}</span>
+                    {tab.badge !== undefined && tab.badge > 0 && (
+                      <span
+                        className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold ${
+                          isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        {tab.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
 
-          {/* New Deal Entry Trigger: ONLY VISIBLE TO BDM & ADMIN */}
-          {canCreateDeals && (
-            <button
-              onClick={() => setIsNewDealOpen(true)}
-              className="h-10 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 shadow-xs transition-all self-stretch sm:self-auto justify-center"
-            >
-              <Plus className="w-4 h-4" />
-              <span>+ New Deal Entry (BDM Stage 01-03)</span>
-            </button>
-          )}
-        </div>
+            {/* New Deal Entry Trigger: ONLY VISIBLE TO BDM WHEN NOT ON LMS */}
+            {canCreateDeals && activeTab !== 'lms' && (
+              <button
+                onClick={() => setIsNewDealOpen(true)}
+                className="h-10 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 shadow-xs transition-all self-stretch sm:self-auto justify-center"
+              >
+                <Plus className="w-4 h-4" strokeWidth={3} />
+                <span>New Deal Entry (BDM Stage 01-03)</span>
+              </button>
+            )}
+          </div>
+        )}
 
         {/* 0. ADMIN COMMAND CENTER */}
-        {activeTab === 'admin' && currentUser?.role === 'ADMIN' && (
+        {currentUser?.role === 'ADMIN' && (
           <AdminDashboard
+            currentUser={currentUser}
             onOpenDossier={(id) => setSelectedDealId(id)}
             onRefreshParent={fetchData}
             initialDeals={deals}
             initialStats={stats}
+            stats={stats}
             onConvertToDeal={(leadData) => {
               setNewDealInitialData(leadData);
               setIsNewDealOpen(true);
             }}
+            onCollectBalance={(deal) => setBalanceModalDeal(deal)}
+            highlightLeadId={highlightLeadId}
           />
         )}
 
 
-        {/* LMS: LEAD MANAGEMENT SYSTEM (For BDM and ADMIN) */}
-        {activeTab === 'lms' && (currentUser?.role === 'BDM' || currentUser?.role === 'ADMIN') && (
+        {/* LMS: LEAD MANAGEMENT SYSTEM (For BDM) */}
+        {currentUser?.role !== 'ADMIN' && activeTab === 'lms' && currentUser?.role === 'BDM' && (
           <LeadManagementWorkbench
             currentUser={currentUser}
             highlightLeadId={highlightLeadId}
@@ -487,7 +493,7 @@ export default function App() {
         )}
 
         {/* 1. MASTER / MY DEALS PIPELINE VIEW */}
-        {activeTab === 'pipeline' && (
+        {currentUser?.role !== 'ADMIN' && activeTab === 'pipeline' && (
           <div className="space-y-4">
             <DashboardStats
               stats={stats}
@@ -536,8 +542,8 @@ export default function App() {
           </div>
         )}
 
-        {/* 2. ACCOUNTS WORKBENCH (Only Accounts & Admin) */}
-        {activeTab === 'accounts' && (currentUser?.role === 'ACCOUNTS' || currentUser?.role === 'ADMIN') && (
+        {/* 2. ACCOUNTS WORKBENCH (Only Accounts) */}
+        {currentUser?.role !== 'ADMIN' && activeTab === 'accounts' && currentUser?.role === 'ACCOUNTS' && (
           <AccountsWorkbench
             currentUser={currentUser}
             onRefreshParent={fetchData}
@@ -545,8 +551,8 @@ export default function App() {
           />
         )}
 
-        {/* 3. LEGAL WORKBENCH (Only Legal & Admin) */}
-        {activeTab === 'legal' && (currentUser?.role === 'LEGAL' || currentUser?.role === 'ADMIN') && (
+        {/* 3. LEGAL WORKBENCH (Only Legal) */}
+        {currentUser?.role !== 'ADMIN' && activeTab === 'legal' && currentUser?.role === 'LEGAL' && (
           <LegalWorkbench
             currentUser={currentUser}
             onRefreshParent={fetchData}
@@ -554,8 +560,8 @@ export default function App() {
           />
         )}
 
-        {/* 4. OPERATIONS WORKBENCH (Only Operations & Admin) */}
-        {activeTab === 'operations' && (currentUser?.role === 'OPERATIONS' || currentUser?.role === 'ADMIN') && (
+        {/* 4. OPERATIONS WORKBENCH (Only Operations) */}
+        {currentUser?.role !== 'ADMIN' && activeTab === 'operations' && currentUser?.role === 'OPERATIONS' && (
           <OperationsWorkbench
             currentUser={currentUser}
             onRefreshParent={fetchData}
@@ -563,8 +569,8 @@ export default function App() {
           />
         )}
 
-        {/* 5. RM WORKBENCH (Only RM & Admin) */}
-        {activeTab === 'rm' && (currentUser?.role === 'RM' || currentUser?.role === 'ADMIN') && (
+        {/* 5. RM WORKBENCH (Only RM) */}
+        {currentUser?.role !== 'ADMIN' && activeTab === 'rm' && currentUser?.role === 'RM' && (
           <RmWorkbench
             currentUser={currentUser}
             onRefreshParent={fetchData}

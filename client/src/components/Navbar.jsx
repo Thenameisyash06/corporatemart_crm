@@ -75,31 +75,6 @@ export default function Navbar({
           </div>
         </div>
 
-        {/* Center: Only ADMIN can see and use the Quick Role Switcher */}
-        {isAdmin && (
-          <div className="hidden lg:flex items-center bg-slate-100/90 p-1 rounded-xl border border-slate-200 space-x-1">
-            <span className="text-xs text-slate-500 px-2 flex items-center gap-1.5 font-semibold">
-              <Layers className="w-3.5 h-3.5 text-slate-400" /> Switcher:
-            </span>
-            {QUICK_ROLES.map((r) => {
-              const isActive = currentUser?.role === r.role;
-              return (
-                <button
-                  key={r.email}
-                  onClick={() => handleQuickSwitch(r)}
-                  disabled={switching || isActive}
-                  className={`text-xs px-2.5 py-1 rounded-lg font-semibold transition-all ${isActive
-                      ? 'bg-white text-slate-900 shadow-xs border border-slate-200/90 font-bold'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-                    }`}
-                >
-                  {r.label}
-                </button>
-              );
-            })}
-          </div>
-        )}
-
         {/* Operations Specialist Quick Switcher */}
         {currentUser?.role === 'OPERATIONS' && (
           <div className="hidden md:flex items-center bg-indigo-50/80 px-2.5 py-1 rounded-xl border border-indigo-200 gap-2 text-xs">

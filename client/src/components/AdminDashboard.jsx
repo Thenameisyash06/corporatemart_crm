@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import LeadManagementWorkbench from './LeadManagementWorkbench';
+import DashboardStats from './DashboardStats';
+import DealsTable from './DealsTable';
 import {
   TrendingUp,
   UserPlus,
@@ -28,6 +30,7 @@ import {
   X,
   ShieldCheck,
   Percent,
+  Layers,
 } from 'lucide-react';
 import api from '../lib/api';
 import {
@@ -312,7 +315,17 @@ function buildOverviewFromDeals(deals = [], users = [], stats = null) {
   };
 }
 
-export default function AdminDashboard({ onOpenDossier, onRefreshParent, onConvertToDeal, initialDeals = [], initialStats = null }) {
+export default function AdminDashboard({
+  currentUser,
+  onOpenDossier,
+  onRefreshParent,
+  onConvertToDeal,
+  initialDeals = [],
+  initialStats = null,
+  stats = null,
+  onCollectBalance,
+  highlightLeadId,
+}) {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(() => {
     if (initialDeals && initialDeals.length > 0) {
@@ -325,6 +338,18 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, onConve
   const [lmsCount, setLmsCount] = useState(0);
   const [lmsAnalytics, setLmsAnalytics] = useState(null);
   
+  // Master Pipeline tab filter & search
+  const [pipelineFilterId, setPipelineFilterId] = useState('ALL');
+  const [pipelineStageKey, setPipelineStageKey] = useState(null);
+  const [pipelineSearch, setPipelineSearch] = useState('');
+
+  // Switch to LMS subtab if a specific lead is highlighted
+  useEffect(() => {
+    if (highlightLeadId) {
+      setActiveSubTab('lms');
+    }
+  }, [highlightLeadId]);
+
   // Deals tab filter & search
   const [dealSearch, setDealSearch] = useState('');
   const [stageFilter, setStageFilter] = useState('ALL');
@@ -501,6 +526,49 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, onConve
     return true;
   });
 
+  // Filtered Deals for Master Pipeline tab
+  const pipelineFilteredDeals = allDeals.filter((d) => {
+    if (pipelineStageKey) {
+      if (pipelineStageKey === 'STAGE_08_FINAL_DOCS_DELIVERED') {
+        if (d.stage !== 'STAGE_08_FINAL_DOCS_DELIVERED' && d.stage !== 'STAGE_09_RM_HANDOVER') {
+          return false;
+        }
+      } else if (d.stage !== pipelineStageKey) {
+        return false;
+      }
+    }
+    if (pipelineSearch.trim()) {
+      const q = pipelineSearch.toLowerCase().trim();
+      const code = (d.dealCode || '').toLowerCase();
+      const company = (d.client?.companyName || '').toLowerCase();
+      const client = (d.client?.clientName || '').toLowerCase();
+      const bdmName = (d.bdm?.fullName || '').toLowerCase();
+      return code.includes(q) || company.includes(q) || client.includes(q) || bdmName.includes(q);
+    }
+    return true;
+  });
+
+  const currentStats = stats || initialStats || {
+    counts: {
+      totalDeals: allDeals.length,
+      pendingBdmHandover: 0,
+      pendingAccounts: allDeals.filter((d) => d.stage === 'STAGE_04_ACCOUNTS_VERIFICATION').length,
+      accountsRejected: allDeals.filter((d) => d.stage === 'STAGE_04_ACCOUNTS_REJECTED').length,
+      pendingLegal: allDeals.filter((d) => d.stage === 'STAGE_05_LEGAL_VERIFICATION').length,
+      legalRejected: allDeals.filter((d) => d.stage === 'STAGE_05_LEGAL_REJECTED').length,
+      inOperations: allDeals.filter((d) => d.stage === 'STAGE_06_OPERATIONS_PROCESSING').length,
+      completedServices: allDeals.filter((d) => d.stage === 'STAGE_07_SERVICE_COMPLETED').length,
+      pendingRmHandover: allDeals.filter((d) => d.stage === 'STAGE_08_FINAL_DOCS_DELIVERED' || d.stage === 'STAGE_09_RM_HANDOVER').length,
+      closedDeals: allDeals.filter((d) => d.stage === 'CLOSED').length,
+      pendingBalanceVerifications: 0,
+    },
+    financials: {
+      totalDealValue: summary.totalRevenue || 0,
+      totalCollected: summary.totalCollected || 0,
+      totalPending: summary.totalPending || 0,
+    },
+  };
+
   // Filtered Clients
   const filteredClients = clients.filter((c) => {
     if (!clientSearch.trim()) return true;
@@ -676,6 +744,7 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, onConve
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-3">
         {[
           { id: 'deals', label: 'Deals Monitor', icon: Briefcase, count: allDeals.length },
+          { id: 'pipeline', label: 'Master Pipeline', icon: Layers, count: (currentStats?.counts?.totalDeals || allDeals.length) },
           { id: 'lms', label: 'Lead Management (LMS)', icon: UserPlus, count: lmsCount },
           { id: 'bdm', label: 'BDM Team', icon: TrendingUp, count: bdmPerformance.length },
           { id: 'accounts', label: 'Accounts Desk', icon: CreditCard, count: accountsPerformance.length },
@@ -712,7 +781,50 @@ export default function AdminDashboard({ onOpenDossier, onRefreshParent, onConve
 
       {/* 4. VIEW CONTENT */}
 
-      
+      {/* -------------------- TAB: MASTER PIPELINE -------------------- */}
+      {activeSubTab === 'pipeline' && (
+        <div className="space-y-4">
+          <DashboardStats
+            stats={currentStats}
+            activeFilter={pipelineFilterId}
+            onSelectFilter={(filterId, stageKey) => {
+              setPipelineFilterId(filterId);
+              setPipelineStageKey(stageKey || null);
+            }}
+            currentUser={currentUser || { role: 'ADMIN' }}
+            onRefreshStats={() => {
+              fetchAdminData();
+              if (onRefreshParent) onRefreshParent();
+            }}
+          />
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-xl border border-slate-200 shadow-xs">
+            <div className="relative w-full sm:w-96">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Search company, client name, or deal code..."
+                value={pipelineSearch}
+                onChange={(e) => setPipelineSearch(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800 transition-colors"
+              />
+            </div>
+
+            <div className="text-xs sm:text-sm text-slate-500 font-medium self-end sm:self-auto">
+              Showing <strong className="text-slate-900 font-bold font-mono tabular-nums">{pipelineFilteredDeals.length}</strong> active deals
+            </div>
+          </div>
+
+          <DealsTable
+            deals={pipelineFilteredDeals}
+            loading={loading}
+            currentUser={currentUser || { role: 'ADMIN' }}
+            onSelectDeal={(id) => onOpenDossier(id)}
+            onCollectBalance={onCollectBalance}
+          />
+        </div>
+      )}
+
       {/* -------------------- TAB: LEAD MANAGEMENT SYSTEM (LMS) -------------------- */}
       {activeSubTab === 'lms' && (
         <LeadManagementWorkbench
