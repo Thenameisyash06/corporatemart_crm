@@ -503,6 +503,42 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     }
   }, [isAdmin, loggedInBdmName, isLeader, matchedLeaderName]);
 
+  // Real-time check for duplicate phone number in form
+  const duplicatePhoneLead = useMemo(() => {
+    const p = (form.mobileNo || '').trim();
+    if (p.length !== 10) return null;
+    return leads.find((l) => (l.mobileNo || '').trim() === p) || null;
+  }, [form.mobileNo, leads]);
+
+  // Duplicate Phone Number Popup State (shows for 2 seconds with Cancel option)
+  const [duplicatePhonePopup, setDuplicatePhonePopup] = useState(null);
+  const duplicatePhoneTimerRef = useRef(null);
+
+  const showDuplicatePhonePopup = useCallback((detail = '') => {
+    if (duplicatePhoneTimerRef.current) {
+      clearTimeout(duplicatePhoneTimerRef.current);
+    }
+    setDuplicatePhonePopup({ detail });
+    duplicatePhoneTimerRef.current = setTimeout(() => {
+      setDuplicatePhonePopup(null);
+    }, 4000);
+  }, []);
+
+  const closeDuplicatePhonePopup = useCallback(() => {
+    if (duplicatePhoneTimerRef.current) {
+      clearTimeout(duplicatePhoneTimerRef.current);
+    }
+    setDuplicatePhonePopup(null);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (duplicatePhoneTimerRef.current) {
+        clearTimeout(duplicatePhoneTimerRef.current);
+      }
+    };
+  }, []);
+
   // Filters State
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLeaderFilter, setSelectedLeaderFilter] = useState('ALL');
@@ -1398,6 +1434,12 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       });
       return;
     }
+    if (duplicatePhoneLead) {
+      showDuplicatePhonePopup(
+        `This mobile number is already registered for "${duplicatePhoneLead.companyName}".`
+      );
+      return;
+    }
     if (!quotationFile) {
       setFeedback({ type: 'error', message: 'Quotation file is mandatory! Please upload a PDF or Word quotation document.' });
       setFileError('Quotation document (PDF or Word) is mandatory.');
@@ -1471,7 +1513,16 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       fetchLeads();
       window.dispatchEvent(new Event('lms_leads_changed'));
     } catch (err) {
-      setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to create lead.' });
+      const errMsg = err.response?.data?.error || err.message || 'Failed to create lead.';
+      if (
+        errMsg.toLowerCase().includes('already exists') ||
+        errMsg.toLowerCase().includes('phone number') ||
+        errMsg.toLowerCase().includes('mobile number')
+      ) {
+        showDuplicatePhonePopup(errMsg);
+      } else {
+        setFeedback({ type: 'error', message: errMsg });
+      }
     } finally {
       setSubmitting(false);
     }
@@ -1674,8 +1725,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
           <button
             onClick={() => setShowBdmLeaderboard(!showBdmLeaderboard)}
             className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition border ${showBdmLeaderboard
-                ? 'bg-indigo-900 text-white border-indigo-900 shadow-xs'
-                : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'
+              ? 'bg-indigo-900 text-white border-indigo-900 shadow-xs'
+              : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'
               }`}
           >
             <Award className="w-3.5 h-3.5" />
@@ -1708,8 +1759,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       {feedback && (
         <div
           className={`p-3 rounded-xl text-xs flex items-center justify-between border ${feedback.type === 'success'
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-              : 'bg-rose-50 border-rose-200 text-rose-800'
+            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+            : 'bg-rose-50 border-rose-200 text-rose-800'
             }`}
         >
           <span>{typeof feedback.message === 'object' ? feedback.message?.message || JSON.stringify(feedback.message) : String(feedback.message || '')}</span>
@@ -1826,8 +1877,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
           <div
             onClick={() => setPendingFollowUpFilter((prev) => !prev)}
             className={`p-3.5 rounded-xl border shadow-xs transition cursor-pointer ${pendingFollowUpFilter
-                ? 'bg-rose-100/80 border-rose-400 ring-2 ring-rose-400'
-                : 'bg-white hover:bg-rose-50/50 border-slate-200 hover:border-rose-300'
+              ? 'bg-rose-100/80 border-rose-400 ring-2 ring-rose-400'
+              : 'bg-white hover:bg-rose-50/50 border-slate-200 hover:border-rose-300'
               }`}
             title="Click to view leads whose follow-up date exceeded current date"
           >
@@ -1905,8 +1956,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 type="button"
                 onClick={() => setAdminCockpitTab('ALL')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap cursor-pointer border ${adminCockpitTab === 'ALL'
-                    ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
-                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
+                  ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
                   }`}
               >
                 All ({adminBdmCards.length})
@@ -1915,8 +1966,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 type="button"
                 onClick={() => setAdminCockpitTab('LEADERS')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap cursor-pointer border flex items-center gap-1.5 ${adminCockpitTab === 'LEADERS'
-                    ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
-                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
+                  ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
                   }`}
               >
                 <span>Team Leaders</span>
@@ -1929,8 +1980,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 type="button"
                 onClick={() => setAdminCockpitTab('MEMBERS')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap cursor-pointer border flex items-center gap-1.5 ${adminCockpitTab === 'MEMBERS'
-                    ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
-                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
+                  ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
                   }`}
               >
                 <span>BDM Members</span>
@@ -1946,8 +1997,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                   setAdminCockpitSort('OVERDUE_DESC');
                 }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap cursor-pointer border flex items-center gap-1.5 ${adminCockpitTab === 'PENDING_FOLLOWUPS'
-                    ? 'bg-rose-700 text-white border-rose-700 shadow-xs'
-                    : 'bg-white text-rose-700 border-rose-200 hover:bg-rose-50'
+                  ? 'bg-rose-700 text-white border-rose-700 shadow-xs'
+                  : 'bg-white text-rose-700 border-rose-200 hover:bg-rose-50'
                   }`}
               >
                 <AlertTriangle className="w-3.5 h-3.5" />
@@ -1961,8 +2012,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 type="button"
                 onClick={() => setAdminCockpitTab('ACTIVE_ONLY')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap cursor-pointer border flex items-center gap-1.5 ${adminCockpitTab === 'ACTIVE_ONLY'
-                    ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
-                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
+                  ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
                   }`}
               >
                 <span>Active Pipeline</span>
@@ -2056,8 +2107,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                     key={member.name}
                     onClick={() => setSelectedBdmDetailModal(member)}
                     className={`bg-white border rounded-xl p-4 transition shadow-2xs flex flex-col justify-between gap-3 cursor-pointer group ${isSelected
-                        ? 'border-slate-900 ring-2 ring-slate-900/10 bg-slate-50/30'
-                        : 'border-slate-200 hover:border-slate-400 hover:shadow-xs'
+                      ? 'border-slate-900 ring-2 ring-slate-900/10 bg-slate-50/30'
+                      : 'border-slate-200 hover:border-slate-400 hover:shadow-xs'
                       }`}
                   >
                     <div>
@@ -2066,8 +2117,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                         <div className="flex items-center gap-2.5">
                           <div
                             className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${member.isLeader
-                                ? 'bg-slate-900 text-white'
-                                : 'bg-slate-100 text-slate-700 border border-slate-200'
+                              ? 'bg-slate-900 text-white'
+                              : 'bg-slate-100 text-slate-700 border border-slate-200'
                               }`}
                           >
                             {memberInitials}
@@ -2287,8 +2338,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                           }
                         }}
                         className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-1 cursor-pointer ${isSelected
-                            ? 'bg-slate-900 text-white hover:bg-slate-800 shadow-xs'
-                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                          ? 'bg-slate-900 text-white hover:bg-slate-800 shadow-xs'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
                           }`}
                         title="Filter table below to this person's leads"
                       >
@@ -2609,12 +2660,12 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                         type="button"
                         onClick={() => setForm({ ...form, clientStatus: cs.id })}
                         className={`py-2 px-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${active
-                            ? cs.id === 'Hot'
-                              ? 'bg-rose-600 text-white shadow-xs'
-                              : cs.id === 'Warm'
-                                ? 'bg-amber-500 text-white shadow-xs'
-                                : 'bg-slate-700 text-white shadow-xs'
-                            : 'text-slate-600 hover:bg-white hover:text-slate-900'
+                          ? cs.id === 'Hot'
+                            ? 'bg-rose-600 text-white shadow-xs'
+                            : cs.id === 'Warm'
+                              ? 'bg-amber-500 text-white shadow-xs'
+                              : 'bg-slate-700 text-white shadow-xs'
+                          : 'text-slate-600 hover:bg-white hover:text-slate-900'
                           }`}
                         title={cs.description}
                       >
@@ -2784,8 +2835,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 <div className="bg-white border border-slate-200 rounded-lg p-3 flex items-center justify-between shadow-xs">
                   <div className="flex items-center gap-3">
                     <span className={`p-2.5 rounded-lg border ${quotationFile.name.toLowerCase().endsWith('.pdf')
-                        ? 'bg-rose-50 text-rose-600 border-rose-200'
-                        : 'bg-blue-50 text-blue-600 border-blue-200'
+                      ? 'bg-rose-50 text-rose-600 border-rose-200'
+                      : 'bg-blue-50 text-blue-600 border-blue-200'
                       }`}>
                       <FileText className="w-5 h-5" />
                     </span>
@@ -2793,8 +2844,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                       <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
                         <span className="truncate max-w-xs">{quotationFile.name}</span>
                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${quotationFile.name.toLowerCase().endsWith('.pdf')
-                            ? 'bg-rose-100 text-rose-700'
-                            : 'bg-blue-100 text-blue-700'
+                          ? 'bg-rose-100 text-rose-700'
+                          : 'bg-blue-100 text-blue-700'
                           }`}>
                           {quotationFile.name.split('.').pop()}
                         </span>
@@ -3048,8 +3099,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                   <div
                     key={member.name}
                     className={`bg-white border rounded-xl p-4 transition shadow-2xs flex flex-col justify-between gap-3 ${isSelected
-                        ? 'border-slate-900 ring-2 ring-slate-900/10 bg-slate-50/30'
-                        : 'border-slate-200 hover:border-slate-400 hover:shadow-xs'
+                      ? 'border-slate-900 ring-2 ring-slate-900/10 bg-slate-50/30'
+                      : 'border-slate-200 hover:border-slate-400 hover:shadow-xs'
                       }`}
                   >
                     <div>
@@ -3237,8 +3288,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                           }
                         }}
                         className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-1 cursor-pointer ${isSelected
-                            ? 'bg-slate-900 text-white hover:bg-slate-800 shadow-xs'
-                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                          ? 'bg-slate-900 text-white hover:bg-slate-800 shadow-xs'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
                           }`}
                         title="Filter table below to this person's leads"
                       >
@@ -3278,8 +3329,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
               type="button"
               onClick={() => { setSelectedMonthFilter('THIS_MONTH'); setPage(1); fetchLeads(1, limit, 'THIS_MONTH'); }}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer border ${selectedMonthFilter === 'THIS_MONTH'
-                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                  : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-indigo-50 hover:text-indigo-700'
+                ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-indigo-50 hover:text-indigo-700'
                 }`}
             >
               <span>📅 This Month ({monthLabels.thisMonth})</span>
@@ -3297,8 +3348,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
               type="button"
               onClick={() => { setSelectedMonthFilter('NEXT_MONTH'); setPage(1); fetchLeads(1, limit, 'NEXT_MONTH'); }}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer border ${selectedMonthFilter === 'NEXT_MONTH'
-                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                  : 'bg-emerald-50/60 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                : 'bg-emerald-50/60 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
                 }`}
             >
               <span>🚀 Next Month ({monthLabels.nextMonth})</span>
@@ -3319,8 +3370,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 setPage(1);
               }}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer border ${selectedMonthFilter === 'PENDING_FOLLOWUPS'
-                  ? 'bg-rose-700 text-white border-rose-700 shadow-xs'
-                  : 'bg-rose-50/60 text-rose-800 border-rose-200 hover:bg-rose-100'
+                ? 'bg-rose-700 text-white border-rose-700 shadow-xs'
+                : 'bg-rose-50/60 text-rose-800 border-rose-200 hover:bg-rose-100'
                 }`}
             >
               <AlertTriangle className="w-3.5 h-3.5" />
@@ -3461,8 +3512,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                               type="button"
                               onClick={() => toggleLeadExpand(lead.id)}
                               className={`mt-0.5 w-5 h-5 flex items-center justify-center rounded transition-all shrink-0 cursor-pointer ${isExpanded
-                                  ? 'bg-slate-900 text-white rotate-90'
-                                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-900'
+                                ? 'bg-slate-900 text-white rotate-90'
+                                : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-900'
                                 }`}
                               title={isExpanded ? 'Click to hide details' : 'Click to view more information'}
                             >
@@ -3658,8 +3709,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                                 }}
                                 title="Revoke & Reassign Lead to another BDM"
                                 className={`px-2 py-1 rounded text-[11px] font-bold transition shadow-2xs flex items-center gap-0.5 cursor-pointer ${getLeadOverdueInfo(lead).isOverdue
-                                    ? 'bg-rose-700 hover:bg-rose-800 text-white ring-1 ring-rose-400'
-                                    : 'bg-slate-800 hover:bg-slate-900 text-white'
+                                  ? 'bg-rose-700 hover:bg-rose-800 text-white ring-1 ring-rose-400'
+                                  : 'bg-slate-800 hover:bg-slate-900 text-white'
                                   }`}
                               >
                                 <ArrowRightLeft className="w-2.5 h-2.5" />
@@ -3846,12 +3897,12 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                                         </div>
                                         <span
                                           className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold border ${fu.status === 'Hot'
-                                              ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                              : fu.status === 'Warm'
-                                                ? 'bg-amber-50 text-amber-800 border-amber-200'
-                                                : fu.status === 'Closed'
-                                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                                  : 'bg-slate-100 text-slate-600 border-slate-300'
+                                            ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                            : fu.status === 'Warm'
+                                              ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                              : fu.status === 'Closed'
+                                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                                : 'bg-slate-100 text-slate-600 border-slate-300'
                                             }`}
                                         >
                                           {fu.status}
@@ -3979,8 +4030,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                           fetchLeads(p, limit);
                         }}
                         className={`w-7 h-7 rounded-lg font-semibold transition cursor-pointer ${p === pagination.page
-                            ? 'bg-slate-900 text-white shadow-xs'
-                            : 'text-slate-600 hover:bg-slate-100'
+                          ? 'bg-slate-900 text-white shadow-xs'
+                          : 'text-slate-600 hover:bg-slate-100'
                           }`}
                       >
                         {p}
@@ -4086,14 +4137,14 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                         type="button"
                         onClick={() => setFollowUpForm({ ...followUpForm, status: st.id })}
                         className={`p-2.5 rounded-xl border text-left transition flex items-center justify-between cursor-pointer ${active
-                            ? st.id === 'Hot'
-                              ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
-                              : st.id === 'Warm'
-                                ? 'bg-amber-500 text-white border-amber-500 shadow-xs'
-                                : st.id === 'Closed'
-                                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                                  : 'bg-slate-700 text-white border-slate-700 shadow-xs'
-                            : `${st.color} hover:border-slate-400`
+                          ? st.id === 'Hot'
+                            ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
+                            : st.id === 'Warm'
+                              ? 'bg-amber-500 text-white border-amber-500 shadow-xs'
+                              : st.id === 'Closed'
+                                ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                                : 'bg-slate-700 text-white border-slate-700 shadow-xs'
+                          : `${st.color} hover:border-slate-400`
                           }`}
                       >
                         <div>
@@ -4354,8 +4405,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 type="button"
                 onClick={() => setBdmDetailModalTab('LEADS')}
                 className={`pb-2.5 px-3 text-xs font-semibold border-b-2 transition cursor-pointer flex items-center gap-1.5 ${bdmDetailModalTab === 'LEADS'
-                    ? 'border-slate-900 text-slate-900 font-bold'
-                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                  ? 'border-slate-900 text-slate-900 font-bold'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
                   }`}
               >
                 <Briefcase className="w-3.5 h-3.5" />
@@ -4365,8 +4416,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 type="button"
                 onClick={() => setBdmDetailModalTab('FOLLOWUPS')}
                 className={`pb-2.5 px-3 text-xs font-semibold border-b-2 transition cursor-pointer flex items-center gap-1.5 ${bdmDetailModalTab === 'FOLLOWUPS'
-                    ? 'border-slate-900 text-slate-900 font-bold'
-                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                  ? 'border-slate-900 text-slate-900 font-bold'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
                   }`}
               >
                 <Clock className="w-3.5 h-3.5" />
@@ -4376,8 +4427,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 type="button"
                 onClick={() => setBdmDetailModalTab('METRICS')}
                 className={`pb-2.5 px-3 text-xs font-semibold border-b-2 transition cursor-pointer flex items-center gap-1.5 ${bdmDetailModalTab === 'METRICS'
-                    ? 'border-slate-900 text-slate-900 font-bold'
-                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                  ? 'border-slate-900 text-slate-900 font-bold'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
                   }`}
               >
                 <Award className="w-3.5 h-3.5" />
@@ -4957,6 +5008,45 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* DUPLICATE PHONE NUMBER POPUP (Shows for 2 seconds with Cancel option) */}
+      {duplicatePhonePopup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-rose-200 text-center space-y-3.5 relative">
+            <button
+              type="button"
+              onClick={closeDuplicatePhonePopup}
+              className="absolute top-3.5 right-3.5 text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+              title="Close"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto shadow-xs">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">
+                This number already exists
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                {duplicatePhonePopup.detail || 'This phone number is already registered in LMS. Phone numbers must be unique.'}
+              </p>
+            </div>
+
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={closeDuplicatePhonePopup}
+                className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

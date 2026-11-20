@@ -306,6 +306,14 @@ async function ensureLeadsTable() {
       // Index might already exist
     }
 
+    try {
+      await prisma.$executeRawUnsafe(`
+        CREATE UNIQUE INDEX IF NOT EXISTS "idx_leads_mobile_no_unique" ON "leads"("mobileNo")
+      `);
+    } catch (e) {
+      // Index might already exist
+    }
+
     tableReady = true;
   } catch (err) {
     console.error('[LMS] Warning: Could not ensure leads table via raw SQL:', err.message);
@@ -845,7 +853,7 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       if (bdm2 && bdm2 !== '-- None (Single BDM) --' && bdm2.toLowerCase() !== bdm1.toLowerCase()) namesToAssign.add(bdm2);
 
       namesToAssign.forEach((name) => {
-        const isLdr = LMS_LEADERS_LIST.some((l) => l.toLowerCase() === name.toLowerCase());
+        const isLdr = LEADERS_LIST.some((l) => l.toLowerCase() === name.toLowerCase());
         if (!allBdmMap[name]) {
           allBdmMap[name] = { name, isLeader: isLdr, leads: [], leaderName: ldr || null };
         }
@@ -1108,14 +1116,14 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
       });
     }
 
-    // Duplicate check by mobile number
-    const [existingPhoneLead] = await prisma.$queryRawUnsafe(
+    // Duplicate check by mobile number (Phone numbers must be strictly unique in LMS)
+    const existingPhoneLeads = await prisma.$queryRawUnsafe(
       `SELECT "id", "companyName" FROM "leads" WHERE "mobileNo" = $1 LIMIT 1`,
       cleanPhone
     );
-    if (existingPhoneLead) {
+    if (existingPhoneLeads && existingPhoneLeads.length > 0) {
       return res.status(400).json({
-        error: `A lead with phone number ${cleanPhone} already exists (${existingPhoneLead.companyName}).`,
+        error: `A lead with mobile number ${cleanPhone} already exists (${existingPhoneLeads[0].companyName}). Phone numbers must be unique in LMS.`,
       });
     }
 
@@ -1241,6 +1249,9 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
       lead: created,
     });
   } catch (error) {
+    if (error.code === '23505' || error.code === 'P2002' || (error.message && error.message.includes('unique'))) {
+      return res.status(400).json({ error: 'A lead with this mobile number already exists. Phone numbers must be unique in LMS.' });
+    }
     console.error('[LMS] Create lead error:', error);
     return res.status(500).json({ error: error.message || 'Failed to create lead.' });
   }
@@ -1370,6 +1381,16 @@ router.patch('/:id', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req
           error: 'Invalid mobile number. Must be exactly 10 digits without symbols, spaces, or country code (starting with 6-9).',
         });
       }
+      const existingPhoneLeads = await prisma.$queryRawUnsafe(
+        `SELECT "id", "companyName" FROM "leads" WHERE "mobileNo" = $1 AND "id" != $2 LIMIT 1`,
+        cleanPhone,
+        id
+      );
+      if (existingPhoneLeads && existingPhoneLeads.length > 0) {
+        return res.status(400).json({
+          error: `A lead with mobile number ${cleanPhone} already exists (${existingPhoneLeads[0].companyName}). Phone numbers must be unique in LMS.`,
+        });
+      }
       updates.push(`"mobileNo" = $${pIdx++}`);
       params.push(cleanPhone);
     }
@@ -1456,6 +1477,9 @@ router.patch('/:id', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req
       lead: updated,
     });
   } catch (error) {
+    if (error.code === '23505' || error.code === 'P2002' || (error.message && error.message.includes('unique'))) {
+      return res.status(400).json({ error: 'A lead with this mobile number already exists. Phone numbers must be unique in LMS.' });
+    }
     console.error('[LMS] Update lead error:', error);
     return res.status(500).json({ error: 'Failed to update lead: ' + error.message });
   }

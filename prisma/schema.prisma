@@ -381,7 +381,7 @@ model Lead {
   id                   String    @id @default(uuid())
   companyName          String
   directorName         String?
-  mobileNo             String
+  mobileNo             String    @unique
   emailId              String?
   leaderName           String
   bdmName1             String

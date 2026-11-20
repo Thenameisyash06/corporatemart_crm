@@ -85,7 +85,7 @@ export default function Navbar({
               const isActive = currentUser?.role === r.role;
               return (
                 <button
-                  key={r.role}
+                  key={r.email}
                   onClick={() => handleQuickSwitch(r)}
                   disabled={switching || isActive}
                   className={`text-xs px-2.5 py-1 rounded-lg font-semibold transition-all ${isActive
