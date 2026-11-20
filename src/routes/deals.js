@@ -11,13 +11,40 @@ const upload = multer({
 });
 
 /**
- * Generate human-friendly Deal Code: CM-2026-0001
+ * Generate human-friendly Deal Code: CM-2026-0001 (Collision-safe)
  */
 async function generateDealCode() {
   const currentYear = new Date().getFullYear();
-  const count = await prisma.deal.count();
-  const sequence = String(count + 1).padStart(4, '0');
-  return `CM-${currentYear}-${sequence}`;
+  const prefix = `CM-${currentYear}-`;
+
+  // Find the highest existing deal sequence for the current year
+  const latestDeal = await prisma.deal.findFirst({
+    where: { dealCode: { startsWith: prefix } },
+    orderBy: { dealCode: 'desc' },
+    select: { dealCode: true },
+  });
+
+  let nextSeq = 1;
+  if (latestDeal && latestDeal.dealCode) {
+    const parts = latestDeal.dealCode.split('-');
+    const lastNum = parseInt(parts[parts.length - 1], 10);
+    if (!isNaN(lastNum)) {
+      nextSeq = lastNum + 1;
+    }
+  }
+
+  // Ensure collision safety in case of concurrent creations or deleted records
+  while (true) {
+    const candidate = `${prefix}${String(nextSeq).padStart(4, '0')}`;
+    const exists = await prisma.deal.findUnique({
+      where: { dealCode: candidate },
+      select: { id: true },
+    });
+    if (!exists) {
+      return candidate;
+    }
+    nextSeq++;
+  }
 }
 
 /**
