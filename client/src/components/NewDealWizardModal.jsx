@@ -79,11 +79,14 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
               serviceName: DEFAULT_SERVICES[0].name,
               standardAmount: DEFAULT_SERVICES[0].standardAmount,
               dealAmount: DEFAULT_SERVICES[0].standardAmount,
-              govtFee: DEFAULT_SERVICES[0].govtFee,
+              gstAmount: Math.round((parseFloat(DEFAULT_SERVICES[0].standardAmount) || 0) * 0.18),
             },
           ],
           standardAmount: DEFAULT_SERVICES[0].standardAmount,
-          totalAmount: DEFAULT_SERVICES[0].standardAmount,
+          totalAmount: String(
+            (parseFloat(DEFAULT_SERVICES[0].standardAmount) || 0) +
+            Math.round((parseFloat(DEFAULT_SERVICES[0].standardAmount) || 0) * 0.18)
+          ),
           amountReceived: '10000',
           paymentType: 'PART_PAYMENT',
           paymentMode: 'UPI',
@@ -129,12 +132,15 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
         serviceName: DEFAULT_SERVICES[0].name,
         standardAmount: DEFAULT_SERVICES[0].standardAmount,
         dealAmount: DEFAULT_SERVICES[0].standardAmount,
-        govtFee: DEFAULT_SERVICES[0].govtFee,
+        gstAmount: Math.round((parseFloat(DEFAULT_SERVICES[0].standardAmount) || 0) * 0.18),
       },
     ],
 
     standardAmount: DEFAULT_SERVICES[0].standardAmount,
-    totalAmount: DEFAULT_SERVICES[0].standardAmount,
+    totalAmount: String(
+      (parseFloat(DEFAULT_SERVICES[0].standardAmount) || 0) +
+      Math.round((parseFloat(DEFAULT_SERVICES[0].standardAmount) || 0) * 0.18)
+    ),
     amountReceived: '10000',
     paymentType: 'PART_PAYMENT',
     paymentMode: 'UPI',
@@ -174,6 +180,21 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
   const receivedVal = parseFloat(form.amountReceived) || 0;
   const pendingVal = Math.max(0, totalVal - receivedVal);
 
+  const totalServiceFee = form.services.reduce(
+    (sum, s) => sum + (parseFloat(s.dealAmount !== undefined ? s.dealAmount : s.serviceFee) || 0),
+    0
+  );
+  const totalGst = form.services.reduce(
+    (sum, s) =>
+      sum +
+      (parseFloat(
+        s.gstAmount !== undefined
+          ? s.gstAmount
+          : Math.round((parseFloat(s.dealAmount !== undefined ? s.dealAmount : s.serviceFee) || 0) * 0.18)
+      ) || 0),
+    0
+  );
+
   const handleDirectorChange = (index, field, value) => {
     const updated = [...form.directors];
     updated[index][field] = value;
@@ -195,23 +216,31 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
 
   const calculateTotals = (servicesList) => {
     let std = 0;
-    let tot = 0;
+    let totDeal = 0;
+    let totGst = 0;
     servicesList.forEach((s) => {
-      std += parseFloat(s.standardAmount) || 0;
-      tot += (parseFloat(s.dealAmount !== undefined ? s.dealAmount : s.serviceFee) || 0) + (parseFloat(s.govtFee) || 0);
+      const stdVal = parseFloat(s.standardAmount) || 0;
+      const dealVal = parseFloat(s.dealAmount !== undefined ? s.dealAmount : s.serviceFee) || 0;
+      const gstVal = Math.round(dealVal * 0.18);
+      std += stdVal;
+      totDeal += dealVal;
+      totGst += gstVal;
     });
-    return { std: String(std), tot: String(tot) };
+    const tot = totDeal + totGst;
+    return { std: String(std), tot: String(tot), totDeal: String(totDeal), totGst: String(totGst) };
   };
 
   const addService = () => {
     const catalogItem = DEFAULT_SERVICES[form.services.length % DEFAULT_SERVICES.length] || DEFAULT_SERVICES[0];
+    const stdVal = parseFloat(catalogItem.standardAmount) || 0;
+    const gstVal = Math.round(stdVal * 0.18);
     const newServices = [
       ...form.services,
       {
         serviceName: catalogItem.name,
         standardAmount: catalogItem.standardAmount,
         dealAmount: catalogItem.standardAmount,
-        govtFee: catalogItem.govtFee,
+        gstAmount: gstVal,
       },
     ];
     const { std, tot } = calculateTotals(newServices);
@@ -244,10 +273,11 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
     );
     if (catalogMatch) {
       updated[index].standardAmount = catalogMatch.standardAmount;
-      updated[index].govtFee = catalogMatch.govtFee || '0';
       // By default the deal amount will be same as standard amount
       updated[index].dealAmount = catalogMatch.standardAmount;
       updated[index].serviceFee = catalogMatch.standardAmount;
+      const stdVal = parseFloat(catalogMatch.standardAmount) || 0;
+      updated[index].gstAmount = Math.round(stdVal * 0.18);
     }
     const { std, tot } = calculateTotals(updated);
     setForm({
@@ -274,19 +304,9 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
     const finalVal = isNaN(numVal) ? value : String(numVal);
     updated[index].dealAmount = finalVal;
     updated[index].serviceFee = finalVal;
+    const dealVal = parseFloat(finalVal) || 0;
+    updated[index].gstAmount = Math.round(dealVal * 0.18);
 
-    const { std: newStd, tot: newTot } = calculateTotals(updated);
-    setForm({
-      ...form,
-      services: updated,
-      standardAmount: newStd,
-      totalAmount: newTot,
-    });
-  };
-
-  const handleGovtFeeChange = (index, value) => {
-    const updated = [...form.services];
-    updated[index].govtFee = value;
     const { std: newStd, tot: newTot } = calculateTotals(updated);
     setForm({
       ...form,
@@ -386,13 +406,18 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
         totalAmount: totalVal,
         amountReceived: receivedVal,
         paymentType: pendingVal > 0 ? 'PART_PAYMENT' : 'FULL_PAYMENT',
-        services: form.services.map((s) => ({
-          serviceName: s.serviceName,
-          standardAmount: parseFloat(s.standardAmount) || 0,
-          dealAmount: parseFloat(s.dealAmount !== undefined ? s.dealAmount : s.serviceFee) || 0,
-          serviceFee: parseFloat(s.dealAmount !== undefined ? s.dealAmount : s.serviceFee) || 0,
-          govtFee: parseFloat(s.govtFee) || 0,
-        })),
+        services: form.services.map((s) => {
+          const dealFee = parseFloat(s.dealAmount !== undefined ? s.dealAmount : s.serviceFee) || 0;
+          const gstFee = Math.round(dealFee * 0.18);
+          return {
+            serviceName: s.serviceName,
+            standardAmount: parseFloat(s.standardAmount) || 0,
+            dealAmount: dealFee,
+            serviceFee: dealFee,
+            govtFee: gstFee,
+            gstAmount: gstFee,
+          };
+        }),
       });
 
       const dealId = dealRes.data.dealId;
@@ -999,15 +1024,12 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
 
                       <div className="md:col-span-2">
                         <label className="text-[11px] text-slate-600 font-semibold block mb-1">
-                          Govt Fee (₹)
+                          GST (18%) (₹) <span className="text-[10px] text-indigo-600 font-medium">(Auto)</span>
                         </label>
-                        <input
-                          type="number"
-                          value={s.govtFee || ''}
-                          onChange={(e) => handleGovtFeeChange(index, e.target.value)}
-                          placeholder="0"
-                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-slate-800 font-mono"
-                        />
+                        <div className="w-full bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-mono font-bold select-none cursor-not-allowed flex items-center justify-between">
+                          <span>₹{Number(s.gstAmount !== undefined ? s.gstAmount : Math.round((parseFloat(s.dealAmount !== undefined ? s.dealAmount : s.serviceFee) || 0) * 0.18)).toLocaleString('en-IN')}</span>
+                          <span className="text-[10px] text-slate-500 font-normal">18%</span>
+                        </div>
                       </div>
 
                       <div className="md:col-span-1 text-right pt-4">
@@ -1029,10 +1051,10 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
 
               {/* 3. Deal Financial Summary (Standard Amount - Deal Amount - Received Amount - Pending Amount) */}
               <div className="space-y-1.5">
-                <div className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center justify-between">
+                <div className="text-xs font-bold uppercase tracking-wider text-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
                   <span>Deal Commercial Summary</span>
-                  <span className="text-[11px] font-normal text-slate-500">
-                    Dedicated GST (18%) calculated below each metric
+                  <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+                    Deal Amount (₹{totalServiceFee.toLocaleString('en-IN')}) + GST (₹{totalGst.toLocaleString('en-IN')}) = Total Deal Amount (₹{totalVal.toLocaleString('en-IN')})
                   </span>
                 </div>
                 <DealFinancialMetrics
@@ -1041,6 +1063,7 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
                   receivedAmount={receivedVal}
                   pendingAmount={pendingVal}
                   receivingAccount={form.accountName}
+                  gstAmount={totalGst}
                 />
               </div>
 

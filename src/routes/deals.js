@@ -465,7 +465,7 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, re
           serviceName: s.serviceName ? s.serviceName.trim().toUpperCase() : s.serviceName,
           standardAmount: s.standardAmount ? parseFloat(s.standardAmount) : null,
           serviceFee: parseFloat(s.serviceFee || s.dealAmount) || 0,
-          govtFee: s.govtFee ? parseFloat(s.govtFee) : null,
+          govtFee: s.gstAmount !== undefined ? parseFloat(s.gstAmount) : (s.govtFee ? parseFloat(s.govtFee) : null),
           status: 'PENDING',
         })),
       });

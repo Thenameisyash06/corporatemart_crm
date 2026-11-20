@@ -21,6 +21,7 @@ export default function DealFinancialMetrics({
   compact = false,
   className = '',
   onEditDealAmount = null,
+  gstAmount = null,
 }) {
   const numStandard = parseFloat(standardAmount) || 0;
   const numDeal = parseFloat(dealAmount) || 0;
@@ -80,9 +81,9 @@ export default function DealFinancialMetrics({
             ₹{numDeal.toLocaleString('en-IN')}
           </div>
           <div className="mt-1.5 pt-1.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-600">
-            <span>GST (18%):</span>
+            <span>{gstAmount !== null && gstAmount !== undefined ? 'GST (18% incl.):' : 'GST (18%):'}</span>
             <span className="font-semibold text-slate-800 font-mono">
-              ₹{calculateGst(numDeal).toLocaleString('en-IN')}
+              ₹{(gstAmount !== null && gstAmount !== undefined ? Number(gstAmount) : calculateGst(numDeal)).toLocaleString('en-IN')}
             </span>
           </div>
         </div>
