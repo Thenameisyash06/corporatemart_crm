@@ -298,34 +298,6 @@ router.get('/admin-overview', authenticateToken, requireRoles('ADMIN'), async (r
           coBdms: {
             select: { id: true, fullName: true },
           },
-          assignedAccountsUser: {
-            select: { id: true, fullName: true },
-          },
-          assignedLegalUser: {
-            select: { id: true, fullName: true },
-          },
-          assignedOpsUser: {
-            select: { id: true, fullName: true },
-          },
-          services: {
-            select: {
-              id: true,
-              serviceName: true,
-              serviceFee: true,
-              status: true,
-              assignedOpsUser: { select: { id: true, fullName: true } },
-            },
-          },
-          payments: {
-            select: {
-              id: true,
-              trancheNumber: true,
-              amount: true,
-              status: true,
-              paymentMode: true,
-              transactionReference: true,
-            },
-          },
         },
         orderBy: { createdAt: 'desc' },
       }),
@@ -522,6 +494,7 @@ router.get('/clients', authenticateToken, requireRoles('ADMIN', 'BDM', 'RM'), as
 
     const clients = await prisma.client.findMany({
       where,
+      take: 200,
       include: {
         directors: true,
         deals: {

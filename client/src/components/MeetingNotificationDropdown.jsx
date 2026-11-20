@@ -62,7 +62,13 @@ export default function MeetingNotificationDropdown({
 
     window.addEventListener('lms_leads_changed', handleLeadsChanged);
     window.addEventListener('lead_notifications_changed', handleLeadsChanged);
-    const interval = setInterval(fetchNotifications, 30000); // 30s auto-refresh
+
+    // 60s auto-refresh, paused when browser tab is inactive to protect DB connection pool
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        fetchNotifications();
+      }
+    }, 60000);
 
     return () => {
       window.removeEventListener('lms_leads_changed', handleLeadsChanged);

@@ -29,6 +29,7 @@ model User {
   fullName     String
   role         Role
   phone        String?
+  leaderName   String?
   salesTarget  Decimal  @default(500000.00) @db.Decimal(12, 2)
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
@@ -48,6 +49,7 @@ model User {
   auditLogs         AuditLog[]
   renewalsAssigned  RenewalReminder[] @relation("RmRenewals")
 
+  @@index([role, isActive])
   @@map("users")
 }
 
@@ -78,6 +80,10 @@ model Client {
   deals          Deal[]
   renewals       RenewalReminder[]
 
+  @@index([companyName])
+  @@index([clientName])
+  @@index([phone])
+  @@index([createdAt(sort: Desc)])
   @@map("clients")
 }
 
@@ -198,6 +204,12 @@ model Deal {
   renewals  RenewalReminder[]
   auditLogs AuditLog[]
 
+  @@index([stage, createdAt(sort: Desc)])
+  @@index([bdmId])
+  @@index([clientId])
+  @@index([assignedAccountsUserId])
+  @@index([assignedLegalUserId])
+  @@index([assignedOpsUserId])
   @@map("deals")
 }
 
@@ -235,6 +247,9 @@ model DealService {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([dealId])
+  @@index([assignedOpsUserId])
+  @@index([status])
   @@map("deal_services")
 }
 
@@ -280,6 +295,9 @@ model Payment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([dealId])
+  @@index([status])
+  @@index([verifiedById])
   @@map("payments")
 }
 
@@ -321,6 +339,8 @@ model Document {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([dealId])
+  @@index([uploadedByUserId])
   @@map("documents")
 }
 
@@ -352,6 +372,10 @@ model RenewalReminder {
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
+  @@index([dealId])
+  @@index([clientId])
+  @@index([assignedRmId])
+  @@index([status])
   @@map("renewal_reminders")
 }
 
@@ -370,6 +394,9 @@ model AuditLog {
   remarks   String?
   createdAt DateTime   @default(now())
 
+  @@index([dealId])
+  @@index([userId])
+  @@index([createdAt(sort: Desc)])
   @@map("audit_logs")
 }
 
@@ -400,8 +427,37 @@ model Lead {
   quotationFileSize    Int?
   createdById          String?
   followUps            Json?     @default("[]")
+  nextFollowUpDate     DateTime?
+  reassignmentHistory  Json?     @default("[]")
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
+  @@index([leadStatus, createdAt(sort: Desc)])
+  @@index([bdmName1])
+  @@index([leaderName])
+  @@index([clientStatus])
+  @@index([meetingDate])
+  @@index([nextFollowUpDate])
   @@map("leads")
+}
+
+// -----------------------------------------------------------------------------
+// LEAD NOTIFICATIONS (Revocation & Assignment Alerts)
+// -----------------------------------------------------------------------------
+model LeadNotification {
+  id            String   @id @default(uuid())
+  targetBdmName String
+  targetUserId  String?
+  title         String
+  message       String
+  type          String
+  leadId        String?
+  companyName   String?
+  reason        String?
+  isRead        Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@index([targetBdmName])
+  @@index([createdAt(sort: Desc)])
+  @@map("lead_notifications")
 }

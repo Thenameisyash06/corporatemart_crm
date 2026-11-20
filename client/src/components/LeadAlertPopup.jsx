@@ -58,7 +58,13 @@ export default function LeadAlertPopup({ currentUser, onNavigateToLms, onAlertAc
 
     window.addEventListener('lead_notifications_changed', handleNotificationsChanged);
     window.addEventListener('lms_leads_changed', handleNotificationsChanged);
-    const interval = setInterval(fetchAlerts, 15000); // 15s poll for real-time reactivity
+
+    // 45s poll, paused when browser tab is inactive to protect DB connection pool
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        fetchAlerts();
+      }
+    }, 45000);
 
     return () => {
       window.removeEventListener('lead_notifications_changed', handleNotificationsChanged);
