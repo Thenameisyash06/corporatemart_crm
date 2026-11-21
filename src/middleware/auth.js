@@ -36,6 +36,7 @@ async function authenticateToken(req, res, next) {
         fullName: true,
         role: true,
         phone: true,
+        leaderName: true,
         salesTarget: true,
         isActive: true,
       },
