@@ -94,6 +94,13 @@ export default function App() {
         if (parsed && parsed.role) {
           setCurrentUser(parsed);
           setDefaultTabForRole(parsed.role);
+          // Refresh user profile from server to keep latest stored leaderName & targets
+          api.get('/auth/me').then((res) => {
+            if (res.data?.user) {
+              setCurrentUser(res.data.user);
+              localStorage.setItem('cm_crm_user', JSON.stringify(res.data.user));
+            }
+          }).catch(() => {});
         } else {
           throw new Error('Invalid user payload');
         }

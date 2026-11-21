@@ -224,6 +224,57 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
 
   const isLeader = Boolean(matchedLeaderName);
 
+  // Fetch active users from database to get live stored leaderName mappings
+  const [dbUsers, setDbUsers] = useState([]);
+
+  useEffect(() => {
+    api
+      .get('/users')
+      .then((res) => {
+        if (res.data?.users) {
+          setDbUsers(res.data.users);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Compute strictly fetched Leader Name from stored user data
+  const fetchedLeaderName = useMemo(() => {
+    // 1. If current user is an LMS Leader themselves:
+    if (isLeader && matchedLeaderName) {
+      return matchedLeaderName;
+    }
+    // 2. From currentUser record (loaded from DB /auth/me)
+    if (currentUser?.leaderName && currentUser.leaderName.trim()) {
+      return currentUser.leaderName.trim();
+    }
+    // 3. From dbUsers list matching currentUser.id or name
+    const cleanCurrent = (currentUser?.fullName || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+    const cleanBdm = (loggedInBdmName || '').trim().toLowerCase();
+    const found = dbUsers.find((u) => {
+      if (currentUser?.id && u.id === currentUser.id) return true;
+      const uName = (u.fullName || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+      return (
+        (uName && cleanCurrent && (uName === cleanCurrent || uName.includes(cleanCurrent) || cleanCurrent.includes(uName))) ||
+        (uName && cleanBdm && (uName === cleanBdm || uName.includes(cleanBdm) || cleanBdm.includes(uName)))
+      );
+    });
+    if (found?.leaderName && found.leaderName.trim()) {
+      return found.leaderName.trim();
+    }
+    // 4. From static master mapping BDM_LEADER_MAP
+    if (loggedInBdmName && BDM_LEADER_MAP[loggedInBdmName]) {
+      return BDM_LEADER_MAP[loggedInBdmName];
+    }
+    if (currentUser?.fullName) {
+      const matchKey = Object.keys(BDM_LEADER_MAP).find((k) =>
+        k.toLowerCase() === cleanCurrent || cleanCurrent.includes(k.toLowerCase())
+      );
+      if (matchKey) return BDM_LEADER_MAP[matchKey];
+    }
+    return 'Management';
+  }, [isLeader, matchedLeaderName, currentUser, dbUsers, loggedInBdmName]);
+
   // Toggle Form Visibility (BDM only - HIDE BY DEFAULT for Leader BDM and Admin, open for regular BDM)
   const [isFormOpen, setIsFormOpen] = useState(!isAdmin && !isLeader);
 
@@ -467,7 +518,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     directorName: '',
     mobileNo: '',
     emailId: '',
-    leaderName: isLeader && matchedLeaderName ? matchedLeaderName : LMS_LEADERS[0],
+    leaderName: fetchedLeaderName || LMS_LEADERS[0],
     bdmName1: loggedInBdmName,
     bdmName2: '',
     closerStatus: isLeader ? 'Self Closer' : LMS_CLOSER_STATUSES[0],
@@ -485,18 +536,18 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
 
   // Lock form fields:
   // - BDM-I locked to logged-in BDM
-  // - For Leaders: Leader Name locked to themselves, Closer Status locked to 'Self Closer'
+  // - Leader Name strictly fetched from stored user records (not editable)
+  // - For Leaders: Closer Status locked to 'Self Closer'
   useEffect(() => {
     if (!isAdmin) {
       setForm((prev) => ({
         ...prev,
         bdmName1: loggedInBdmName || prev.bdmName1,
-        ...(isLeader && matchedLeaderName
-          ? { leaderName: matchedLeaderName, closerStatus: 'Self Closer' }
-          : {}),
+        leaderName: fetchedLeaderName || prev.leaderName,
+        ...(isLeader ? { closerStatus: 'Self Closer' } : {}),
       }));
     }
-  }, [isAdmin, loggedInBdmName, isLeader, matchedLeaderName]);
+  }, [isAdmin, loggedInBdmName, fetchedLeaderName, isLeader]);
 
   // Real-time check for duplicate phone number in form
   const duplicatePhoneLead = useMemo(() => {
@@ -1514,7 +1565,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
 
       const targetBdm = loggedInBdmName || form.bdmName1;
 
-      const targetLeader = isLeader && matchedLeaderName ? matchedLeaderName : form.leaderName;
+      const targetLeader = fetchedLeaderName || (isLeader && matchedLeaderName ? matchedLeaderName : form.leaderName) || 'Management';
       const targetCloser = isLeader ? 'Self Closer' : form.closerStatus;
 
       const formData = new FormData();
@@ -2585,31 +2636,19 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
             {/* Row 2: Leader's Name, BDM-I (Locked to current BDM), BDM-II, Closer Status */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1.5">
-                  Leader's Name <span className="text-rose-500">*</span>
+                <label className="text-xs font-semibold text-slate-700 block mb-1.5 flex items-center justify-between">
+                  <span>Leader's Name <span className="text-rose-500">*</span></span>
+                  <span className="text-[10px] text-slate-400 font-normal">Auto-assigned</span>
                 </label>
-                {isLeader ? (
-                  <div className="w-full h-10 bg-slate-100 border border-slate-300 rounded-xl px-3 text-xs text-slate-900 font-bold flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
-                      <Award className="w-4 h-4 text-indigo-600" />
-                      {matchedLeaderName || form.leaderName}
-                    </span>
-                    <span className="text-[10px] text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full font-bold">
-                      Leader (You)
-                    </span>
-                  </div>
-                ) : (
-                  <select
-                    required
-                    value={form.leaderName}
-                    onChange={(e) => setForm({ ...form, leaderName: e.target.value })}
-                    className="w-full h-10 bg-slate-50 border border-slate-300 rounded-xl px-3 text-xs text-slate-900 font-medium focus:bg-white focus:border-slate-800 focus:outline-none transition-colors"
-                  >
-                    {LMS_LEADERS.map((ldr) => (
-                      <option key={ldr} value={ldr}>{ldr}</option>
-                    ))}
-                  </select>
-                )}
+                <div className="w-full h-10 bg-slate-100 border border-slate-300 rounded-xl px-3 text-xs text-slate-900 font-bold flex items-center justify-between cursor-not-allowed select-none shadow-2xs">
+                  <span className="flex items-center gap-1.5 truncate">
+                    <Award className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <span className="truncate">{fetchedLeaderName || form.leaderName || 'Management'}</span>
+                  </span>
+                  <span className="text-[10px] text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full font-bold shrink-0">
+                    {isLeader ? 'Leader (You)' : 'Leader'}
+                  </span>
+                </div>
               </div>
 
               {/* BDM-I: LOCKED TO CURRENT LOGGED-IN BDM */}

@@ -1250,8 +1250,25 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
       });
     }
 
-    if (!leaderName) {
+    // Ensure Leader is strictly fetched from stored user data for BDM
+    let finalLeaderName = (leaderName || '').trim();
+    if (req.user.role === 'BDM') {
+      const u = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        select: { leaderName: true, fullName: true },
+      });
+      if (u?.leaderName && u.leaderName.trim()) {
+        finalLeaderName = u.leaderName.trim();
+      } else if (u?.fullName && BDM_LEADER_MAP[u.fullName]) {
+        finalLeaderName = BDM_LEADER_MAP[u.fullName];
+      }
+    }
+
+    if (!finalLeaderName && !leaderName) {
       return res.status(400).json({ error: "Leader's Name is mandatory." });
+    }
+    if (!finalLeaderName) {
+      finalLeaderName = leaderName.trim();
     }
     if (!bdmName1) {
       return res.status(400).json({ error: "BDM's Name - I is mandatory." });
@@ -1355,7 +1372,7 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
       directorName ? directorName.trim().toUpperCase() : null,
       mobileNo.trim(),
       emailId ? emailId.trim().toUpperCase() : null,
-      leaderName ? leaderName.trim().toUpperCase() : leaderName,
+      finalLeaderName ? finalLeaderName.trim().toUpperCase() : 'MANAGEMENT',
       bdmName1 ? bdmName1.trim().toUpperCase() : bdmName1,
       bdmName2 && bdmName2.trim() ? bdmName2.trim().toUpperCase() : null,
       closerStatus ? closerStatus.trim().toUpperCase() : closerStatus,
