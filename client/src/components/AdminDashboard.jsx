@@ -31,6 +31,8 @@ import {
   ShieldCheck,
   Percent,
   Layers,
+  Trash2,
+  Crown,
 } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from '../context/ToastContext';
@@ -57,28 +59,19 @@ const STAGE_LABELS = {
 };
 
 function getDealVerifiedCollected(d) {
-  if (d.payments && Array.isArray(d.payments) && d.payments.length > 0) {
-    return d.payments
-      .filter((p) => p.status === 'VERIFIED')
-      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
-  }
-  if (d.isAccountsVerified || !['STAGE_04_ACCOUNTS_VERIFICATION', 'STAGE_04_ACCOUNTS_REJECTED'].includes(d.stage)) {
-    return Number(d.amountReceived || 0);
-  }
-  return 0;
+  return Number(d.amountReceived || 0);
 }
 
 function isDealAccountsVerified(d) {
-  return Boolean(d.isAccountsVerified || !['STAGE_04_ACCOUNTS_VERIFICATION', 'STAGE_04_ACCOUNTS_REJECTED'].includes(d.stage));
+  return true;
 }
 
 function buildOverviewFromDeals(deals = [], users = [], stats = null) {
   const totalDeals = deals.length;
-  const verifiedDeals = deals.filter(isDealAccountsVerified);
-  const totalRevenue = verifiedDeals.reduce((sum, d) => sum + Number(d.totalAmount || 0), 0);
-  const totalCollected = deals.reduce((sum, d) => sum + getDealVerifiedCollected(d), 0);
-  const totalPending = Math.max(0, totalRevenue - totalCollected);
-  const avgDealSize = verifiedDeals.length > 0 ? Math.round(totalRevenue / verifiedDeals.length) : 0;
+  const totalRevenue = deals.reduce((sum, d) => sum + Number(d.totalAmount || 0), 0);
+  const totalCollected = deals.reduce((sum, d) => sum + Number(d.amountReceived || 0), 0);
+  const totalPending = deals.reduce((sum, d) => sum + Number(d.pendingAmount !== undefined ? d.pendingAmount : (d.totalAmount - d.amountReceived) || 0), 0);
+  const avgDealSize = totalDeals > 0 ? Math.round(totalRevenue / totalDeals) : 0;
   const collectionRate = totalRevenue > 0 ? Math.round((totalCollected / totalRevenue) * 100) : 0;
 
   // Extract unique clients
@@ -98,6 +91,7 @@ function buildOverviewFromDeals(deals = [], users = [], stats = null) {
       fullName: u.fullName,
       email: u.email,
       phone: u.phone,
+      leaderName: u.leaderName || 'Management',
       salesTarget: Number(u.salesTarget || 500000),
       dealsCount: 0,
       totalRevenue: 0,
@@ -133,10 +127,9 @@ function buildOverviewFromDeals(deals = [], users = [], stats = null) {
     }
     const b = bdmMap.get(bdmId);
     b.dealsCount += 1;
-    if (isDealAccountsVerified(d)) {
-      b.totalRevenue += Number(d.totalAmount || 0);
-    }
-    b.totalCollected += getDealVerifiedCollected(d);
+    b.totalRevenue += Number(d.totalAmount || 0);
+    b.totalCollected += Number(d.amountReceived || 0);
+    b.totalPending += Number(d.pendingAmount !== undefined ? d.pendingAmount : (d.totalAmount - d.amountReceived) || 0);
     if (d.stage === 'CLOSED') b.closedDealsCount += 1;
     else b.activeDealsCount += 1;
   });
@@ -367,6 +360,26 @@ export default function AdminDashboard({
   // Export menu toggle
   const [showExportMenu, setShowExportMenu] = useState(false);
 
+  // Member management modal state
+  const [memberModalOpen, setMemberModalOpen] = useState(false);
+  const [editingMember, setEditingMember] = useState(null);
+  const [memberFormData, setMemberFormData] = useState({
+    fullName: '',
+    email: '',
+    phone: '',
+    password: '',
+    salesTarget: '500000',
+    isLeader: false,
+    leaderName: 'Management',
+    memberIds: [],
+  });
+  const [memberSaving, setMemberSaving] = useState(false);
+  const [memberError, setMemberError] = useState(null);
+
+  // Delete employee confirmation state
+  const [deletingMember, setDeletingMember] = useState(null);
+  const [deletingLoading, setDeletingLoading] = useState(false);
+
   const fetchAdminData = async () => {
     try {
       setLoading(true);
@@ -387,12 +400,12 @@ export default function AdminDashboard({
       }
 
       // If backend returned complete overview, use it
-      if (overviewData && overviewData.allDeals && overviewData.allDeals.length > 0) {
+      if (overviewData && overviewData.bdmPerformance && overviewData.bdmPerformance.length > 0) {
         setData(overviewData);
         if (clientsData.length > 0) {
           setClients(clientsData);
         } else {
-          extractClientsFromDeals(overviewData.allDeals);
+          extractClientsFromDeals(overviewData.allDeals || []);
         }
       } else {
         // Fallback: Fetch directly from /deals and /users
@@ -490,6 +503,223 @@ export default function AdminDashboard({
     }
   };
 
+  const KNOWN_LEADERS = ['jayesh rohit', 'neel boda', 'shashank singhal', 'vishishta dixit', 'yash rathod'];
+
+  const isBdmLeader = (user, allBdms = []) => {
+    if (!user) return false;
+    const name = (user.fullName || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+    const leader = (user.leaderName || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+    if (leader && leader === name) return true;
+    const hasMembers = allBdms.some((m) => {
+      if (m.id === user.id) return false;
+      const mLdr = (m.leaderName || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+      return mLdr && (mLdr === name || name.includes(mLdr) || mLdr.includes(name));
+    });
+    if (hasMembers) return true;
+    if (KNOWN_LEADERS.some((kl) => name.includes(kl) || kl.includes(name))) return true;
+    return false;
+  };
+
+  const activeLeaders = React.useMemo(() => {
+    const list = [];
+    (data?.bdmPerformance || []).forEach((u) => {
+      if (isBdmLeader(u, data?.bdmPerformance || []) && !list.includes(u.fullName)) {
+        list.push(u.fullName);
+      }
+    });
+    ['Jayesh Rohit', 'Neel Boda', 'Shashank Singhal', 'Vishishta Dixit', 'Yash Rathod'].forEach((l) => {
+      if ((data?.bdmPerformance || []).some((u) => u.fullName === l) && !list.includes(l)) {
+        list.push(l);
+      }
+    });
+    return list;
+  }, [data?.bdmPerformance]);
+
+  // When assigning team members, show only:
+  // 1. Members currently in this leader's team (so they are checked)
+  // 2. Members who are not in ANY team (Management or unassigned)
+  // Members belonging to other leaders are excluded so other leaders cannot add them
+  const assignableMembers = React.useMemo(() => {
+    const leaderNameLower = editingMember?.fullName ? editingMember.fullName.trim().toLowerCase() : '';
+    return (data?.bdmPerformance || []).filter((m) => {
+      if (editingMember?.id && m.id === editingMember.id) return false;
+      if (isBdmLeader(m, data?.bdmPerformance || [])) return false;
+
+      const memberLeader = (m.leaderName || '').trim().toLowerCase();
+
+      // 1. Is this member already in this leader's team?
+      const isCurrentMember = leaderNameLower && (
+        memberLeader === leaderNameLower ||
+        memberLeader.includes(leaderNameLower) ||
+        leaderNameLower.includes(memberLeader)
+      );
+      if (isCurrentMember) return true;
+
+      // 2. Is this member unassigned or under Management?
+      const isUnassigned = !memberLeader || memberLeader === 'management' || memberLeader === 'not assigned';
+      if (isUnassigned) return true;
+
+      // 3. Already in another leader's team -> exclude
+      return false;
+    });
+  }, [data?.bdmPerformance, editingMember]);
+
+  const handleOpenAddMember = () => {
+    setEditingMember(null);
+    const defaultLeader = activeLeaders.length > 0 ? activeLeaders[0] : 'Management';
+    setMemberFormData({
+      fullName: '',
+      email: '',
+      phone: '',
+      password: '',
+      salesTarget: '200000',
+      isLeader: false,
+      leaderName: defaultLeader,
+      memberIds: [],
+    });
+    setMemberError(null);
+    setMemberModalOpen(true);
+  };
+
+  const handleOpenEditMember = (bdm) => {
+    const isLeader = isBdmLeader(bdm, data?.bdmPerformance || []);
+    const leaderNameLower = bdm.fullName.trim().toLowerCase();
+
+    // Pre-check all members currently in this leader's team
+    const currentTeamIds = isLeader
+      ? (data?.bdmPerformance || [])
+          .filter((u) => {
+            if (u.id === bdm.id) return false;
+            const uLdr = (u.leaderName || '').trim().toLowerCase();
+            return uLdr && (uLdr === leaderNameLower || uLdr.includes(leaderNameLower) || leaderNameLower.includes(uLdr));
+          })
+          .map((u) => u.id)
+      : [];
+
+    const currentLeaderName = bdm.leaderName && bdm.leaderName !== bdm.fullName ? bdm.leaderName : (activeLeaders[0] || 'Management');
+
+    setEditingMember(bdm);
+    setMemberFormData({
+      fullName: bdm.fullName || '',
+      email: bdm.email || '',
+      phone: bdm.phone || '',
+      password: '',
+      salesTarget: String(bdm.salesTarget || 500000),
+      isLeader,
+      leaderName: isLeader ? 'Management' : currentLeaderName,
+      memberIds: currentTeamIds,
+    });
+    setMemberError(null);
+    setMemberModalOpen(true);
+  };
+
+  const handleToggleMemberSelection = (memberId) => {
+    setMemberFormData((prev) => {
+      const exists = prev.memberIds.includes(memberId);
+      return {
+        ...prev,
+        memberIds: exists
+          ? prev.memberIds.filter((id) => id !== memberId)
+          : [...prev.memberIds, memberId],
+      };
+    });
+  };
+
+  const handleSaveMember = async (e) => {
+    e.preventDefault();
+    setMemberSaving(true);
+    setMemberError(null);
+
+    try {
+      const fullName = memberFormData.fullName.trim();
+      const email = memberFormData.email.trim();
+      const phone = memberFormData.phone.trim();
+      const password = memberFormData.password.trim();
+      const target = parseFloat(memberFormData.salesTarget);
+
+      // Validation 1: Full Name
+      if (!fullName || fullName.length < 2) {
+        throw new Error('Please enter a valid full name (at least 2 characters).');
+      }
+
+      // Validation 2: Email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!email || !emailRegex.test(email)) {
+        throw new Error('Please enter a valid corporate email address (e.g. name@corporatemart.com).');
+      }
+
+      // Validation 3: Mobile Phone format
+      if (phone) {
+        const digits = phone.replace(/\D/g, '');
+        const isValidPhone = digits.length === 10 ? /^[6-9]\d{9}$/.test(digits) : digits.length === 12 && digits.startsWith('91') ? /^91[6-9]\d{9}$/.test(digits) : false;
+        if (!isValidPhone) {
+          throw new Error('Please enter a valid 10-digit mobile number (e.g. +91 98765 43210).');
+        }
+      }
+
+      // Validation 4: Password
+      if (!editingMember) {
+        if (!password || password.length < 6) {
+          throw new Error('Password is required and must be at least 6 characters long.');
+        }
+      } else if (password && password.length < 6) {
+        throw new Error('New password must be at least 6 characters long.');
+      }
+
+      // Validation 5: Sales Target
+      if (isNaN(target) || target <= 0) {
+        throw new Error('Please enter a valid monthly sales target greater than zero.');
+      }
+
+      const payload = {
+        fullName,
+        email,
+        phone,
+        salesTarget: target,
+        isLeader: memberFormData.isLeader,
+        leaderName: memberFormData.isLeader ? fullName : memberFormData.leaderName,
+        memberIds: memberFormData.isLeader ? memberFormData.memberIds : [],
+      };
+
+      if (password) {
+        payload.password = password;
+      }
+
+      if (editingMember) {
+        await api.put(`/users/${editingMember.id}`, payload);
+        toast.success(`Employee "${payload.fullName}" updated successfully!`);
+      } else {
+        await api.post('/users', payload);
+        toast.success(`New employee "${payload.fullName}" added successfully!`);
+      }
+
+      setMemberModalOpen(false);
+      setEditingMember(null);
+      await fetchAdminData();
+    } catch (err) {
+      const msg = err.response?.data?.error || err.message || 'Failed to save employee.';
+      setMemberError(msg);
+      toast.error(msg);
+    } finally {
+      setMemberSaving(false);
+    }
+  };
+
+  const handleDeleteMember = async () => {
+    if (!deletingMember) return;
+    setDeletingLoading(true);
+    try {
+      await api.delete(`/users/${deletingMember.id}`);
+      toast.success(`Employee "${deletingMember.fullName}" removed successfully.`);
+      setDeletingMember(null);
+      await fetchAdminData();
+    } catch (err) {
+      toast.error(err.response?.data?.error || err.message || 'Failed to remove employee.');
+    } finally {
+      setDeletingLoading(false);
+    }
+  };
+
   const summary = data?.summary || {
     totalDeals: 0,
     totalClients: 0,
@@ -544,8 +774,8 @@ export default function AdminDashboard({
     return true;
   });
 
-  const currentStats = stats || initialStats || {
-    counts: {
+  const currentStats = {
+    counts: stats?.counts || initialStats?.counts || {
       totalDeals: allDeals.length,
       pendingBdmHandover: 0,
       pendingAccounts: allDeals.filter((d) => d.stage === 'STAGE_04_ACCOUNTS_VERIFICATION').length,
@@ -559,9 +789,9 @@ export default function AdminDashboard({
       pendingBalanceVerifications: 0,
     },
     financials: {
-      totalDealValue: summary.totalRevenue || 0,
-      totalCollected: summary.totalCollected || 0,
-      totalPending: summary.totalPending || 0,
+      totalDealValue: summary.totalRevenue ?? (stats?.financials?.totalDealValue || 0),
+      totalCollected: summary.totalCollected ?? (stats?.financials?.totalCollected || 0),
+      totalPending: summary.totalPending ?? (stats?.financials?.totalPending || 0),
     },
   };
 
@@ -1000,19 +1230,35 @@ export default function AdminDashboard({
               <h2 className="text-sm font-bold text-slate-900">BDM Sales Team Scorecard</h2>
               <p className="text-xs text-slate-500">Track target achievements, revenue generated, collection rates and edit sales targets</p>
             </div>
-            <button
-              onClick={() => exportBdmPerformanceToCsv(bdmPerformance)}
-              className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Export BDM Scorecard</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleOpenAddMember}
+                className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>Add New Member</span>
+              </button>
+              <button
+                onClick={() => exportBdmPerformanceToCsv(bdmPerformance)}
+                className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Export BDM Scorecard</span>
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {bdmPerformance.map((bdm) => {
               const isEditing = editingTargetUserId === bdm.id;
               const isGoalMet = bdm.achievementPercent >= 100;
+              const isLeader = isBdmLeader(bdm, bdmPerformance);
+              const leaderNameLower = bdm.fullName.trim().toLowerCase();
+              const teamMembers = (bdmPerformance || []).filter((u) => {
+                if (u.id === bdm.id) return false;
+                const uLdr = (u.leaderName || '').trim().toLowerCase();
+                return uLdr && (uLdr === leaderNameLower || uLdr.includes(leaderNameLower) || leaderNameLower.includes(uLdr));
+              });
               const progressColor =
                 bdm.achievementPercent >= 100
                   ? 'bg-emerald-500'
@@ -1025,19 +1271,65 @@ export default function AdminDashboard({
                   key={bdm.id}
                   className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-4 hover:shadow-md transition"
                 >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="font-bold text-slate-900 text-sm">{bdm.fullName}</h3>
-                      <p className="text-xs text-slate-500">{bdm.email}</p>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-0.5 min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h3 className="font-bold text-slate-900 text-sm truncate">{bdm.fullName}</h3>
+                        {isLeader ? (
+                          <span className="text-[10px] bg-indigo-100 text-indigo-800 font-extrabold px-2 py-0.5 rounded-md flex items-center gap-1 shrink-0">
+                            <Crown className="w-3 h-3 text-indigo-600" /> Leader
+                          </span>
+                        ) : (
+                          <span className="text-[10px] bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded-md shrink-0">
+                            Member
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500 truncate">{bdm.email}</p>
                       {bdm.phone && <p className="text-xs text-slate-400">{bdm.phone}</p>}
+                      <div className="text-[11px] text-slate-500 pt-0.5 font-medium">
+                        {isLeader ? (
+                          <span className="text-indigo-700 font-semibold flex items-center gap-1">
+                            <Users className="w-3 h-3 text-indigo-600" />
+                            Team: {teamMembers.length} {teamMembers.length === 1 ? 'member' : 'members'}
+                          </span>
+                        ) : (
+                          <span>
+                            Leader: <strong className="text-slate-800 font-semibold">{bdm.leaderName && bdm.leaderName !== bdm.fullName ? bdm.leaderName : 'Management'}</strong>
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <span
-                      className={`text-xs px-2.5 py-1 rounded-full font-extrabold ${
-                        isGoalMet ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'
-                      }`}
-                    >
-                      {bdm.achievementPercent}% Goal
-                    </span>
+
+                    <div className="flex flex-col items-end gap-1.5 shrink-0">
+                      <span
+                        className={`text-xs px-2.5 py-1 rounded-full font-extrabold ${
+                          isGoalMet ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        {bdm.achievementPercent}% Goal
+                      </span>
+
+                      {/* Edit & Remove Action Buttons */}
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <button
+                          onClick={() => handleOpenEditMember(bdm)}
+                          title="Edit employee details"
+                          className="px-2.5 py-1 text-slate-700 hover:text-indigo-700 bg-slate-50 hover:bg-indigo-50/80 rounded-lg border border-slate-300 hover:border-indigo-300 transition-colors flex items-center gap-1 text-[11px] font-bold shadow-2xs"
+                        >
+                          <Edit3 className="w-3 h-3 text-slate-600" />
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          onClick={() => setDeletingMember(bdm)}
+                          title="Remove employee"
+                          className="px-2.5 py-1 text-rose-700 hover:text-rose-900 bg-rose-50 hover:bg-rose-100 rounded-lg border border-rose-300 hover:border-rose-400 transition-colors flex items-center gap-1 text-[11px] font-bold shadow-2xs"
+                        >
+                          <Trash2 className="w-3 h-3 text-rose-600" />
+                          <span>Remove</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Target & Inline Editor */}
@@ -1124,7 +1416,7 @@ export default function AdminDashboard({
                     <div className="p-2.5 rounded-lg bg-indigo-50/50 border border-indigo-100">
                       <span className="text-[10px] text-indigo-600 uppercase font-semibold block">Deals</span>
                       <span className="font-extrabold text-indigo-800">
-                        {bdm.dealsCount} Total ({bdm.closedDealsCount} Closed)
+                        {bdm.dealsCount} Total
                       </span>
                     </div>
 
@@ -1574,6 +1866,281 @@ export default function AdminDashboard({
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* -------------------- ADD / EDIT EMPLOYEE MODAL -------------------- */}
+      {memberModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 max-w-lg w-full shadow-2xl max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-200">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-100">
+                  <UserPlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    {editingMember ? 'Edit Employee Details' : 'Add New Team Member'}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {editingMember
+                      ? `Updating records for ${editingMember.fullName}`
+                      : 'Create new BDM credentials & configure reporting'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMemberModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {memberError && (
+              <div className="p-3 mb-4 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs">
+                {memberError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveMember} className="space-y-4 text-xs">
+              {/* Full Name & Corporate Email */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-700 font-semibold block mb-1">Full Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={memberFormData.fullName}
+                    onChange={(e) => setMemberFormData({ ...memberFormData, fullName: e.target.value })}
+                    className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-slate-900 focus:outline-none focus:border-indigo-600 font-medium"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-700 font-semibold block mb-1">Corporate Email *</label>
+                  <input
+                    type="email"
+                    required
+                    value={memberFormData.email}
+                    onChange={(e) => setMemberFormData({ ...memberFormData, email: e.target.value })}
+                    className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-slate-900 focus:outline-none focus:border-indigo-600 font-medium"
+                  />
+                </div>
+              </div>
+
+              {/* Mobile Phone & Monthly Sales Target */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-700 font-semibold block mb-1">Mobile Phone</label>
+                  <input
+                    type="tel"
+                    value={memberFormData.phone}
+                    onChange={(e) => setMemberFormData({ ...memberFormData, phone: e.target.value })}
+                    className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-slate-900 focus:outline-none focus:border-indigo-600 font-medium"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-700 font-semibold block mb-1">Monthly Sales Target (₹)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1000"
+                    value={memberFormData.salesTarget}
+                    onChange={(e) => setMemberFormData({ ...memberFormData, salesTarget: e.target.value })}
+                    className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-slate-900 focus:outline-none focus:border-indigo-600 font-semibold"
+                  />
+                </div>
+              </div>
+
+              {/* Password */}
+              <div>
+                <label className="text-slate-700 font-semibold block mb-1">
+                  Password {editingMember ? '(Leave blank to keep current)' : '*'}
+                </label>
+                <input
+                  type="password"
+                  required={!editingMember}
+                  value={memberFormData.password}
+                  onChange={(e) => setMemberFormData({ ...memberFormData, password: e.target.value })}
+                  className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-slate-900 focus:outline-none focus:border-indigo-600 font-medium"
+                />
+              </div>
+
+              {/* Role Option: Member vs Leader */}
+              <div>
+                <label className="text-slate-700 font-semibold block mb-1.5">
+                  Hierarchy Position
+                </label>
+                <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => setMemberFormData({ ...memberFormData, isLeader: false })}
+                    className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                      !memberFormData.isLeader
+                        ? 'bg-white text-slate-900 shadow-sm border border-slate-200'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Users className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Member (Default)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMemberFormData({ ...memberFormData, isLeader: true })}
+                    className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                      memberFormData.isLeader
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Crown className="w-3.5 h-3.5 text-amber-300" />
+                    <span>Team Leader</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* DYNAMIC HIERARCHY SECTION */}
+              {!memberFormData.isLeader ? (
+                /* IF MEMBER: Show Reporting Leader & can edit */
+                <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
+                  <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <Crown className="w-3.5 h-3.5 text-indigo-600" />
+                    Reporting Team Leader:
+                  </label>
+                  <select
+                    value={memberFormData.leaderName}
+                    onChange={(e) => setMemberFormData({ ...memberFormData, leaderName: e.target.value })}
+                    className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 font-semibold focus:outline-none focus:border-indigo-600"
+                  >
+                    {activeLeaders.map((ldr) => (
+                      <option key={ldr} value={ldr}>
+                        {ldr === 'Management' ? 'Management (Direct / No Team Leader)' : `${ldr} (Team Leader)`}
+                      </option>
+                    ))}
+                    {!activeLeaders.includes('Management') && (
+                      <option value="Management">Management (Direct / No Team Leader)</option>
+                    )}
+                  </select>
+                  <p className="text-[11px] text-slate-500">
+                    This member's leads, meetings, and conversion metrics will be supervised by the selected leader.
+                  </p>
+                </div>
+              ) : (
+                /* IF LEADER: Show Assigned Members & can edit */
+                <div className="p-3.5 bg-indigo-50/60 rounded-xl border border-indigo-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5 text-indigo-600" />
+                      Assigned Team Members:
+                    </label>
+                    <span className="text-[11px] font-bold text-indigo-700 bg-white px-2 py-0.5 rounded-md border border-indigo-200">
+                      {memberFormData.memberIds.length} Selected
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-indigo-800">
+                    Select team members who report to this leader. Members belonging to other leaders cannot be selected:
+                  </p>
+                  <div className="max-h-48 overflow-y-auto space-y-1 bg-white p-2.5 rounded-lg border border-indigo-100">
+                    {assignableMembers.length === 0 ? (
+                      <p className="text-xs text-slate-400 py-3 text-center">No unassigned BDM members available to add.</p>
+                    ) : (
+                      assignableMembers.map((m) => {
+                        const isChecked = memberFormData.memberIds.includes(m.id);
+                        return (
+                          <label
+                            key={m.id}
+                            className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition text-xs ${
+                              isChecked
+                                ? 'bg-indigo-50 border border-indigo-200 text-indigo-950 font-semibold'
+                                : 'hover:bg-slate-50 text-slate-700 border border-transparent'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => handleToggleMemberSelection(m.id)}
+                                className="rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer"
+                              />
+                              <div>
+                                <span className="block leading-tight">{m.fullName}</span>
+                                <span className="text-[10px] text-slate-400 block font-normal">{m.email}</span>
+                              </div>
+                            </div>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-normal ${
+                              isChecked ? 'text-indigo-700 bg-indigo-100 font-semibold' : 'text-slate-500 bg-slate-100'
+                            }`}>
+                              {isChecked ? 'In This Team' : 'Unassigned'}
+                            </span>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Form Buttons */}
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setMemberModalOpen(false)}
+                  className="px-4 py-2 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg font-semibold transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={memberSaving}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold transition shadow-sm disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {memberSaving ? (
+                    <span>Saving...</span>
+                  ) : (
+                    <span>{editingMember ? 'Update Employee' : 'Add Employee'}</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* -------------------- DELETE CONFIRMATION MODAL -------------------- */}
+      {deletingMember && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 max-w-sm w-full shadow-2xl">
+            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mb-4 mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h3 className="text-base font-bold text-slate-900 text-center mb-1">Remove Employee?</h3>
+            <p className="text-xs text-slate-500 text-center mb-6">
+              Are you sure you want to remove <strong className="text-slate-800">{deletingMember.fullName}</strong>?
+              {deletingMember.leaderName === deletingMember.fullName && (
+                <span className="block mt-1 text-amber-600 font-medium">
+                  Team members under this leader will be safely reassigned to Management.
+                </span>
+              )}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setDeletingMember(null)}
+                className="flex-1 py-2 px-3 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg text-xs font-semibold transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deletingLoading}
+                onClick={handleDeleteMember}
+                className="flex-1 py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold transition disabled:opacity-50"
+              >
+                {deletingLoading ? 'Removing...' : 'Yes, Remove'}
+              </button>
             </div>
           </div>
         </div>

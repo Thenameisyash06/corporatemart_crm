@@ -12,16 +12,6 @@ import api from '../lib/api';
 import { toast } from '../context/ToastContext';
 import MeetingNotificationDropdown from './MeetingNotificationDropdown';
 
-const QUICK_ROLES = [
-  { label: 'BDM (Sales)', email: 'bdm@corporatemart.com', pass: 'bdm123', role: 'BDM' },
-  { label: 'BDM (Leader)', email: 'leader@corporatemart.com', pass: 'leader123', role: 'BDM' },
-  { label: 'Accounts', email: 'accounts@corporatemart.com', pass: 'accounts123', role: 'ACCOUNTS' },
-  { label: 'Legal', email: 'legal@corporatemart.com', pass: 'legal123', role: 'LEGAL' },
-  { label: 'Operations', email: 'ops@corporatemart.com', pass: 'ops123', role: 'OPERATIONS' },
-  { label: 'RM', email: 'rm@corporatemart.com', pass: 'rm123', role: 'RM' },
-  { label: 'Admin', email: 'admin@corporatemart.com', pass: 'admin123', role: 'ADMIN' },
-];
-
 export default function Navbar({
   currentUser,
   onUserChange,
