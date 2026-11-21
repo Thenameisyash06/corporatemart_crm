@@ -1218,35 +1218,35 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
 
     const file = req.file;
 
-    // MANDATORY VALIDATION: Quotation file is required
-    if (!file) {
-      return res.status(400).json({
-        error: 'Quotation file is mandatory. Please attach a quotation document in PDF (.pdf) or Word (.doc, .docx) format.',
-      });
-    }
-
-    // Validate Required Text Fields
+    // 1. Validate Required Text Fields first
     if (!companyName || !companyName.trim()) {
-      return res.status(400).json({ error: 'Company Name is mandatory.' });
+      return res.status(400).json({ error: 'Company Name is mandatory. Please enter the client company name.' });
     }
     const cleanPhone = (mobileNo || '').trim();
     if (!cleanPhone) {
-      return res.status(400).json({ error: 'Mobile Number is mandatory.' });
+      return res.status(400).json({ error: 'Mobile Number is mandatory. Please provide a 10-digit mobile number.' });
     }
     if (!EXACT_10_DIGIT_PHONE_REGEX.test(cleanPhone)) {
       return res.status(400).json({
-        error: 'Invalid mobile number. Must be exactly 10 digits without symbols, spaces, or country code (starting with 6-9).',
+        error: 'Invalid mobile number. Must be exactly 10 digits starting with 6, 7, 8, or 9 (without country code, symbols, or spaces).',
       });
     }
 
-    // Duplicate check by mobile number (Phone numbers must be strictly unique in LMS)
+    // 2. Duplicate check by mobile number (Phone numbers must be strictly unique in LMS)
     const existingPhoneLeads = await prisma.$queryRawUnsafe(
       `SELECT "id", "companyName" FROM "leads" WHERE "mobileNo" = $1 LIMIT 1`,
       cleanPhone
     );
     if (existingPhoneLeads && existingPhoneLeads.length > 0) {
       return res.status(400).json({
-        error: `A lead with mobile number ${cleanPhone} already exists (${existingPhoneLeads[0].companyName}). Phone numbers must be unique in LMS.`,
+        error: `A lead with mobile number ${cleanPhone} already exists (${existingPhoneLeads[0].companyName}). Each lead must have a unique phone number in LMS.`,
+      });
+    }
+
+    // 3. MANDATORY VALIDATION: Quotation file is required
+    if (!file) {
+      return res.status(400).json({
+        error: 'Quotation file is mandatory. Please attach an official quotation document in PDF (.pdf) or Word (.doc, .docx) format.',
       });
     }
 
