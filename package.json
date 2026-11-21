@@ -48,24 +48,17 @@
     "appId": "com.corporatemart.crm",
     "productName": "CorporateMart CRM",
     "directories": {
-      "output": "release"
+      "output": "dist-desktop"
     },
-    "asar": false,
+    "asar": true,
     "files": [
-      "src/**/*",
       "electron/**/*",
       "client/dist/**/*",
-      "uploads/**/*",
-      "prisma/**/*",
-      ".env",
-      "node_modules/**/*",
-      "!node_modules/electron{,/**/*}",
-      "!node_modules/electron-builder{,/**/*}",
-      "!node_modules/app-builder-bin{,/**/*}",
-      "!node_modules/@electron{,/**/*}",
+      "build/**/*",
       "package.json"
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -86,7 +79,10 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "CorporateMart CRM"
+      "shortcutName": "CorporateMart CRM",
+      "uninstallDisplayName": "CorporateMart CRM",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
     }
   }
 }

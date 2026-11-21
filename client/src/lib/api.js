@@ -1,17 +1,56 @@
 import axios from 'axios';
 
-// Detect runtime environment: Web browser (relative /api), custom API url, or Electron desktop (file: / localhost)
-const getApiBaseUrl = () => {
+export const DEFAULT_CLOUD_API_URL = 'https://corporatemartcrm.vercel.app/api';
+
+export const getStoredCloudUrl = () => {
+  try {
+    return localStorage.getItem('cm_cloud_api_url') || '';
+  } catch (e) {
+    return '';
+  }
+};
+
+export const setStoredCloudUrl = (url) => {
+  try {
+    if (url && url.trim()) {
+      let clean = url.trim().replace(/\/+$/, '');
+      if (!clean.endsWith('/api')) clean = `${clean}/api`;
+      localStorage.setItem('cm_cloud_api_url', clean);
+      api.defaults.baseURL = clean;
+    } else {
+      localStorage.removeItem('cm_cloud_api_url');
+      api.defaults.baseURL = getApiBaseUrl();
+    }
+    window.dispatchEvent(new Event('api_url_changed'));
+  } catch (e) {}
+};
+
+// Detect runtime environment: Web browser (relative /api), custom API url, or Electron desktop
+export const getApiBaseUrl = () => {
+  // 1. In-app customized Cloud Server URL (saved in localStorage by user or staff)
+  const stored = getStoredCloudUrl();
+  if (stored) return stored;
+
+  // 2. Pre-injected by Electron window or preload script
   if (typeof window !== 'undefined' && window.CORPORATEMART_API_URL) {
-    return window.CORPORATEMART_API_URL;
+    let injected = window.CORPORATEMART_API_URL.trim().replace(/\/+$/, '');
+    return injected.endsWith('/api') ? injected : `${injected}/api`;
   }
+
+  // 3. Vite environment variable from build/env
   if (import.meta.env?.VITE_API_URL) {
-    return import.meta.env.VITE_API_URL;
+    let envUrl = import.meta.env.VITE_API_URL.trim().replace(/\/+$/, '');
+    return envUrl.endsWith('/api') ? envUrl : `${envUrl}/api`;
   }
-  // If running in packaged Electron or loaded via file:// protocol
-  if (typeof window !== 'undefined' && (window.location.protocol === 'file:' || !window.location.origin.startsWith('http'))) {
-    return 'http://localhost:4000/api';
+
+  // 4. If running in packaged Electron or loaded via file:// protocol (native desktop window)
+  if (
+    typeof window !== 'undefined' &&
+    (window.location.protocol === 'file:' || !window.location.origin.startsWith('http') || window.desktopAPI?.isDesktop)
+  ) {
+    return DEFAULT_CLOUD_API_URL;
   }
+
   return '/api';
 };
 

@@ -1,69 +1,28 @@
-const { app, BrowserWindow, shell } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
 
-// Pre-load environment variables
-const envPath = path.join(__dirname, '../.env');
-try {
-  require('dotenv').config({ path: envPath });
-} catch (e) {}
-
 let mainWindow = null;
-let serverInstance = null;
+const CLOUD_APP_URL = 'https://corporatemartcrm.vercel.app';
 
-// Static require so electron-builder packs all backend dependencies
-let expressApp = null;
-try {
-  expressApp = require('../src/server.js');
-} catch (err) {
-  console.error('[Desktop] Failed to require server.js:', err);
-}
-
-// Helper to check if a server is running on a port
-function isServerRunning(port = 4000, checkPath = '/api/health') {
+// Helper to check if a local development server is running on a port
+function isServerRunning(port = 5173, checkPath = '/') {
   return new Promise((resolve) => {
-    const req = http.get(`http://localhost:${port}${checkPath}`, (res) => {
+    const req = http.get(`http://localhost:${port}${checkPath}`, () => {
       resolve(true);
     });
     req.on('error', () => resolve(false));
-    req.setTimeout(500, () => {
+    req.setTimeout(600, () => {
       req.destroy();
       resolve(false);
     });
   });
 }
 
-// Start backend Express server non-blockingly in the background
-async function startBackgroundServer(port = 4000) {
-  try {
-    const running = await isServerRunning(port);
-    if (running) {
-      console.log(`[Desktop] Server is already running on port ${port}.`);
-      return;
-    }
-
-    if (expressApp) {
-      console.log(`[Desktop] Starting embedded API server on port ${port}...`);
-      serverInstance = expressApp.listen(port, () => {
-        console.log(`[Desktop] Embedded Express API ready on http://localhost:${port}`);
-      });
-
-      serverInstance.on('error', (err) => {
-        if (err.code !== 'EADDRINUSE') {
-          console.error('[Desktop] Server error:', err.message);
-        }
-      });
-    } else {
-      console.error('[Desktop] expressApp is not loaded, cannot start embedded server.');
-    }
-  } catch (err) {
-    console.error('[Desktop] Non-fatal server startup notice:', err.message);
-  }
-}
-
 function createWindow() {
   const preloadPath = path.join(__dirname, 'preload.js');
+  const iconPath = path.join(__dirname, 'icon.png');
 
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -71,17 +30,27 @@ function createWindow() {
     minWidth: 1024,
     minHeight: 700,
     title: 'CorporateMart CRM',
-    backgroundColor: '#020617',
-    show: true,
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
+    backgroundColor: '#0f172a',
+    show: false,
+    autoHideMenuBar: true,
     webPreferences: {
       preload: fs.existsSync(preloadPath) ? preloadPath : undefined,
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false,
+      webSecurity: false, // Allow cross-origin requests to Vercel cloud API from local files
     },
   });
 
-  // Open external links in default web browser
+  // Remove default menu bar for clean native app appearance
+  Menu.setApplicationMenu(null);
+
+  // Show window smoothly once ready
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+  });
+
+  // Open external links (e.g. documentation, government portals) in default web browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
@@ -90,46 +59,58 @@ function createWindow() {
   const prodFile = path.join(__dirname, '../client/dist/index.html');
   const devUrl = 'http://localhost:5173';
 
-  if (app.isPackaged) {
-    // In compiled .exe application, load local production build directly
-    mainWindow.loadFile(prodFile).catch((err) => {
-      console.error('[Desktop] Error loading index.html:', err);
+  // Fallback to local files if cloud connection fails
+  const loadWithFallback = (targetUrl) => {
+    mainWindow.loadURL(targetUrl).catch((err) => {
+      console.warn('[Desktop] Cloud connection failed, loading local build:', err.message);
+      mainWindow.loadFile(prodFile).catch((e) => {
+        console.error('[Desktop] Failed to load local fallback:', e);
+      });
     });
+  };
+
+  if (app.isPackaged) {
+    // In production desktop package, load live cloud app so any code pushed by developers reflects immediately
+    loadWithFallback(CLOUD_APP_URL);
   } else {
-    // In local dev, check if Vite dev server is running on 5173 first
+    // In local dev mode, check if Vite dev server is running on 5173 first
     isServerRunning(5173, '/').then((running) => {
       if (!mainWindow) return;
       if (running) {
         mainWindow.loadURL(devUrl);
       } else {
-        mainWindow.loadFile(prodFile).catch((err) => {
-          console.error('[Desktop] Error loading index.html:', err);
-        });
+        loadWithFallback(CLOUD_APP_URL);
       }
     });
   }
+
+  // Handle network failure during navigation
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+    if (errorCode !== -3 && mainWindow && !mainWindow.isDestroyed()) { // -3 is ABORTED
+      console.warn(`[Desktop] Page failed to load (${errorCode}: ${errorDescription}), falling back to local files.`);
+      mainWindow.loadFile(prodFile).catch(() => {});
+    }
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 }
 
+// IPC Handlers
+ipcMain.handle('open-external', async (_, url) => {
+  if (url && typeof url === 'string') {
+    shell.openExternal(url);
+  }
+});
+
 // App lifecycle
-app.whenReady().then(async () => {
+app.whenReady().then(() => {
   createWindow();
-  await startBackgroundServer(4000);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
-});
-
-app.on('before-quit', () => {
-  if (serverInstance) {
-    try {
-      serverInstance.close();
-    } catch (e) {}
-  }
 });
 
 app.on('window-all-closed', () => {
