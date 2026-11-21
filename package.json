@@ -9,6 +9,9 @@
     "build": "npm --prefix client run build",
     "postinstall": "prisma generate && npm --prefix client install",
     "desktop": "electron electron/main.js",
+    "desktop:dev": "concurrently -k \"node --watch src/server.js\" \"npm --prefix client run dev\" \"wait-on http://localhost:5173 && electron electron/main.js\"",
+    "desktop:build": "npm run build && electron-builder",
+    "desktop:dist": "npm run build && electron-builder --win nsis",
     "dev": "concurrently -k \"node --watch src/server.js\" \"npm --prefix client run dev\"",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
@@ -37,6 +40,53 @@
   },
   "devDependencies": {
     "concurrently": "^10.0.6",
-    "electron": "^31.7.7"
+    "electron": "^31.7.7",
+    "electron-builder": "^26.18.0",
+    "wait-on": "^9.5.1"
+  },
+  "build": {
+    "appId": "com.corporatemart.crm",
+    "productName": "CorporateMart CRM",
+    "directories": {
+      "output": "release"
+    },
+    "asar": false,
+    "files": [
+      "src/**/*",
+      "electron/**/*",
+      "client/dist/**/*",
+      "uploads/**/*",
+      "prisma/**/*",
+      ".env",
+      "node_modules/**/*",
+      "!node_modules/electron{,/**/*}",
+      "!node_modules/electron-builder{,/**/*}",
+      "!node_modules/app-builder-bin{,/**/*}",
+      "!node_modules/@electron{,/**/*}",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "CorporateMart CRM"
+    }
   }
 }

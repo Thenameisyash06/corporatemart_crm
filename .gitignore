@@ -5,6 +5,8 @@ client/node_modules/
 # Production Build Output
 dist/
 client/dist/
+release/
+dist-electron/
 
 # Environment Variables & Credentials
 .env
