@@ -24,7 +24,12 @@ router.get('/stats', authenticateToken, async (req, res) => {
     if (isBdmUser) {
       const rows = await prisma.$queryRawUnsafe(`
         WITH bdm_deals AS (
-          SELECT d.id, d.stage, d."totalAmount", d."amountReceived", d."pendingAmount"
+          SELECT 
+            d.id, 
+            d.stage, 
+            ((d."totalAmount" / 1.18) / ((SELECT COUNT(*) FROM "_DealCoBdms" WHERE "A" = d.id) + 1.0)) as "totalAmount", 
+            ((d."amountReceived" / 1.18) / ((SELECT COUNT(*) FROM "_DealCoBdms" WHERE "A" = d.id) + 1.0)) as "amountReceived", 
+            ((d."pendingAmount" / 1.18) / ((SELECT COUNT(*) FROM "_DealCoBdms" WHERE "A" = d.id) + 1.0)) as "pendingAmount"
           FROM "deals" d
           WHERE d."bdmId" = $1 OR d.id IN (SELECT "A" FROM "_DealCoBdms" WHERE "B" = $1)
         ),
@@ -47,7 +52,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
         payment_stats AS (
           SELECT
             COUNT(*) FILTER (WHERE p.status = 'PENDING_VERIFICATION' AND p."trancheNumber" > 1)::int as pending_balance_verifications,
-            COALESCE(SUM(p.amount) FILTER (WHERE p.status = 'VERIFIED'), 0)::float as total_collected
+            COALESCE(SUM((p.amount / 1.18) / ((SELECT COUNT(*) FROM "_DealCoBdms" WHERE "A" = p."dealId") + 1.0)) FILTER (WHERE p.status = 'VERIFIED'), 0)::float as total_collected
           FROM "payments" p
           WHERE p."dealId" IN (SELECT id FROM bdm_deals)
         )
@@ -111,15 +116,15 @@ router.get('/stats', authenticateToken, async (req, res) => {
     const closedDeals = statsRow.closed_deals || 0;
     const pendingBalanceVerifications = statsRow.pending_balance_verifications || 0;
 
-    const totalCollected = Number(statsRow.amount_received ?? statsRow.total_collected ?? 0);
-    const totalDealValue = Number(statsRow.total_deal_value || 0);
-    const totalPending = Number(statsRow.pending_amount !== undefined && statsRow.pending_amount !== null ? statsRow.pending_amount : Math.max(0, totalDealValue - totalCollected));
+    const totalCollected = Math.round(Number(statsRow.total_collected || 0));
+    const totalDealValue = Math.round(Number(statsRow.total_deal_value || 0));
+    const totalPending = Math.round(Math.max(0, totalDealValue - totalCollected));
 
     let bdmMetrics = null;
     if (isBdmUser) {
-      const target = parseFloat(statsRow.salesTarget) || 500000;
-      const achievement = totalCollected;
-      const pending = Math.max(0, target - achievement);
+      const target = Math.round(parseFloat(statsRow.salesTarget) || 500000);
+      const achievement = Math.round(totalCollected);
+      const pending = Math.round(Math.max(0, target - achievement));
       const progressPercent = target > 0 ? Math.min(100, Math.round((achievement / target) * 100)) : 0;
       bdmMetrics = {
         target,
@@ -221,13 +226,29 @@ router.get('/admin-overview', authenticateToken, requireRoles('ADMIN'), async (r
               amountReceived: true,
               pendingAmount: true,
               isAccountsVerified: true,
+              coBdms: {
+                select: { id: true, fullName: true },
+              },
               payments: {
-                select: {
-                  id: true,
-                  amount: true,
-                  status: true,
-                  trancheNumber: true,
-                },
+                select: { id: true, amount: true, status: true },
+              },
+              createdAt: true,
+            },
+          },
+          coBdmDeals: {
+            select: {
+              id: true,
+              dealCode: true,
+              stage: true,
+              totalAmount: true,
+              amountReceived: true,
+              pendingAmount: true,
+              isAccountsVerified: true,
+              coBdms: {
+                select: { id: true, fullName: true },
+              },
+              payments: {
+                select: { id: true, amount: true, status: true },
               },
               createdAt: true,
             },
@@ -307,6 +328,9 @@ router.get('/admin-overview', authenticateToken, requireRoles('ADMIN'), async (r
           coBdms: {
             select: { id: true, fullName: true },
           },
+          payments: {
+            select: { id: true, amount: true, status: true },
+          },
         },
         orderBy: { createdAt: 'desc' },
       }),
@@ -324,16 +348,66 @@ router.get('/admin-overview', authenticateToken, requireRoles('ADMIN'), async (r
       }),
     ]);
 
-    // 1. Format BDM Performance
+    // 1. Format BDM Performance (deals divided equally among lead BDM and co-BDMs)
     const bdmPerformance = bdms.map((b) => {
-      const deals = b.dealsCreated || [];
-      const totalCollected = deals.reduce((sum, d) => sum + Number(d.amountReceived || 0), 0);
-      const totalRevenue = deals.reduce((sum, d) => sum + Number(d.totalAmount || 0), 0);
-      const totalPending = deals.reduce((sum, d) => sum + Number(d.pendingAmount !== undefined && d.pendingAmount !== null ? d.pendingAmount : (d.totalAmount - d.amountReceived) || 0), 0);
+      const primaryDeals = b.dealsCreated || [];
+      const coDeals = b.coBdmDeals || [];
+
+      // Combine all deals where user is primary or co-BDM
+      const seenDealIds = new Set();
+      const allMyDeals = [];
+      primaryDeals.forEach((d) => {
+        seenDealIds.add(d.id);
+        allMyDeals.push(d);
+      });
+      coDeals.forEach((d) => {
+        if (!seenDealIds.has(d.id)) {
+          seenDealIds.add(d.id);
+          allMyDeals.push(d);
+        }
+      });
+
+      let totalRevenue = 0;
+      let totalCollected = 0;
+      let totalPending = 0;
+      let closedDealsCount = 0;
+      let activeDealsCount = 0;
+
+      allMyDeals.forEach((d) => {
+        const coCount = d.coBdms ? d.coBdms.length : 0;
+        const splitCount = 1 + coCount;
+        const splitFactor = 1 / splitCount;
+
+        // Received amounts only counted after Accounts verification
+        let dealVerifiedCollected = 0;
+        if (d.payments && d.payments.length > 0) {
+          dealVerifiedCollected = d.payments
+            .filter((p) => p.status === 'VERIFIED')
+            .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+        } else if (d.isAccountsVerified || !['STAGE_01_PAYMENT_RECEIVED', 'STAGE_02_DOCUMENTS_COLLECTED', 'STAGE_04_ACCOUNTS_VERIFICATION', 'STAGE_04_ACCOUNTS_REJECTED'].includes(d.stage)) {
+          dealVerifiedCollected = Number(d.amountReceived || 0);
+        }
+
+        // First remove 18% GST of total deal value, received amount, and pending amount
+        const baseTotalRevenue = Number(d.totalAmount || 0) / 1.18;
+        const baseVerifiedCollected = dealVerifiedCollected / 1.18;
+        const basePending = Math.max(0, baseTotalRevenue - baseVerifiedCollected);
+
+        // Then divide equally among primary BDM and co-BDMs (half each for 1 co-BDM)
+        const myRevenue = baseTotalRevenue * splitFactor;
+        const myCollected = baseVerifiedCollected * splitFactor;
+        const myPending = basePending * splitFactor;
+
+        totalRevenue += myRevenue;
+        totalCollected += myCollected;
+        totalPending += myPending;
+
+        if (d.stage === 'CLOSED') closedDealsCount += 1;
+        else activeDealsCount += 1;
+      });
+
       const target = Number(b.salesTarget || 500000);
       const achievementPercent = target > 0 ? Math.round((totalCollected / target) * 100) : 0;
-      const closedDeals = deals.filter((d) => d.stage === 'CLOSED');
-      const activeDeals = deals.filter((d) => d.stage !== 'CLOSED');
 
       return {
         id: b.id,
@@ -342,14 +416,14 @@ router.get('/admin-overview', authenticateToken, requireRoles('ADMIN'), async (r
         phone: b.phone,
         leaderName: b.leaderName,
         salesTarget: target,
-        dealsCount: deals.length,
-        totalRevenue,
-        totalCollected,
-        totalPending,
+        dealsCount: allMyDeals.length,
+        totalRevenue: Math.round(totalRevenue),
+        totalCollected: Math.round(totalCollected),
+        totalPending: Math.round(totalPending),
         achievementPercent,
-        closedDealsCount: closedDeals.length,
-        activeDealsCount: activeDeals.length,
-        avgDealSize: deals.length > 0 ? Math.round(totalRevenue / deals.length) : 0,
+        closedDealsCount,
+        activeDealsCount,
+        avgDealSize: allMyDeals.length > 0 ? Math.round(totalRevenue / allMyDeals.length) : 0,
         isActive: b.isActive,
       };
     });
@@ -428,9 +502,9 @@ router.get('/admin-overview', authenticateToken, requireRoles('ADMIN'), async (r
       };
     });
 
-    const totalRevenue = Number(dealAggregates._sum.totalAmount || 0);
-    const totalCollected = Number(dealAggregates._sum.amountReceived || 0);
-    const totalPending = Number(dealAggregates._sum.pendingAmount !== undefined && dealAggregates._sum.pendingAmount !== null ? dealAggregates._sum.pendingAmount : Math.max(0, totalRevenue - totalCollected));
+    const totalRevenue = Math.round(Number(dealAggregates._sum.totalAmount || 0));
+    const totalCollected = Math.round(Number(verifiedPaymentsAgg._sum.amount || 0));
+    const totalPending = Math.round(Math.max(0, totalRevenue - totalCollected));
 
     return res.json({
       summary: {
@@ -439,7 +513,7 @@ router.get('/admin-overview', authenticateToken, requireRoles('ADMIN'), async (r
         totalRevenue,
         totalCollected,
         totalPending,
-        avgDealSize: Number(dealAggregates._avg.totalAmount || 0),
+        avgDealSize: Math.round(Number(dealAggregates._avg.totalAmount || 0)),
         collectionRate: totalRevenue > 0 ? Math.round((totalCollected / totalRevenue) * 100) : 0,
       },
       stageMap,

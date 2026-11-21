@@ -1628,4 +1628,51 @@ router.post('/:id/rm-communication', authenticateToken, requireRoles('RM', 'ADMI
   }
 });
 
+// -----------------------------------------------------------------------------
+// DELETE /api/deals/:id - Delete a Deal and all its related records
+// -----------------------------------------------------------------------------
+router.delete('/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deal = await prisma.deal.findUnique({
+      where: { id },
+      include: { client: true },
+    });
+
+    if (!deal) {
+      return res.status(404).json({ error: 'Deal not found.' });
+    }
+
+    // Admins and BDM owners can delete
+    if (req.user.role !== 'ADMIN' && req.user.id !== deal.bdmId && req.user.role !== 'BDM') {
+      return res.status(403).json({ error: 'Permission denied. Only Admins or BDMs can delete deals.' });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      // 1. Delete associated payments
+      await tx.payment.deleteMany({ where: { dealId: id } });
+
+      // 2. Delete associated documents
+      await tx.document.deleteMany({ where: { dealId: id } });
+
+      // 3. Delete associated services
+      await tx.dealService.deleteMany({ where: { dealId: id } });
+
+      // 4. Delete associated renewal reminders
+      await tx.renewalReminder.deleteMany({ where: { dealId: id } });
+
+      // 5. Delete associated audit logs
+      await tx.auditLog.deleteMany({ where: { dealId: id } });
+
+      // 6. Delete deal itself (Prisma automatically disconnects many-to-many coBdms)
+      await tx.deal.delete({ where: { id } });
+    });
+
+    return res.json({ message: `Deal ${deal.dealCode} deleted successfully.` });
+  } catch (error) {
+    console.error('Delete deal error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to delete deal.' });
+  }
+});
+
 module.exports = router;

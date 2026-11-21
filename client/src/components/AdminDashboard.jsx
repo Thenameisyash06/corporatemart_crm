@@ -59,18 +59,26 @@ const STAGE_LABELS = {
 };
 
 function getDealVerifiedCollected(d) {
-  return Number(d.amountReceived || 0);
+  if (d.payments && Array.isArray(d.payments) && d.payments.length > 0) {
+    return d.payments
+      .filter((p) => p.status === 'VERIFIED')
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  }
+  if (d.isAccountsVerified || !['STAGE_01_PAYMENT_RECEIVED', 'STAGE_02_DOCUMENTS_COLLECTED', 'STAGE_04_ACCOUNTS_VERIFICATION', 'STAGE_04_ACCOUNTS_REJECTED'].includes(d.stage)) {
+    return Number(d.amountReceived || 0);
+  }
+  return 0;
 }
 
 function isDealAccountsVerified(d) {
-  return true;
+  return Boolean(d.isAccountsVerified || !['STAGE_01_PAYMENT_RECEIVED', 'STAGE_02_DOCUMENTS_COLLECTED', 'STAGE_04_ACCOUNTS_VERIFICATION', 'STAGE_04_ACCOUNTS_REJECTED'].includes(d.stage));
 }
 
 function buildOverviewFromDeals(deals = [], users = [], stats = null) {
   const totalDeals = deals.length;
   const totalRevenue = deals.reduce((sum, d) => sum + Number(d.totalAmount || 0), 0);
-  const totalCollected = deals.reduce((sum, d) => sum + Number(d.amountReceived || 0), 0);
-  const totalPending = deals.reduce((sum, d) => sum + Number(d.pendingAmount !== undefined ? d.pendingAmount : (d.totalAmount - d.amountReceived) || 0), 0);
+  const totalCollected = deals.reduce((sum, d) => sum + getDealVerifiedCollected(d), 0);
+  const totalPending = Math.max(0, totalRevenue - totalCollected);
   const avgDealSize = totalDeals > 0 ? Math.round(totalRevenue / totalDeals) : 0;
   const collectionRate = totalRevenue > 0 ? Math.round((totalCollected / totalRevenue) * 100) : 0;
 
@@ -106,41 +114,65 @@ function buildOverviewFromDeals(deals = [], users = [], stats = null) {
   });
 
   deals.forEach((d) => {
-    const bdmId = d.bdm?.id || d.bdmId || 'unknown_bdm';
-    if (!bdmMap.has(bdmId)) {
-      bdmMap.set(bdmId, {
-        id: bdmId,
-        fullName: d.bdm?.fullName || 'Primary BDM',
-        email: d.bdm?.email || '',
-        phone: '',
-        salesTarget: 500000,
-        dealsCount: 0,
-        totalRevenue: 0,
-        totalCollected: 0,
-        totalPending: 0,
-        achievementPercent: 0,
-        closedDealsCount: 0,
-        activeDealsCount: 0,
-        avgDealSize: 0,
-        isActive: true,
-      });
-    }
-    const b = bdmMap.get(bdmId);
-    b.dealsCount += 1;
-    b.totalRevenue += Number(d.totalAmount || 0);
-    b.totalCollected += Number(d.amountReceived || 0);
-    b.totalPending += Number(d.pendingAmount !== undefined ? d.pendingAmount : (d.totalAmount - d.amountReceived) || 0);
-    if (d.stage === 'CLOSED') b.closedDealsCount += 1;
-    else b.activeDealsCount += 1;
+    const leadBdmId = d.bdm?.id || d.bdmId;
+    const coBdmList = (d.coBdms || []).map((cb) => (typeof cb === 'string' ? cb : cb.id)).filter(Boolean);
+    const participantIds = Array.from(new Set([leadBdmId, ...coBdmList].filter(Boolean)));
+    const splitCount = participantIds.length || 1;
+    const splitFactor = 1 / splitCount;
+
+    const verifiedCollectedOnDeal = getDealVerifiedCollected(d);
+    // 1. First remove 18% GST of total deal value, received amount, and pending amount
+    const baseTotalRevenue = Number(d.totalAmount || 0) / 1.18;
+    const baseVerifiedCollected = verifiedCollectedOnDeal / 1.18;
+    const basePending = Math.max(0, baseTotalRevenue - baseVerifiedCollected);
+
+    // 2. Then divide equally among primary BDM and co-BDMs (half each for 1 co-BDM)
+    const revShare = baseTotalRevenue * splitFactor;
+    const collShare = baseVerifiedCollected * splitFactor;
+    const pendShare = basePending * splitFactor;
+
+    participantIds.forEach((pId) => {
+      if (!bdmMap.has(pId)) {
+        const foundUser = (users || []).find((u) => u.id === pId);
+        bdmMap.set(pId, {
+          id: pId,
+          fullName: foundUser?.fullName || (pId === leadBdmId ? d.bdm?.fullName : 'BDM Member') || 'BDM Member',
+          email: foundUser?.email || (pId === leadBdmId ? d.bdm?.email : '') || '',
+          phone: foundUser?.phone || '',
+          salesTarget: Number(foundUser?.salesTarget || 500000),
+          dealsCount: 0,
+          totalRevenue: 0,
+          totalCollected: 0,
+          totalPending: 0,
+          achievementPercent: 0,
+          closedDealsCount: 0,
+          activeDealsCount: 0,
+          avgDealSize: 0,
+          isActive: true,
+        });
+      }
+      const b = bdmMap.get(pId);
+      b.dealsCount += 1;
+      b.totalRevenue += revShare;
+      b.totalCollected += collShare;
+      b.totalPending += pendShare;
+      if (d.stage === 'CLOSED') b.closedDealsCount += 1;
+      else b.activeDealsCount += 1;
+    });
   });
 
   const bdmPerformance = Array.from(bdmMap.values()).map((b) => {
     const target = b.salesTarget || 500000;
-    b.totalPending = Math.max(0, b.totalRevenue - b.totalCollected);
+    const roundedRev = Math.round(b.totalRevenue);
+    const roundedColl = Math.round(b.totalCollected);
+    const roundedPend = Math.max(0, roundedRev - roundedColl);
     return {
       ...b,
-      achievementPercent: target > 0 ? Math.round((b.totalCollected / target) * 100) : 0,
-      avgDealSize: b.dealsCount > 0 ? Math.round(b.totalRevenue / b.dealsCount) : 0,
+      totalRevenue: roundedRev,
+      totalCollected: roundedColl,
+      totalPending: roundedPend,
+      achievementPercent: target > 0 ? Math.round((roundedColl / target) * 100) : 0,
+      avgDealSize: b.dealsCount > 0 ? Math.round(roundedRev / b.dealsCount) : 0,
     };
   });
 
@@ -740,7 +772,11 @@ export default function AdminDashboard({
   // Filtered Deals
   const filteredDeals = allDeals.filter((d) => {
     if (stageFilter !== 'ALL' && d.stage !== stageFilter) return false;
-    if (bdmFilter !== 'ALL' && (d.bdm?.id !== bdmFilter && d.bdmId !== bdmFilter)) return false;
+    if (bdmFilter !== 'ALL') {
+      const isLead = d.bdm?.id === bdmFilter || d.bdmId === bdmFilter;
+      const isCoBdm = (d.coBdms || []).some((cb) => (typeof cb === 'string' ? cb : cb.id) === bdmFilter);
+      if (!isLead && !isCoBdm) return false;
+    }
     if (dealSearch.trim()) {
       const q = dealSearch.toLowerCase().trim();
       const code = (d.dealCode || '').toLowerCase();
@@ -915,10 +951,10 @@ export default function AdminDashboard({
           <div className="bg-white/5 rounded-xl p-3.5 border border-white/10">
             <span className="text-[11px] font-medium text-slate-300 uppercase tracking-wider block">Closed Pipeline Value</span>
             <div className="text-xl font-extrabold text-white mt-1 font-mono tabular-nums">
-              ₹{Number(summary.totalRevenue || 0).toLocaleString('en-IN')}
+              ₹{Math.round(Number(summary.totalRevenue || 0)).toLocaleString('en-IN')}
             </div>
             <div className="text-[11px] text-slate-300 mt-1 flex items-center gap-1 font-mono tabular-nums">
-              <span>Avg Deal: ₹{Number(summary.avgDealSize || 0).toLocaleString('en-IN')}</span>
+              <span>Avg Deal: ₹{Math.round(Number(summary.avgDealSize || 0)).toLocaleString('en-IN')}</span>
             </div>
           </div>
           <div className="bg-indigo-950/40 rounded-xl p-3.5 border border-indigo-500/30">
@@ -926,7 +962,7 @@ export default function AdminDashboard({
               <TrendingUp className="w-3.5 h-3.5 text-indigo-400" /> LMS Lead Funnel
             </span>
             <div className="text-xl font-extrabold text-amber-300 mt-1 font-mono tabular-nums">
-              ₹{Number(lmsAnalytics?.totalEstimatedValue || 0).toLocaleString('en-IN')}
+              ₹{Math.round(Number(lmsAnalytics?.totalEstimatedValue || 0)).toLocaleString('en-IN')}
             </div>
             <div className="text-[11px] text-indigo-200 mt-1">
               <span className="font-mono tabular-nums font-bold">{lmsCount}</span> prospective leads in funnel
@@ -936,18 +972,18 @@ export default function AdminDashboard({
           <div className="bg-white/5 rounded-xl p-3.5 border border-white/10">
             <span className="text-[11px] font-medium text-slate-300 uppercase tracking-wider block">Collected / Realized</span>
             <div className="text-xl font-extrabold text-emerald-400 mt-1 font-mono tabular-nums">
-              ₹{Number(summary.totalCollected || 0).toLocaleString('en-IN')}
+              ₹{Math.round(Number(summary.totalCollected || 0)).toLocaleString('en-IN')}
             </div>
             <div className="text-[11px] text-emerald-300/80 mt-1 flex items-center gap-1">
               <Percent className="w-3 h-3" />
-              <span className="font-mono tabular-nums font-bold">{summary.collectionRate}%</span> Collection Rate
+              <span className="font-mono tabular-nums font-bold">{Math.round(Number(summary.collectionRate || 0))}%</span> Collection Rate
             </div>
           </div>
 
           <div className="bg-white/5 rounded-xl p-3.5 border border-white/10">
             <span className="text-[11px] font-medium text-slate-300 uppercase tracking-wider block">Outstanding Balance</span>
             <div className="text-xl font-extrabold text-amber-400 mt-1 font-mono tabular-nums">
-              ₹{Number(summary.totalPending || 0).toLocaleString('en-IN')}
+              ₹{Math.round(Number(summary.totalPending || 0)).toLocaleString('en-IN')}
             </div>
             <div className="text-[11px] text-amber-300/80 mt-1">
               Across Part-Payment Deals
@@ -1307,7 +1343,7 @@ export default function AdminDashboard({
                           isGoalMet ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'
                         }`}
                       >
-                        {bdm.achievementPercent}% Goal
+                        {Math.round(Number(bdm.achievementPercent || 0))}% Goal
                       </span>
 
                       {/* Edit & Remove Action Buttons */}
@@ -1385,7 +1421,7 @@ export default function AdminDashboard({
                     <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden mt-2.5">
                       <div
                         className={`h-full ${progressColor} transition-all duration-500`}
-                        style={{ width: `${Math.min(100, bdm.achievementPercent)}%` }}
+                        style={{ width: `${Math.min(100, Math.round(Number(bdm.achievementPercent || 0)))}%` }}
                       />
                     </div>
                   </div>
@@ -1395,21 +1431,21 @@ export default function AdminDashboard({
                     <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
                       <span className="text-[10px] text-slate-500 uppercase font-semibold block">Revenue</span>
                       <span className="font-extrabold text-slate-900">
-                        ₹{Number(bdm.totalRevenue || 0).toLocaleString('en-IN')}
+                        ₹{Math.round(Number(bdm.totalRevenue || 0)).toLocaleString('en-IN')}
                       </span>
                     </div>
 
                     <div className="p-2.5 rounded-lg bg-emerald-50/50 border border-emerald-100">
                       <span className="text-[10px] text-emerald-600 uppercase font-semibold block">Collected</span>
                       <span className="font-extrabold text-emerald-700">
-                        ₹{Number(bdm.totalCollected || 0).toLocaleString('en-IN')}
+                        ₹{Math.round(Number(bdm.totalCollected || 0)).toLocaleString('en-IN')}
                       </span>
                     </div>
 
                     <div className="p-2.5 rounded-lg bg-amber-50/50 border border-amber-100">
                       <span className="text-[10px] text-amber-600 uppercase font-semibold block">Pending</span>
                       <span className="font-extrabold text-amber-700">
-                        ₹{Number(bdm.totalPending || 0).toLocaleString('en-IN')}
+                        ₹{Math.round(Number(bdm.totalPending || 0)).toLocaleString('en-IN')}
                       </span>
                     </div>
 

@@ -165,13 +165,13 @@ export function exportBdmPerformanceToCsv(bdms, filename = 'CorporateMart_BDM_Pe
       leaderName: displayLeader,
       email: b.email,
       phone: b.phone || 'N/A',
-      salesTarget: Number(b.salesTarget || 0).toLocaleString('en-IN'),
-      totalRevenue: Number(b.totalRevenue || 0).toLocaleString('en-IN'),
-      totalCollected: Number(b.totalCollected || 0).toLocaleString('en-IN'),
-      totalPending: Number(b.totalPending || 0).toLocaleString('en-IN'),
-      achievementPercent: `${b.achievementPercent}%`,
+      salesTarget: Math.round(Number(b.salesTarget || 0)).toLocaleString('en-IN'),
+      totalRevenue: Math.round(Number(b.totalRevenue || 0)).toLocaleString('en-IN'),
+      totalCollected: Math.round(Number(b.totalCollected || 0)).toLocaleString('en-IN'),
+      totalPending: Math.round(Number(b.totalPending || 0)).toLocaleString('en-IN'),
+      achievementPercent: `${Math.round(Number(b.achievementPercent || 0))}%`,
       dealsCount: b.dealsCount,
-      avgDealSize: Number(b.avgDealSize || 0).toLocaleString('en-IN'),
+      avgDealSize: Math.round(Number(b.avgDealSize || 0)).toLocaleString('en-IN'),
     };
   });
 

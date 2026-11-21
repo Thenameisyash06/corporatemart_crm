@@ -23,10 +23,10 @@ export default function DealFinancialMetrics({
   onEditDealAmount = null,
   gstAmount = null,
 }) {
-  const numStandard = parseFloat(standardAmount) || 0;
-  const numDeal = parseFloat(dealAmount) || 0;
-  const numReceived = parseFloat(receivedAmount) || 0;
-  const numPending = parseFloat(pendingAmount) || 0;
+  const numStandard = Math.round(parseFloat(standardAmount) || 0);
+  const numDeal = Math.round(parseFloat(dealAmount) || 0);
+  const numReceived = Math.round(parseFloat(receivedAmount) || 0);
+  const numPending = Math.round(parseFloat(pendingAmount) || 0);
 
   return (
     <div className={`space-y-3 ${className}`}>
