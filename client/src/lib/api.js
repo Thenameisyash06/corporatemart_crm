@@ -1,7 +1,22 @@
 import axios from 'axios';
 
+// Detect runtime environment: Web browser (relative /api), custom API url, or Electron desktop (file: / localhost)
+const getApiBaseUrl = () => {
+  if (typeof window !== 'undefined' && window.CORPORATEMART_API_URL) {
+    return window.CORPORATEMART_API_URL;
+  }
+  if (import.meta.env?.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  // If running in packaged Electron or loaded via file:// protocol
+  if (typeof window !== 'undefined' && (window.location.protocol === 'file:' || !window.location.origin.startsWith('http'))) {
+    return 'http://localhost:4000/api';
+  }
+  return '/api';
+};
+
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: getApiBaseUrl(),
 });
 
 // Attach JWT token to requests if present
