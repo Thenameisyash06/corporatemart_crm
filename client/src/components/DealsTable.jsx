@@ -73,7 +73,7 @@ export default function DealsTable({
                 color: 'bg-slate-100 text-slate-700 border-slate-200',
               };
 
-              const pending = Number(deal.pendingAmount);
+              const pending = Math.round(Number(deal.pendingAmount || 0));
               const isRejected = deal.stage.includes('REJECTED');
 
               return (
@@ -138,11 +138,11 @@ export default function DealsTable({
                     <div className="flex items-baseline gap-2">
                       <span className="text-xs font-semibold text-slate-500">Deal:</span>
                       <span className="font-extrabold text-slate-900 text-sm sm:text-base font-mono tabular-nums">
-                        ₹{Number(deal.totalAmount).toLocaleString('en-IN')}
+                        ₹{Math.round(Number(deal.totalAmount || 0)).toLocaleString('en-IN')}
                       </span>
                       {deal.standardAmount && Number(deal.standardAmount) !== Number(deal.totalAmount) && (
                         <span className="text-xs text-slate-400 font-mono tabular-nums line-through" title="Standard Fee">
-                          ₹{Number(deal.standardAmount).toLocaleString('en-IN')}
+                          ₹{Math.round(Number(deal.standardAmount || 0)).toLocaleString('en-IN')}
                         </span>
                       )}
                     </div>
@@ -150,7 +150,7 @@ export default function DealsTable({
                     <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                       <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
                         <span className="text-[10px] text-emerald-600 font-medium">Recv:</span>
-                        <span className="font-mono tabular-nums font-bold">₹{Number(deal.amountReceived).toLocaleString('en-IN')}</span>
+                        <span className="font-mono tabular-nums font-bold">₹{Math.round(Number(deal.amountReceived || 0)).toLocaleString('en-IN')}</span>
                       </span>
 
                       {pending > 0 ? (

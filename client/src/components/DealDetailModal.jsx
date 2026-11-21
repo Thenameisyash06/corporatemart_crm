@@ -19,6 +19,7 @@ import {
   UserCheck,
   Building,
   MapPin,
+  Trash2,
 } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from '../context/ToastContext';
@@ -58,6 +59,23 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
     dueDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     notes: 'Standard 1-year annual return filing',
   });
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deletingDeal, setDeletingDeal] = useState(false);
+
+  const handleDeleteDeal = async () => {
+    try {
+      setDeletingDeal(true);
+      await api.delete(`/deals/${deal.id}`);
+      toast.success(`Deal ${deal.dealCode} deleted successfully.`);
+      setDeleteConfirmOpen(false);
+      onClose();
+      if (onRefreshParent) onRefreshParent();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to delete deal.');
+    } finally {
+      setDeletingDeal(false);
+    }
+  };
 
   const fetchDeal = async () => {
     try {
@@ -300,6 +318,21 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
             <span className={`text-xs px-3 py-1 rounded-full border font-semibold ${STAGE_CONFIG[deal.stage]?.color}`}>
               {STAGE_CONFIG[deal.stage]?.label}
             </span>
+
+            {/* Delete Deal Button */}
+            {(currentUser?.role === 'ADMIN' || currentUser?.role === 'BDM' || currentUser?.id === deal.bdmId) && (
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmOpen(true)}
+                disabled={actionLoading || deletingDeal}
+                className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 transition shadow-2xs"
+                title="Permanently Delete this Deal"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                <span>Delete Deal</span>
+              </button>
+            )}
+
             <button
               onClick={onClose}
               className="p-1.5 text-slate-400 hover:text-slate-700 rounded-md transition"
@@ -1122,6 +1155,43 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
             onRefreshParent();
           }}
         />
+
+      {/* DELETE DEAL CONFIRMATION MODAL */}
+      {deleteConfirmOpen && (
+        <div className="fixed inset-0 z-70 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95">
+            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mb-4 mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h3 className="text-base font-bold text-slate-900 text-center mb-1">Delete Deal?</h3>
+            <p className="text-xs text-slate-500 text-center mb-4 leading-relaxed">
+              Are you sure you want to permanently delete deal <strong className="text-slate-800">{deal.dealCode}</strong> ({deal.client?.companyName})?
+              All associated payments, service line items, audit logs, and documents will be removed.
+            </p>
+            <div className="p-3 bg-rose-50 rounded-lg border border-rose-100 text-[11px] text-rose-700 font-medium mb-5 text-center">
+              ⚠️ Warning: This action is irreversible and will remove all revenue and metrics associated with this deal.
+            </div>
+            <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                disabled={deletingDeal}
+                onClick={() => setDeleteConfirmOpen(false)}
+                className="flex-1 py-2 px-3 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg text-xs font-semibold transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deletingDeal}
+                onClick={handleDeleteDeal}
+                className="flex-1 py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold transition disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                {deletingDeal ? 'Deleting...' : 'Yes, Delete Deal'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

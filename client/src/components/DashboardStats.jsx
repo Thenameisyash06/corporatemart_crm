@@ -29,13 +29,13 @@ export default function DashboardStats({
   const isBdm = currentUser?.role === 'BDM' || Boolean(stats.bdmMetrics);
 
   const bdmMetrics = stats.bdmMetrics || {
-    target: currentUser?.salesTarget ? Number(currentUser.salesTarget) : 500000,
-    achievement: Number(financials?.totalCollected) || 0,
-    pending: Math.max(
+    target: Math.round(currentUser?.salesTarget ? Number(currentUser.salesTarget) : 500000),
+    achievement: Math.round(Number(financials?.totalCollected) || 0),
+    pending: Math.round(Math.max(
       0,
       (currentUser?.salesTarget ? Number(currentUser.salesTarget) : 500000) -
         (Number(financials?.totalCollected) || 0)
-    ),
+    )),
     progressPercent: 0,
   };
 
@@ -168,7 +168,7 @@ export default function DashboardStats({
               ) : (
                 <>
                   <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1 font-mono tracking-tight tabular-nums">
-                    ₹{Number(bdmMetrics.target).toLocaleString('en-IN')}
+                    ₹{Math.round(Number(bdmMetrics.target || 0)).toLocaleString('en-IN')}
                   </div>
                   <div className="text-xs text-slate-500 mt-1 font-medium">Specific BDM Sales Target</div>
                 </>
@@ -187,17 +187,17 @@ export default function DashboardStats({
                 Achievement
               </div>
               <div className="text-2xl sm:text-3xl font-extrabold text-emerald-700 mt-1 font-mono tracking-tight tabular-nums">
-                ₹{Number(bdmMetrics.achievement).toLocaleString('en-IN')}
+                ₹{Math.round(Number(bdmMetrics.achievement || 0)).toLocaleString('en-IN')}
               </div>
               <div className="flex items-center gap-2 mt-2">
                 <div className="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
                   <div
                     className="bg-emerald-600 h-1.5 rounded-full transition-all duration-500"
-                    style={{ width: `${Math.min(100, bdmMetrics.progressPercent)}%` }}
+                    style={{ width: `${Math.min(100, Math.round(Number(bdmMetrics.progressPercent || 0)))}%` }}
                   />
                 </div>
                 <span className="text-[11px] font-bold text-emerald-800 font-mono tabular-nums">
-                  {bdmMetrics.progressPercent}%
+                  {Math.round(Number(bdmMetrics.progressPercent || 0))}%
                 </span>
               </div>
             </div>
@@ -214,10 +214,10 @@ export default function DashboardStats({
                 Pending
               </div>
               <div className="text-2xl sm:text-3xl font-extrabold text-amber-700 mt-1 font-mono tracking-tight tabular-nums">
-                ₹{Number(bdmMetrics.pending).toLocaleString('en-IN')}
+                ₹{Math.round(Number(bdmMetrics.pending || 0)).toLocaleString('en-IN')}
               </div>
               <div className="text-xs text-amber-700/90 mt-1 font-medium">
-                {bdmMetrics.pending === 0
+                {Math.round(Number(bdmMetrics.pending || 0)) === 0
                   ? '🎉 Target 100% Achieved!'
                   : 'Remaining to hit sales target'}
               </div>
@@ -235,7 +235,7 @@ export default function DashboardStats({
                 Total Deal Volume
               </div>
               <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1 font-mono tracking-tight tabular-nums">
-                ₹{Number(financials.totalDealValue).toLocaleString('en-IN')}
+                ₹{Math.round(Number(financials?.totalDealValue || 0)).toLocaleString('en-IN')}
               </div>
             </div>
             <div className="w-11 h-11 bg-slate-100 text-slate-700 rounded-xl border border-slate-200/90 flex items-center justify-center shrink-0 shadow-2xs">
@@ -249,7 +249,7 @@ export default function DashboardStats({
                 Amount Collected
               </div>
               <div className="text-2xl sm:text-3xl font-extrabold text-emerald-700 mt-1 font-mono tracking-tight tabular-nums">
-                ₹{Number(financials.totalCollected).toLocaleString('en-IN')}
+                ₹{Math.round(Number(financials?.totalCollected || 0)).toLocaleString('en-IN')}
               </div>
             </div>
             <div className="w-11 h-11 bg-emerald-50 text-emerald-700 rounded-xl border border-emerald-200 flex items-center justify-center shrink-0 shadow-2xs">
@@ -263,7 +263,7 @@ export default function DashboardStats({
                 Pending Balance
               </div>
               <div className="text-2xl sm:text-3xl font-extrabold text-amber-700 mt-1 font-mono tracking-tight tabular-nums">
-                ₹{Number(financials.totalPending).toLocaleString('en-IN')}
+                ₹{Math.round(Number(financials?.totalPending || 0)).toLocaleString('en-IN')}
               </div>
             </div>
             <div className="w-11 h-11 bg-amber-50 text-amber-700 rounded-xl border border-amber-200 flex items-center justify-center shrink-0 shadow-2xs">
