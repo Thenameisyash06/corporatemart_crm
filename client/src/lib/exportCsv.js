@@ -133,8 +133,11 @@ export function exportClientsToCsv(clients, filename = 'CorporateMart_Clients_Di
  * Format BDM team performance for CSV export
  */
 export function exportBdmPerformanceToCsv(bdms, filename = 'CorporateMart_BDM_Performance_Report.csv') {
+  const KNOWN_LEADERS = ['jayesh rohit', 'neel boda', 'shashank singhal', 'vishishta dixit', 'yash rathod'];
+
   const headers = [
     { key: 'fullName', label: 'BDM Name' },
+    { key: 'leaderName', label: 'Leader Name' },
     { key: 'email', label: 'Email' },
     { key: 'phone', label: 'Phone' },
     { key: 'salesTarget', label: 'Target (₹)' },
@@ -143,25 +146,34 @@ export function exportBdmPerformanceToCsv(bdms, filename = 'CorporateMart_BDM_Pe
     { key: 'totalPending', label: 'Pending Balance (₹)' },
     { key: 'achievementPercent', label: 'Achievement (%)' },
     { key: 'dealsCount', label: 'Total Deals' },
-    { key: 'closedDealsCount', label: 'Closed Deals' },
-    { key: 'activeDealsCount', label: 'Active Pipeline Deals' },
     { key: 'avgDealSize', label: 'Average Ticket Size (₹)' },
   ];
 
-  const rows = bdms.map((b) => ({
-    fullName: b.fullName,
-    email: b.email,
-    phone: b.phone || 'N/A',
-    salesTarget: Number(b.salesTarget || 0).toLocaleString('en-IN'),
-    totalRevenue: Number(b.totalRevenue || 0).toLocaleString('en-IN'),
-    totalCollected: Number(b.totalCollected || 0).toLocaleString('en-IN'),
-    totalPending: Number(b.totalPending || 0).toLocaleString('en-IN'),
-    achievementPercent: `${b.achievementPercent}%`,
-    dealsCount: b.dealsCount,
-    closedDealsCount: b.closedDealsCount,
-    activeDealsCount: b.activeDealsCount,
-    avgDealSize: Number(b.avgDealSize || 0).toLocaleString('en-IN'),
-  }));
+  const rows = bdms.map((b) => {
+    const nameLower = (b.fullName || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+    const leaderLower = (b.leaderName || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+    let displayLeader = 'Management';
+
+    if (b.isLeader || (leaderLower && leaderLower === nameLower) || KNOWN_LEADERS.some((kl) => nameLower.includes(kl) || kl.includes(nameLower))) {
+      displayLeader = 'Team Leader';
+    } else if (b.leaderName && b.leaderName.trim() && leaderLower !== nameLower) {
+      displayLeader = b.leaderName.trim();
+    }
+
+    return {
+      fullName: b.fullName,
+      leaderName: displayLeader,
+      email: b.email,
+      phone: b.phone || 'N/A',
+      salesTarget: Number(b.salesTarget || 0).toLocaleString('en-IN'),
+      totalRevenue: Number(b.totalRevenue || 0).toLocaleString('en-IN'),
+      totalCollected: Number(b.totalCollected || 0).toLocaleString('en-IN'),
+      totalPending: Number(b.totalPending || 0).toLocaleString('en-IN'),
+      achievementPercent: `${b.achievementPercent}%`,
+      dealsCount: b.dealsCount,
+      avgDealSize: Number(b.avgDealSize || 0).toLocaleString('en-IN'),
+    };
+  });
 
   downloadCsv(filename, headers, rows);
 }

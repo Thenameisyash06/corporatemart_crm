@@ -80,7 +80,7 @@ export default function App() {
 
 
   // Login form state (if logged out)
-  const [loginForm, setLoginForm] = useState({ email: 'bdm@corporatemart.com', password: 'bdm123' });
+  const [loginForm, setLoginForm] = useState({ email: '', password: '' });
   const [loginError, setLoginError] = useState(null);
   const [loginLoading, setLoginLoading] = useState(false);
 
@@ -100,11 +100,8 @@ export default function App() {
       } catch {
         localStorage.removeItem('cm_crm_user');
         localStorage.removeItem('cm_crm_token');
-        handleDirectLogin('bdm@corporatemart.com', 'bdm123');
+        setCurrentUser(null);
       }
-    } else {
-      // Default initial login as BDM
-      handleDirectLogin('bdm@corporatemart.com', 'bdm123');
     }
   }, []);
 
@@ -335,7 +332,8 @@ export default function App() {
                 type="email"
                 value={loginForm.email}
                 onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
-                className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-slate-900 focus:outline-none focus:border-slate-800"
+                placeholder="name@corporatemart.com"
+                className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-slate-800"
                 required
               />
             </div>
@@ -346,7 +344,8 @@ export default function App() {
                 type="password"
                 value={loginForm.password}
                 onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-slate-900 focus:outline-none focus:border-slate-800"
+                placeholder="Enter password"
+                className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-slate-800"
                 required
               />
             </div>
@@ -359,31 +358,6 @@ export default function App() {
               {loginLoading ? 'Signing in...' : 'Sign In'}
             </button>
           </form>
-
-          {/* Quick presets for office team */}
-          <div className="mt-6 pt-4 border-t border-slate-200">
-            <span className="text-xs text-slate-500 block mb-2 font-semibold">Quick Department Logins:</span>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-              {[
-                { label: 'BDM (Sales)', email: 'bdm@corporatemart.com', pass: 'bdm123' },
-                { label: 'BDM (Leader)', email: 'leader@corporatemart.com', pass: 'leader123' },
-                { label: 'Accounts', email: 'accounts@corporatemart.com', pass: 'accounts123' },
-                { label: 'Legal', email: 'legal@corporatemart.com', pass: 'legal123' },
-                { label: 'Operations', email: 'ops@corporatemart.com', pass: 'ops123' },
-                { label: 'RM', email: 'rm@corporatemart.com', pass: 'rm123' },
-                { label: 'Admin', email: 'admin@corporatemart.com', pass: 'admin123' },
-              ].map((p, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => handleDirectLogin(p.email, p.pass)}
-                  className="p-2 bg-slate-50 hover:bg-slate-100 text-slate-800 rounded-md border border-slate-200 font-medium truncate"
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     );

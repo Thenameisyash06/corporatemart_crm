@@ -3,9 +3,9 @@ const router = express.Router();
 const prisma = require('../lib/prisma');
 const { authenticateToken, requireRoles } = require('../middleware/auth');
 
-// Lightweight TTL cache for dashboard stats (15 seconds)
+// Lightweight TTL cache for dashboard stats (1 second debounce)
 const statsCache = new Map();
-const STATS_CACHE_TTL_MS = 15000;
+const STATS_CACHE_TTL_MS = 1000;
 
 /**
  * GET /api/dashboard/stats
@@ -16,7 +16,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
     const isBdmUser = req.user.role === 'BDM';
     const cacheKey = `stats:${req.user.id}:${req.user.role}`;
     const cached = statsCache.get(cacheKey);
-    if (cached && (Date.now() - cached.timestamp < STATS_CACHE_TTL_MS)) {
+    if (!req.query.refresh && cached && (Date.now() - cached.timestamp < STATS_CACHE_TTL_MS)) {
       return res.json(cached.data);
     }
 
@@ -111,9 +111,9 @@ router.get('/stats', authenticateToken, async (req, res) => {
     const closedDeals = statsRow.closed_deals || 0;
     const pendingBalanceVerifications = statsRow.pending_balance_verifications || 0;
 
-    const totalCollected = Number(statsRow.total_collected || 0);
+    const totalCollected = Number(statsRow.amount_received ?? statsRow.total_collected ?? 0);
     const totalDealValue = Number(statsRow.total_deal_value || 0);
-    const totalPending = Math.max(0, totalDealValue - totalCollected);
+    const totalPending = Number(statsRow.pending_amount !== undefined && statsRow.pending_amount !== null ? statsRow.pending_amount : Math.max(0, totalDealValue - totalCollected));
 
     let bdmMetrics = null;
     if (isBdmUser) {
@@ -210,7 +210,7 @@ router.get('/admin-overview', authenticateToken, requireRoles('ADMIN'), async (r
         },
       }),
       prisma.user.findMany({
-        where: { role: 'BDM' },
+        where: { role: 'BDM', isActive: true },
         include: {
           dealsCreated: {
             select: {
@@ -327,18 +327,9 @@ router.get('/admin-overview', authenticateToken, requireRoles('ADMIN'), async (r
     // 1. Format BDM Performance
     const bdmPerformance = bdms.map((b) => {
       const deals = b.dealsCreated || [];
-      // Achievement / Collected: only payments verified by Accounts (initial tranche after accounts verify and balance payments after accounts verify)
-      const totalCollected = deals.reduce((sum, d) => {
-        const verifiedPayments = (d.payments || [])
-          .filter((p) => p.status === 'VERIFIED')
-          .reduce((pSum, p) => pSum + Number(p.amount || 0), 0);
-        return sum + verifiedPayments;
-      }, 0);
-
-      // Booked Revenue: only deals verified by accounts (or past accounts verification)
-      const verifiedDeals = deals.filter((d) => d.isAccountsVerified || !['STAGE_04_ACCOUNTS_VERIFICATION', 'STAGE_04_ACCOUNTS_REJECTED'].includes(d.stage));
-      const totalRevenue = verifiedDeals.reduce((sum, d) => sum + Number(d.totalAmount || 0), 0);
-      const totalPending = Math.max(0, totalRevenue - totalCollected);
+      const totalCollected = deals.reduce((sum, d) => sum + Number(d.amountReceived || 0), 0);
+      const totalRevenue = deals.reduce((sum, d) => sum + Number(d.totalAmount || 0), 0);
+      const totalPending = deals.reduce((sum, d) => sum + Number(d.pendingAmount !== undefined && d.pendingAmount !== null ? d.pendingAmount : (d.totalAmount - d.amountReceived) || 0), 0);
       const target = Number(b.salesTarget || 500000);
       const achievementPercent = target > 0 ? Math.round((totalCollected / target) * 100) : 0;
       const closedDeals = deals.filter((d) => d.stage === 'CLOSED');
@@ -349,6 +340,7 @@ router.get('/admin-overview', authenticateToken, requireRoles('ADMIN'), async (r
         fullName: b.fullName,
         email: b.email,
         phone: b.phone,
+        leaderName: b.leaderName,
         salesTarget: target,
         dealsCount: deals.length,
         totalRevenue,
@@ -357,7 +349,7 @@ router.get('/admin-overview', authenticateToken, requireRoles('ADMIN'), async (r
         achievementPercent,
         closedDealsCount: closedDeals.length,
         activeDealsCount: activeDeals.length,
-        avgDealSize: verifiedDeals.length > 0 ? Math.round(totalRevenue / verifiedDeals.length) : 0,
+        avgDealSize: deals.length > 0 ? Math.round(totalRevenue / deals.length) : 0,
         isActive: b.isActive,
       };
     });
@@ -437,8 +429,8 @@ router.get('/admin-overview', authenticateToken, requireRoles('ADMIN'), async (r
     });
 
     const totalRevenue = Number(dealAggregates._sum.totalAmount || 0);
-    const totalCollected = Number(verifiedPaymentsAgg._sum.amount || 0);
-    const totalPending = Math.max(0, totalRevenue - totalCollected);
+    const totalCollected = Number(dealAggregates._sum.amountReceived || 0);
+    const totalPending = Number(dealAggregates._sum.pendingAmount !== undefined && dealAggregates._sum.pendingAmount !== null ? dealAggregates._sum.pendingAmount : Math.max(0, totalRevenue - totalCollected));
 
     return res.json({
       summary: {
