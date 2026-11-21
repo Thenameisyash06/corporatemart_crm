@@ -384,12 +384,12 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     if (e) e.preventDefault();
     if (!followUpModalLead) return;
     if (!followUpForm.date) {
-      toast.warning('Please select a follow-up date.');
+      toast.warning('Please select a scheduled date for this client follow-up.', 'Date Required');
       return;
     }
     const currentToday = getTodayDateStr();
     if (followUpForm.date < currentToday) {
-      toast.warning('Follow-up date cannot be in the past. Please select today or an upcoming date.');
+      toast.warning('Follow-up date cannot be in the past. Please select today or a future date.', 'Past Date Not Allowed');
       return;
     }
     try {
@@ -399,7 +399,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         status: followUpForm.status,
         remarks: followUpForm.remarks,
       });
-      toast.success(`Follow-up on ${followUpForm.date} (${followUpForm.status}) recorded for "${followUpModalLead.companyName}".`);
+      toast.success(`Follow-up on ${followUpForm.date} with status "${followUpForm.status}" recorded for ${followUpModalLead.companyName}.`, 'Follow-up Saved');
       setFollowUpModalLead(null);
       setFollowUpForm({
         date: getTodayDateStr(),
@@ -408,7 +408,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       });
       fetchLeads();
     } catch (err) {
-      toast.error('Failed to save follow-up: ' + (err.response?.data?.error || err.message));
+      toast.error(err.response?.data?.error || err.message || 'Unable to record follow-up.', 'Follow-up Failed');
     } finally {
       setSavingFollowUp(false);
     }
@@ -418,15 +418,15 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     if (e) e.preventDefault();
     if (!reassignModalLead) return;
     if (!reassignForm.newBdmName) {
-      toast.warning('Please select a new BDM to assign this lead to.');
+      toast.warning('Please select the BDM team member to whom you want to transfer this lead.', 'Target BDM Required');
       return;
     }
     if (reassignForm.newBdmName.trim().toUpperCase() === (reassignModalLead.bdmName1 || '').trim().toUpperCase()) {
-      toast.warning('New BDM must be different from current assigned BDM.');
+      toast.warning(`This lead is already assigned to ${reassignModalLead.bdmName1}. Please choose a different BDM.`, 'Duplicate Assignee');
       return;
     }
     if (!reassignForm.reason.trim()) {
-      toast.warning('Please provide a reason for revoking and reassigning this lead.');
+      toast.warning('Please specify an administrative reason so both BDMs understand the handover.', 'Reassignment Reason Required');
       return;
     }
 
@@ -505,7 +505,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     return leads.find((l) => (l.mobileNo || '').trim() === p) || null;
   }, [form.mobileNo, leads]);
 
-  // Duplicate Phone Number Popup State (shows for 2 seconds with Cancel option)
+  // Duplicate Phone Number Popup State (shows with clear message & cancel/edit option)
   const [duplicatePhonePopup, setDuplicatePhonePopup] = useState(null);
   const duplicatePhoneTimerRef = useRef(null);
 
@@ -516,7 +516,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     setDuplicatePhonePopup({ detail });
     duplicatePhoneTimerRef.current = setTimeout(() => {
       setDuplicatePhonePopup(null);
-    }, 4000);
+    }, 5000);
   }, []);
 
   const closeDuplicatePhonePopup = useCallback(() => {
@@ -1474,38 +1474,38 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
   const handleCreateLead = async (e) => {
     e.preventDefault();
     if (!form.companyName.trim()) {
-      toast.warning('Company Name is required.');
+      toast.warning('Please enter the client company name before submitting.', 'Missing Company Name');
       return;
     }
     const cleanPhone = form.mobileNo.trim();
     if (!cleanPhone) {
-      toast.warning('Mobile Number is required.');
+      toast.warning('Please provide a 10-digit mobile number for client communication.', 'Missing Mobile Number');
       return;
     }
     const exact10DigitPhoneRegex = /^[6-9]\d{9}$/;
     if (!exact10DigitPhoneRegex.test(cleanPhone)) {
-      toast.warning('Invalid phone number. Must be exactly 10 digits without symbols, spaces, or country code (starting with 6-9).');
+      toast.warning('Mobile number must be exactly 10 digits starting with 6, 7, 8, or 9 (do not include +91, spaces, or dashes).', 'Invalid Mobile Format');
       return;
     }
     if (duplicatePhoneLead) {
       showDuplicatePhonePopup(
-        `This mobile number is already registered for "${duplicatePhoneLead.companyName}".`
+        `This mobile number is already registered in LMS for "${duplicatePhoneLead.companyName}".`
       );
       return;
     }
     if (!quotationFile) {
-      toast.warning('Quotation file is mandatory! Please upload a PDF or Word quotation document.');
+      toast.warning('Official quotation document (.pdf, .doc, or .docx) is mandatory. Please attach the quotation file to continue.', 'Quotation Document Required');
       setFileError('Quotation document (PDF or Word) is mandatory.');
       return;
     }
 
     const currentToday = getTodayDateStr();
     if (form.meetingDate && form.meetingDate < currentToday) {
-      toast.warning('Meeting date cannot be in the past. Please select today or an upcoming date.');
+      toast.warning('Scheduled meeting date cannot be in the past. Please choose today or an upcoming date.', 'Invalid Meeting Date');
       return;
     }
     if (form.expectedDateOfCloser && form.expectedDateOfCloser < currentToday) {
-      toast.warning('Expected Date of Closer (EDC) cannot be in the past. Please select today or an upcoming date.');
+      toast.warning('Expected Date of Closure (EDC) cannot be in the past. Please choose today or an estimated future closing date.', 'Invalid Closure Date');
       return;
     }
 
@@ -5041,37 +5041,73 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         </div>
       )}
 
-      {/* DUPLICATE PHONE NUMBER POPUP (Shows for 2 seconds with Cancel option) */}
+      {/* DUPLICATE PHONE NUMBER POPUP (Clean, high-contrast, fully readable with cancel option) */}
       {duplicatePhonePopup && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-rose-200 text-center space-y-3.5 relative">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150">
+          <div
+            onMouseEnter={() => {
+              if (duplicatePhoneTimerRef.current) clearTimeout(duplicatePhoneTimerRef.current);
+            }}
+            onMouseLeave={() => {
+              duplicatePhoneTimerRef.current = setTimeout(() => {
+                setDuplicatePhonePopup(null);
+              }, 4000);
+            }}
+            className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border-2 border-rose-300 text-center space-y-4 relative overflow-hidden"
+          >
+            {/* Top red alert accent */}
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-rose-500 via-rose-600 to-amber-500" />
+
             <button
               type="button"
               onClick={closeDuplicatePhonePopup}
-              className="absolute top-3.5 right-3.5 text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition cursor-pointer"
-              title="Close"
+              className="absolute top-3.5 right-3.5 text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+              title="Close and edit phone number"
             >
-              <X className="w-4 h-4" />
+              <X className="w-5 h-5" />
             </button>
 
-            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto shadow-xs">
-              <AlertCircle className="w-6 h-6" />
+            <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center mx-auto shadow-xs">
+              <AlertTriangle className="w-7 h-7 text-rose-600 animate-pulse" />
             </div>
 
             <div>
-              <h3 className="text-sm font-bold text-slate-900">
-                This number already exists
+              <span className="inline-block text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200 mb-1.5">
+                Duplicate Record Prevention
+              </span>
+              <h3 className="text-base font-extrabold text-slate-900">
+                Mobile Number Already Registered
               </h3>
-              <p className="text-xs text-slate-500 mt-1">
-                {duplicatePhonePopup.detail || 'This phone number is already registered in LMS. Phone numbers must be unique.'}
+            </div>
+
+            {/* Structured details card */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-left text-xs space-y-2">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-200/80">
+                <span className="text-slate-500 font-medium">Entered Mobile:</span>
+                <span className="font-mono font-bold text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200">
+                  +91 {form.mobileNo || '—'}
+                </span>
+              </div>
+              <p className="text-slate-700 leading-relaxed font-medium">
+                {duplicatePhonePopup.detail || 'This mobile number is already linked to an existing client in the LMS.'}
+              </p>
+              <p className="text-[11px] text-slate-500 leading-snug">
+                Every lead must have a unique 10-digit mobile number to prevent duplicate outreach and keep client pipelines clean.
               </p>
             </div>
 
-            <div className="pt-1">
+            <div className="flex items-center gap-2 pt-1">
               <button
                 type="button"
                 onClick={closeDuplicatePhonePopup}
-                className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition cursor-pointer"
+                className="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition cursor-pointer shadow-xs"
+              >
+                Got it, I'll update the number
+              </button>
+              <button
+                type="button"
+                onClick={closeDuplicatePhonePopup}
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition cursor-pointer"
               >
                 Cancel
               </button>

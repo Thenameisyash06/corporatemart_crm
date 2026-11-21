@@ -330,33 +330,33 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
 
   const validateStep1 = () => {
     if (!form.companyName.trim()) {
-      const msg = 'Company Name is required.';
+      const msg = 'Please enter the registered company or business name.';
       setError(msg);
-      toast.warning(msg);
+      toast.warning(msg, 'Company Name Required');
       return false;
     }
     if (!form.clientName.trim()) {
-      const msg = 'Primary Client Name is required.';
+      const msg = 'Please enter the primary director or contact person name.';
       setError(msg);
-      toast.warning(msg);
+      toast.warning(msg, 'Client Name Required');
       return false;
     }
     if (!form.clientEmail.trim()) {
-      const msg = 'Client Email is required.';
+      const msg = 'Please provide a valid client email for invoicing and documentation.';
       setError(msg);
-      toast.warning(msg);
+      toast.warning(msg, 'Client Email Required');
       return false;
     }
     if (!form.clientPhone.trim()) {
-      const msg = 'Client Phone Number is required.';
+      const msg = 'Please provide a 10-digit contact mobile number for the client.';
       setError(msg);
-      toast.warning(msg);
+      toast.warning(msg, 'Client Phone Required');
       return false;
     }
     if (!form.panNumber.trim()) {
-      const msg = 'Company PAN Number is mandatory.';
+      const msg = 'Company PAN Number is mandatory for GST & compliance records.';
       setError(msg);
-      toast.warning(msg);
+      toast.warning(msg, 'Company PAN Required');
       return false;
     }
 
@@ -366,39 +366,39 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
 
   const validateStep2 = () => {
     if (totalVal <= 0) {
-      const msg = 'Total Deal Amount must be greater than zero.';
+      const msg = 'Total Deal Amount must be greater than ₹0. Please add services.';
       setError(msg);
-      toast.warning(msg);
+      toast.warning(msg, 'Invalid Deal Value');
       return false;
     }
     if (receivedVal <= 0) {
-      const msg = 'Amount received must be greater than zero.';
+      const msg = 'Advance amount received from client must be greater than ₹0.';
       setError(msg);
-      toast.warning(msg);
+      toast.warning(msg, 'Advance Payment Required');
       return false;
     }
     for (const s of form.services) {
       const std = parseFloat(s.standardAmount) || 0;
       const deal = parseFloat(s.dealAmount !== undefined ? s.dealAmount : s.serviceFee) || 0;
       if (std > 0 && deal > std) {
-        const msg = `Deal amount (₹${deal.toLocaleString('en-IN')}) cannot be greater than Standard Amount (₹${std.toLocaleString('en-IN')}) for "${s.serviceName}".`;
+        const msg = `Pricing Policy Alert: Deal price (₹${deal.toLocaleString('en-IN')}) exceeds standard catalog price (₹${std.toLocaleString('en-IN')}) for "${s.serviceName}".`;
         setError(msg);
-        toast.warning(msg);
+        toast.warning(msg, 'Price Limit Exceeded');
         return false;
       }
     }
     if (form.paymentMode === 'CASH') {
       if (!form.cashCollectorName || !form.cashCollectorName.trim()) {
-        const msg = 'Please enter the name of the person who collected the cash.';
+        const msg = 'Cash Custody: Please enter the name of the representative who collected and verified the cash.';
         setError(msg);
-        toast.warning(msg);
+        toast.warning(msg, 'Collector Name Required');
         return false;
       }
     } else {
       if (!paymentProofFile) {
-        const msg = 'Payment proof / screenshot is mandatory. Please attach the payment screenshot.';
+        const msg = 'Payment Verification: Please attach the bank transfer screenshot or payment receipt for Accounts audit.';
         setError(msg);
-        toast.warning(msg);
+        toast.warning(msg, 'Payment Proof Required');
         return false;
       }
     }
@@ -543,9 +543,22 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
         {/* Body Content */}
         <div className="p-6 overflow-y-auto flex-1 space-y-5">
           {error && (
-            <div className="p-3.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              <span>{error}</span>
+            <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex items-start justify-between gap-3 shadow-xs animate-in fade-in">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="block font-bold text-rose-950">Action Required:</strong>
+                  <span className="leading-relaxed">{error}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setError(null)}
+                className="text-rose-400 hover:text-rose-700 p-0.5 rounded transition cursor-pointer shrink-0"
+                title="Dismiss message"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
           )}
 
