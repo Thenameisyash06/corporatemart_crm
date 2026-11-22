@@ -168,11 +168,17 @@ function userCanAccessLead(lead, user) {
   if (isCreator) return true;
   if (bdm1 && (bdm1.includes(userName) || userName.includes(bdm1))) return true;
   if (bdm2 && (bdm2.includes(userName) || userName.includes(bdm2))) return true;
-  if (leader && (leader.includes(userName) || userName.includes(leader))) return true;
-  const bdm1Key = Object.keys(BDM_LEADER_MAP).find((b) => b.toLowerCase() === bdm1);
-  if (bdm1Key && BDM_LEADER_MAP[bdm1Key]) {
-    const ldrClean = BDM_LEADER_MAP[bdm1Key].toLowerCase();
-    if (ldrClean.includes(userName) || userName.includes(ldrClean)) return true;
+
+  // Leaders can ONLY access team member leads if closerStatus is 'Lead Sharing'!
+  // A leader will NOT get the lead which are self close.
+  const isLeadSharing = (lead.closerStatus || '').toUpperCase().includes('LEAD SHARING');
+  if (isLeadSharing) {
+    if (leader && (leader.includes(userName) || userName.includes(leader))) return true;
+    const bdm1Key = Object.keys(BDM_LEADER_MAP).find((b) => b.toLowerCase() === bdm1);
+    if (bdm1Key && BDM_LEADER_MAP[bdm1Key]) {
+      const ldrClean = BDM_LEADER_MAP[bdm1Key].toLowerCase();
+      if (ldrClean.includes(userName) || userName.includes(ldrClean)) return true;
+    }
   }
 
   return false;
@@ -475,7 +481,10 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
           "bdmName1" ILIKE $${scopeParamIndex} 
           OR "bdmName2" ILIKE $${scopeParamIndex}
           OR ("createdById" = $${scopeParamIndex + 1} AND ("bdmName1" ILIKE $${scopeParamIndex} OR "bdmName1" = '' OR "bdmName1" IS NULL))
-          OR "leaderName" ILIKE $${scopeParamIndex + 2}${teamMemberSql}
+          OR (
+            ("leaderName" ILIKE $${scopeParamIndex + 2}${teamMemberSql})
+            AND ("closerStatus" ILIKE '%LEAD SHARING%')
+          )
         )`);
         scopeParams.push(`%${targetBdm}%`, req.user.id, `%${targetLeader}%`, ...myTeamMemberNames);
         scopeParamIndex += 3 + myTeamMemberNames.length;
@@ -630,18 +639,20 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
             (l.createdById === req.user.id && (!l.bdmName1 || bdm1Lower.includes(userFullNameClean) || userFullNameClean.includes(bdm1Lower)))
           );
 
-      // Check if lead belongs to a team member under this leader
+      // Check if lead belongs to a team member under this leader (strictly requires Lead Sharing)
       const assignedLeader = (dbBdmLeaderMap[l.bdmName1] || BDM_LEADER_MAP[l.bdmName1] || '').toLowerCase().trim();
+      const isLeadSharing = (l.closerStatus || '').toUpperCase().includes('LEAD SHARING');
       const isTeamLeadUnderMe = Boolean(
         targetLeader &&
         leaderKey &&
+        isLeadSharing &&
         (
           (leadLeaderLower.includes(leaderKey) || leaderKey.includes(leadLeaderLower)) ||
           (assignedLeader && (assignedLeader.includes(leaderKey) || leaderKey.includes(assignedLeader))) ||
           myTeamMemberNames.some((m) => m.toLowerCase() === bdm1Lower || m.toLowerCase() === bdm2Lower)
         )
       );
-      const isCountedInMyFunnel = isAdmin || isOwnLead || isTeamLeadUnderMe;
+      const isCountedInMyFunnel = isAdmin || isOwnLead;
 
       // Monthly categorization (This Month vs Next Month)
       const effDate = l.nextFollowUpDate
@@ -683,7 +694,15 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
         }
       }
       if (leaderName && leaderName !== 'ALL') {
-        if ((l.leaderName || '').toLowerCase() !== leaderName.trim().toLowerCase()) {
+        const ldrTarget = leaderName.trim().toLowerCase();
+        const leadLdr = (l.leaderName || '').toLowerCase().trim();
+        const b1 = (l.bdmName1 || '').toLowerCase().trim();
+        const b2 = (l.bdmName2 || '').toLowerCase().trim();
+        const isLeaderOwn = b1.includes(ldrTarget) || ldrTarget.includes(b1) || b2.includes(ldrTarget) || ldrTarget.includes(b2);
+        const isLeadSharing = (l.closerStatus || '').toUpperCase().includes('LEAD SHARING');
+
+        // Lead belongs to this leader IF they are the direct BDM OR if it is a shared team lead (strictly exclude Self Closer team leads)
+        if (leadLdr !== ldrTarget || (!isLeaderOwn && !isLeadSharing)) {
           matchesTableFilter = false;
         }
       }
@@ -758,9 +777,16 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
         if (l.closerStatus) {
           analytics.byCloserStatus[l.closerStatus] = (analytics.byCloserStatus[l.closerStatus] || 0) + 1;
         }
-        // Leader
+        // Leader (strictly excludes team member Self Closer leads)
         if (l.leaderName) {
-          analytics.byLeader[l.leaderName] = (analytics.byLeader[l.leaderName] || 0) + 1;
+          const b1 = (l.bdmName1 || '').toLowerCase().trim();
+          const b2 = (l.bdmName2 || '').toLowerCase().trim();
+          const leadLdr = l.leaderName.trim().toLowerCase();
+          const isLeaderOwn = b1.includes(leadLdr) || leadLdr.includes(b1) || b2.includes(leadLdr) || leadLdr.includes(b2);
+          const isLeadSharing = (l.closerStatus || '').toUpperCase().includes('LEAD SHARING');
+          if (isLeaderOwn || isLeadSharing) {
+            analytics.byLeader[l.leaderName] = (analytics.byLeader[l.leaderName] || 0) + 1;
+          }
         }
         // BDM
         if (l.bdmName1) {
@@ -986,8 +1012,9 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
         }
       });
 
-      // If leader is also in allBdmMap and not already having this lead directly
-      if (ldr && allBdmMap[ldr] && !namesToAssign.has(ldr)) {
+      // If leader is also in allBdmMap and not already having this lead directly (only if Lead Sharing)
+      const isLeadSharing = (l.closerStatus || '').toUpperCase().includes('LEAD SHARING');
+      if (ldr && allBdmMap[ldr] && !namesToAssign.has(ldr) && isLeadSharing) {
         if (!allBdmMap[ldr].teamLeads) allBdmMap[ldr].teamLeads = [];
         allBdmMap[ldr].teamLeads.push(l);
       }

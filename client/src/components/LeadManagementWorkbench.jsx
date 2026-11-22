@@ -833,7 +833,10 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         return bdm1.includes(mc) || mc.includes(bdm1) || bdm2.includes(mc) || mc.includes(bdm2);
       }) || (assignedLeader && (assignedLeader.includes(leaderKey) || leaderKey.includes(assignedLeader)));
 
-      const isTeamLead = !isOwnLead && leaderKey && (
+      // LEAD SHARING REQUIREMENT: Team leads are ONLY shared with leader if closerStatus is 'Lead Sharing' (not 'Self Closer')
+      const isLeadSharing = (lead.closerStatus || '').toUpperCase().includes('LEAD SHARING');
+
+      const isTeamLead = !isOwnLead && leaderKey && isLeadSharing && (
         (leadLeader && (leadLeader.includes(leaderKey) || leaderKey.includes(leadLeader))) ||
         isMemberOfMyTeam
       );
@@ -854,23 +857,45 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
 
   // BDM's Personal Deal Funnel Value (calculated STRICTLY on own direct leads, excluding team member leads)
   const bdmPersonalFunnel = useMemo(() => {
-    if (analytics?.myDirectFunnel !== undefined) return analytics.myDirectFunnel;
     return ownDirectLeads.reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
-  }, [analytics, ownDirectLeads]);
+  }, [ownDirectLeads]);
 
   const bdmHotFunnel = useMemo(() => {
-    if (analytics?.myDirectHot !== undefined) return analytics.myDirectHot;
     return ownDirectLeads
       .filter((l) => (l.clientStatus || '').toLowerCase() === 'hot')
       .reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
-  }, [analytics, ownDirectLeads]);
+  }, [ownDirectLeads]);
 
   const bdmWarmFunnel = useMemo(() => {
-    if (analytics?.myDirectWarm !== undefined) return analytics.myDirectWarm;
     return ownDirectLeads
       .filter((l) => (l.clientStatus || 'warm').toLowerCase() === 'warm')
       .reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
   }, [ownDirectLeads]);
+
+  // Personal This Month & Next Month Metrics (Strictly based on own direct leads for BDM/Leader)
+  const myThisMonthLeads = useMemo(() => {
+    return ownDirectLeads.filter((l) => {
+      const badge = getLeadMonthBadge(l);
+      return badge?.icon === '📅';
+    });
+  }, [ownDirectLeads, getLeadMonthBadge]);
+
+  const myThisMonthCount = myThisMonthLeads.length;
+  const myThisMonthFunnel = useMemo(() => {
+    return myThisMonthLeads.reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
+  }, [myThisMonthLeads]);
+
+  const myNextMonthLeads = useMemo(() => {
+    return ownDirectLeads.filter((l) => {
+      const badge = getLeadMonthBadge(l);
+      return badge?.icon === '🚀';
+    });
+  }, [ownDirectLeads, getLeadMonthBadge]);
+
+  const myNextMonthCount = myNextMonthLeads.length;
+  const myNextMonthFunnel = useMemo(() => {
+    return myNextMonthLeads.reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
+  }, [myNextMonthLeads]);
 
   // Hot, Warm and Active Leads counts (Active = Sum of Hot + Warm clients)
   const hotClientsCount = useMemo(() => {
@@ -916,13 +941,14 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       };
     });
 
-    // 2. Group leads belonging to team members under this leader
+    // 2. Group leads belonging to team members under this leader (strictly Lead Sharing)
     const sourceLeads = (sharedTeamLeads && sharedTeamLeads.length > 0)
       ? sharedTeamLeads
       : (leads || []).filter((l) => {
           const bdm1 = (l.bdmName1 || '').toLowerCase().trim();
           const isLeaderSelf = bdm1 && (bdm1.includes(leaderKey) || leaderKey.includes(bdm1));
-          return !isLeaderSelf;
+          const isLeadSharing = (l.closerStatus || '').toUpperCase().includes('LEAD SHARING');
+          return !isLeaderSelf && isLeadSharing;
         });
 
     sourceLeads.forEach((lead) => {
@@ -1043,6 +1069,17 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
   // Leads actually displayed in the table below (supports filtering to a selected team member, selected month, and pending follow-ups)
   const displayedLeads = useMemo(() => {
     let list = visibleLeads;
+    if (selectedLeaderFilter && selectedLeaderFilter !== 'ALL') {
+      const ldr = selectedLeaderFilter.toLowerCase().trim();
+      list = list.filter((l) => {
+        const leadLdr = (l.leaderName || '').toLowerCase().trim();
+        const b1 = (l.bdmName1 || '').toLowerCase().trim();
+        const b2 = (l.bdmName2 || '').toLowerCase().trim();
+        const isLeaderOwn = b1.includes(ldr) || ldr.includes(b1) || b2.includes(ldr) || ldr.includes(b2);
+        const isLeadSharing = (l.closerStatus || '').toUpperCase().includes('LEAD SHARING');
+        return (leadLdr === ldr || leadLdr.includes(ldr) || ldr.includes(leadLdr)) && (isLeaderOwn || isLeadSharing);
+      });
+    }
     if (selectedTeamMemberFilter && selectedTeamMemberFilter !== 'ALL') {
       list = list.filter(
         (l) => (l.bdmName1 || '').toLowerCase().trim() === selectedTeamMemberFilter.toLowerCase().trim()
@@ -1081,7 +1118,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       list = list.filter((l) => isLeadFollowUpExceeded(l));
     }
     return list;
-  }, [visibleLeads, leads, isAdmin, selectedTeamMemberFilter, selectedMonthFilter, getLeadMonthBadge, pendingFollowUpFilter, getLeadOverdueInfo, overdueBdmFilter, overdueSortOrder]);
+  }, [visibleLeads, leads, isAdmin, selectedLeaderFilter, selectedTeamMemberFilter, selectedMonthFilter, getLeadMonthBadge, pendingFollowUpFilter, getLeadOverdueInfo, overdueBdmFilter, overdueSortOrder]);
 
   // All overdue leads across available leads
   const allOverdueLeads = useMemo(() => {
@@ -1780,8 +1817,40 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       params.monthFilter = selectedMonthFilter || 'THIS_MONTH';
       if (searchQuery.trim()) params.search = searchQuery.trim();
 
-      const res = await api.get('/leads', { params });
-      const exportList = res.data.leads || displayedLeads;
+      let exportList = [];
+      try {
+        const res = await api.get('/leads', { params });
+        exportList = res.data?.leads || [];
+      } catch (e) {
+        exportList = displayedLeads;
+      }
+
+      if (exportList.length === 0) {
+        exportList = displayedLeads;
+      }
+
+      // Strict access filter for non-admin:
+      // Leaders/BDMs must NEVER export team members' Self Closer leads!
+      if (!isAdmin) {
+        const myName = (loggedInBdmName || '').toLowerCase().trim();
+        exportList = exportList.filter((lead) => {
+          const b1 = (lead.bdmName1 || '').toLowerCase().trim();
+          const b2 = (lead.bdmName2 || '').toLowerCase().trim();
+          const isOwn = b1.includes(myName) || myName.includes(b1) || b2.includes(myName) || (lead.createdById === currentUser?.id);
+          const isLeadSharing = (lead.closerStatus || '').toUpperCase().includes('LEAD SHARING');
+          return isOwn || (isLeader && isLeadSharing);
+        });
+
+        // Also respect active month tab filter on exportList
+        if (selectedMonthFilter === 'NEXT_MONTH') {
+          exportList = exportList.filter((l) => getLeadMonthBadge(l)?.icon === '🚀');
+        } else if (selectedMonthFilter === 'THIS_MONTH') {
+          exportList = exportList.filter((l) => getLeadMonthBadge(l)?.icon === '📅');
+        } else if (selectedMonthFilter === 'PENDING_FOLLOWUPS') {
+          exportList = exportList.filter((l) => getLeadOverdueInfo(l).isOverdue);
+        }
+      }
+
       exportLeadsToCsv(exportList, isAdmin ? 'All_Company_LMS_Leads.csv' : `${loggedInBdmName}_LMS_Leads.csv`);
     } catch (err) {
       console.error('Export CSV error:', err);
@@ -1825,11 +1894,11 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
 
           <button
             onClick={handleExportCsv}
-            disabled={pagination.total === 0 || exportingCsv}
+            disabled={displayedLeads.length === 0 || exportingCsv}
             className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-50"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>{exportingCsv ? 'Exporting...' : `Export CSV (${pagination.total || displayedLeads.length})`}</span>
+            <span>{exportingCsv ? 'Exporting...' : `Export CSV (${displayedLeads.length})`}</span>
           </button>
 
           {/* LOG NEW LEAD BUTTON (BDM ONLY - REMOVED FOR ADMIN) */}
@@ -3404,10 +3473,10 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
               <span>📅 This Month ({monthLabels.thisMonth})</span>
               <span className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold ${selectedMonthFilter === 'THIS_MONTH' ? 'bg-white/20 text-white' : 'bg-indigo-100 text-indigo-800'
                 }`}>
-                {isAdmin ? (analytics?.thisMonthCount ?? 0) : (analytics?.myThisMonthCount ?? 0)}
+                {isAdmin ? (analytics?.thisMonthCount ?? 0) : myThisMonthCount}
               </span>
               <span className="text-[10px] opacity-80 font-medium">
-                (₹{Number(isAdmin ? (analytics?.thisMonthFunnel || 0) : (analytics?.myThisMonthFunnel || 0)).toLocaleString('en-IN')})
+                (₹{Number(isAdmin ? (analytics?.thisMonthFunnel || 0) : myThisMonthFunnel).toLocaleString('en-IN')})
               </span>
             </button>
 
@@ -3423,10 +3492,10 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
               <span>🚀 Next Month ({monthLabels.nextMonth})</span>
               <span className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold ${selectedMonthFilter === 'NEXT_MONTH' ? 'bg-white/20 text-white' : 'bg-emerald-200 text-emerald-900'
                 }`}>
-                {isAdmin ? (analytics?.nextMonthCount ?? 0) : (analytics?.myNextMonthCount ?? 0)}
+                {isAdmin ? (analytics?.nextMonthCount ?? 0) : myNextMonthCount}
               </span>
               <span className="text-[10px] opacity-80 font-medium">
-                (₹{Number(isAdmin ? (analytics?.nextMonthFunnel || 0) : (analytics?.myNextMonthFunnel || 0)).toLocaleString('en-IN')})
+                (₹{Number(isAdmin ? (analytics?.nextMonthFunnel || 0) : myNextMonthFunnel).toLocaleString('en-IN')})
               </span>
             </button>
 
@@ -3504,8 +3573,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
               {selectedMonthFilter === 'PENDING_FOLLOWUPS'
                 ? `⚠️ Showing Pending Follow-ups (${displayedLeads.length} overdue leads in view${overdueBdmFilter !== 'ALL' ? ` for ${overdueBdmFilter}` : ''})`
                 : selectedMonthFilter === 'NEXT_MONTH'
-                  ? `🚀 Showing Next Month (${monthLabels.nextMonth}) leads (${displayedLeads.length} leads in view, ${pagination.total} total)`
-                  : `📅 Showing This Month (${monthLabels.thisMonth}) leads (${displayedLeads.length} leads in view, ${pagination.total} total)`}
+                  ? `🚀 Showing Next Month (${monthLabels.nextMonth}) leads (${displayedLeads.length} leads in view${isAdmin ? `, ${pagination.total} total` : ''})`
+                  : `📅 Showing This Month (${monthLabels.thisMonth}) leads (${displayedLeads.length} leads in view${isAdmin ? `, ${pagination.total} total` : ''})`}
             </span>
             {selectedTeamMemberFilter !== 'ALL' && (
               <button
