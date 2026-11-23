@@ -16,9 +16,18 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required.' });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase().trim() },
+    const cleanEmail = email.toLowerCase().trim();
+    let user = await prisma.user.findUnique({
+      where: { email: cleanEmail },
     });
+
+    // Support email aliases for Accounts & Legal roles
+    if (!user && (cleanEmail === 'akash.prajapati@corporatemart.com' || cleanEmail === 'akash.accounts@corporatemart.com' || cleanEmail === 'akash@corporatemart.com')) {
+      user = await prisma.user.findFirst({ where: { role: 'ACCOUNTS' } });
+    }
+    if (!user && (cleanEmail === 'ronak.donga@corporatemart.com' || cleanEmail === 'ronak.legal@corporatemart.com' || cleanEmail === 'ronak@corporatemart.com')) {
+      user = await prisma.user.findFirst({ where: { role: 'LEGAL' } });
+    }
 
     if (!user || !user.isActive) {
       return res.status(401).json({ error: 'Invalid credentials or inactive account.' });
