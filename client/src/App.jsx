@@ -32,7 +32,7 @@ import {
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
-  const [activeTab, setActiveTab] = useState('pipeline');
+  const [activeTab, setActiveTab] = useState('lms');
   const [stats, setStats] = useState(null);
   const [deals, setDeals] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -118,7 +118,7 @@ export default function App() {
     else if (role === 'LEGAL') setActiveTab('legal');
     else if (role === 'OPERATIONS') setActiveTab('operations');
     else if (role === 'RM') setActiveTab('rm');
-    else setActiveTab('pipeline');
+    else setActiveTab('lms');
   };
 
   const handleDirectLogin = async (email, password) => {
@@ -269,8 +269,8 @@ export default function App() {
 
         if (role === 'BDM') {
       return [
-        { id: 'pipeline', label: 'CRM', icon: Layers, badge: deals.length },
         { id: 'lms', label: 'LMS', icon: UserPlus },
+        { id: 'pipeline', label: 'CRM', icon: Layers, badge: deals.length },
       ];
     }
 
