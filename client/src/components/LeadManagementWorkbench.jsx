@@ -1630,11 +1630,6 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       );
       return;
     }
-    if (!quotationFile) {
-      toast.warning('Official quotation document (.pdf, .doc, or .docx) is mandatory. Please attach the quotation file to continue.', 'Quotation Document Required');
-      setFileError('Quotation document (PDF or Word) is mandatory.');
-      return;
-    }
 
     const currentToday = getTodayDateStr();
     if (form.meetingDate && form.meetingDate < currentToday) {
@@ -1671,7 +1666,9 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       formData.append('leadStatus', form.leadStatus);
       formData.append('dealValue', form.dealValue);
       formData.append('remarks', form.remarks.trim());
-      formData.append('quotation', quotationFile);
+      if (quotationFile) {
+        formData.append('quotation', quotationFile);
+      }
 
       await api.post('/leads', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -2992,7 +2989,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                     <FileText className="w-4 h-4" />
                   </span>
                   <label className="text-xs font-bold text-slate-900">
-                    Quotation Document <span className="text-rose-500 font-extrabold">* (Mandatory)</span>
+                    Quotation Document <span className="text-slate-400 font-normal">(Optional)</span>
                   </label>
                   <span className="text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full">
                     Accepted: PDF (.pdf) or Word (.doc, .docx)
@@ -3017,7 +3014,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 >
                   <UploadCloud className="w-8 h-8 text-indigo-400 group-hover:text-indigo-600 mx-auto mb-1.5 transition" />
                   <p className="text-xs font-bold text-slate-800">
-                    Click to browse or drop quotation document here <span className="text-rose-500">*</span>
+                    Click to browse or drop quotation document here <span className="text-slate-400 font-normal">(Optional)</span>
                   </p>
                   <p className="text-[11px] text-slate-500 mt-0.5">
                     Select customer quotation in PDF format (<span className="font-semibold text-rose-600">.pdf</span>) or Microsoft Word format (<span className="font-semibold text-blue-600">.doc, .docx</span>)

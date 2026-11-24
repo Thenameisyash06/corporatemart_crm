@@ -1307,13 +1307,6 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
       });
     }
 
-    // 3. MANDATORY VALIDATION: Quotation file is required
-    if (!file) {
-      return res.status(400).json({
-        error: 'Quotation file is mandatory. Please attach an official quotation document in PDF (.pdf) or Word (.doc, .docx) format.',
-      });
-    }
-
     // Ensure Leader is strictly fetched from stored user data for BDM
     let finalLeaderName = (leaderName || '').trim();
     if (req.user.role === 'BDM') {
@@ -1364,50 +1357,58 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
       });
     }
 
-    const ext = path.extname(file.originalname).toLowerCase();
-    const validExtensions = ['.pdf', '.doc', '.docx'];
-    if (!validExtensions.includes(ext)) {
-      return res.status(400).json({
-        error: `Invalid file extension "${ext}". Quotation must be in PDF (.pdf) or Word (.doc, .docx) format.`,
-      });
-    }
+    let quotationFileUrl = null;
+    let quotationFileName = null;
+    let quotationFileSize = null;
 
-    const cleanFileName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const localFileName = `${Date.now()}_${cleanFileName}`;
-    const storagePath = `leads/quotations/${localFileName}`;
-    const mimeType = ext === '.pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-
-    let quotationFileUrl = storagePath;
-
-    // 1. Primary: Upload directly to Supabase Object Storage
-    try {
-      const { data, error } = await supabase.storage
-        .from(BUCKET_NAME)
-        .upload(storagePath, file.buffer, {
-          contentType: file.mimetype || mimeType,
-          upsert: false,
+    if (file) {
+      const ext = path.extname(file.originalname).toLowerCase();
+      const validExtensions = ['.pdf', '.doc', '.docx'];
+      if (!validExtensions.includes(ext)) {
+        return res.status(400).json({
+          error: `Invalid file extension "${ext}". Quotation must be in PDF (.pdf) or Word (.doc, .docx) format.`,
         });
+      }
 
-      if (!error && data?.path) {
-        quotationFileUrl = data.path;
-      }
-    } catch (e) {
-      console.warn('[LMS] Supabase storage upload notice:', e.message);
-    }
+      const cleanFileName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const localFileName = `${Date.now()}_${cleanFileName}`;
+      const storagePath = `leads/quotations/${localFileName}`;
+      const mimeType = ext === '.pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-    // 2. Safe local filesystem caching (will not throw on read-only environments like Vercel Lambda)
-    try {
-      const localDir = path.join(__dirname, '../../uploads/quotations');
-      if (!fs.existsSync(localDir)) {
-        fs.mkdirSync(localDir, { recursive: true });
+      quotationFileUrl = storagePath;
+      quotationFileName = file.originalname ? file.originalname.toUpperCase() : file.originalname;
+      quotationFileSize = file.size;
+
+      // 1. Primary: Upload directly to Supabase Object Storage
+      try {
+        const { data, error } = await supabase.storage
+          .from(BUCKET_NAME)
+          .upload(storagePath, file.buffer, {
+            contentType: file.mimetype || mimeType,
+            upsert: false,
+          });
+
+        if (!error && data?.path) {
+          quotationFileUrl = data.path;
+        }
+      } catch (e) {
+        console.warn('[LMS] Supabase storage upload notice:', e.message);
       }
-      const localFilePath = path.join(localDir, localFileName);
-      fs.writeFileSync(localFilePath, file.buffer);
-      if (!quotationFileUrl) {
-        quotationFileUrl = `/uploads/quotations/${localFileName}`;
+
+      // 2. Safe local filesystem caching (will not throw on read-only environments like Vercel Lambda)
+      try {
+        const localDir = path.join(__dirname, '../../uploads/quotations');
+        if (!fs.existsSync(localDir)) {
+          fs.mkdirSync(localDir, { recursive: true });
+        }
+        const localFilePath = path.join(localDir, localFileName);
+        fs.writeFileSync(localFilePath, file.buffer);
+        if (!quotationFileUrl) {
+          quotationFileUrl = `/uploads/quotations/${localFileName}`;
+        }
+      } catch (fsErr) {
+        // Gracefully ignored on read-only serverless filesystems (e.g. AWS Lambda / Vercel EROFS)
       }
-    } catch (fsErr) {
-      // Gracefully ignored on read-only serverless filesystems (e.g. AWS Lambda / Vercel EROFS)
     }
 
     const rawClientStatus = (clientStatus || 'Warm').trim().toLowerCase();
@@ -1449,8 +1450,8 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
       finalValue,
       remarks ? remarks.trim().toUpperCase() : null,
       quotationFileUrl,
-      file.originalname ? file.originalname.toUpperCase() : file.originalname,
-      file.size,
+      quotationFileName,
+      quotationFileSize,
       req.user.id,
       initialFollowUpDate
     );
@@ -1458,7 +1459,7 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
     const [created] = await prisma.$queryRawUnsafe(`SELECT * FROM "leads" WHERE "id" = $1`, id);
 
     return res.status(201).json({
-      message: 'Lead created successfully with quotation document.',
+      message: quotationFileName ? 'Lead created successfully with quotation document.' : 'Lead created successfully.',
       lead: created,
     });
   } catch (error) {
