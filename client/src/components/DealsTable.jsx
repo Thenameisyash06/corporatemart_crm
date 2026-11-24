@@ -7,6 +7,7 @@ import {
   Clock,
   ChevronRight,
   IndianRupee,
+  Pencil,
 } from 'lucide-react';
 
 export const STAGE_CONFIG = {
@@ -27,6 +28,7 @@ export default function DealsTable({
   deals,
   onSelectDeal,
   onCollectBalance,
+  onEditDeal,
   currentUser,
   loading,
   pagination,
@@ -205,6 +207,20 @@ export default function DealsTable({
                   {/* Action */}
                   <td className="py-4 px-4 text-right align-middle">
                     <div className="inline-flex items-center gap-2 justify-end">
+                      {deal.stage.includes('REJECTED') && (currentUser?.role === 'BDM' || currentUser?.role === 'ADMIN') && onEditDeal && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEditDeal(deal);
+                          }}
+                          className="h-8.5 px-3 bg-rose-50 hover:bg-rose-100 text-rose-800 rounded-lg border border-rose-300 text-xs font-bold inline-flex items-center gap-1.5 transition-colors shadow-2xs"
+                          title="Edit deal details, fix discrepancies, and re-submit"
+                        >
+                          <Pencil className="w-3.5 h-3.5 text-rose-700" />
+                          <span>Edit & Resubmit</span>
+                        </button>
+                      )}
+
                       {(currentUser?.role === 'BDM' || currentUser?.role === 'ADMIN') && pending > 0 && onCollectBalance && (
                         <button
                           onClick={(e) => {

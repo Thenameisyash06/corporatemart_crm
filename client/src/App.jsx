@@ -40,6 +40,7 @@ export default function App() {
   const [isNewDealOpen, setIsNewDealOpen] = useState(false);
   const [balanceModalDeal, setBalanceModalDeal] = useState(null);
   const [newDealInitialData, setNewDealInitialData] = useState(null);
+  const [dealToEdit, setDealToEdit] = useState(null);
 
   // Today's Meetings State & Notification Alerts
   const [todayMeetings, setTodayMeetings] = useState([]);
@@ -465,6 +466,7 @@ export default function App() {
               setIsNewDealOpen(true);
             }}
             onCollectBalance={(deal) => setBalanceModalDeal(deal)}
+            onEditDeal={(deal) => setDealToEdit(deal)}
             highlightLeadId={highlightLeadId}
           />
         )}
@@ -518,6 +520,7 @@ export default function App() {
               currentUser={currentUser}
               onSelectDeal={(id) => setSelectedDealId(id)}
               onCollectBalance={(deal) => setBalanceModalDeal(deal)}
+              onEditDeal={(deal) => setDealToEdit(deal)}
               pagination={dealsPagination}
               onPageChange={(p) => {
                 setDealsPage(p);
@@ -571,17 +574,21 @@ export default function App() {
 
       {/* MODALS */}
       <NewDealWizardModal
-        isOpen={isNewDealOpen}
+        isOpen={isNewDealOpen || Boolean(dealToEdit)}
         initialData={newDealInitialData}
+        dealToEdit={dealToEdit}
+        currentUser={currentUser}
         onClose={() => {
           setIsNewDealOpen(false);
           setNewDealInitialData(null);
+          setDealToEdit(null);
         }}
         onSuccess={(newDealId) => {
           fetchData();
           setSelectedDealId(newDealId);
           setIsNewDealOpen(false);
           setNewDealInitialData(null);
+          setDealToEdit(null);
         }}
       />
 
@@ -591,6 +598,10 @@ export default function App() {
         onClose={() => setSelectedDealId(null)}
         currentUser={currentUser}
         onRefreshParent={fetchData}
+        onEditDeal={(deal) => {
+          setSelectedDealId(null);
+          setDealToEdit(deal);
+        }}
       />
 
       <CollectBalanceModal

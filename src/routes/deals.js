@@ -4,6 +4,8 @@ const multer = require('multer');
 const prisma = require('../lib/prisma');
 const { uploadFile } = require('../lib/storage');
 const { authenticateToken, requireRoles } = require('../middleware/auth');
+const { notifyCustomerStageChange, buildStageEmailHtml } = require('../lib/emailService');
+const { sendEmail } = require('../lib/mailer');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -126,6 +128,28 @@ async function recordAuditLog({ dealId, userId, action, fromStage, toStage, rema
         remarks,
       },
     });
+
+    // Automated Customer Email Notifications for each stage start & completion
+    const NOTIFIABLE_ACTIONS = [
+      'DEAL_CREATED',
+      'ACCOUNTS_APPROVED',
+      'ACCOUNTS_REJECTED',
+      'RESUBMIT_TO_ACCOUNTS',
+      'LEGAL_APPROVED',
+      'LEGAL_REJECTED',
+      'SERVICE_COMPLETED',
+      'FINAL_DOCS_DELIVERED',
+      'WORKFLOW_CLOSED',
+      'BALANCE_PAYMENT_VERIFIED',
+    ];
+
+    if (dealId && NOTIFIABLE_ACTIONS.includes(action)) {
+      notifyCustomerStageChange({
+        dealId,
+        event: action,
+        notes: remarks,
+      }).catch((e) => console.error('[EmailService] Stage notification error:', e));
+    }
   } catch (err) {
     console.error('Failed to write audit log:', err);
   }
@@ -134,6 +158,31 @@ async function recordAuditLog({ dealId, userId, action, fromStage, toStage, rema
 // -----------------------------------------------------------------------------
 // GET /api/deals - List deals with filtering by role and stage
 // -----------------------------------------------------------------------------
+
+function formatDealDocuments(deal) {
+  if (!deal || !deal.documents) return;
+  const verifiedPayments = (deal.payments || []).filter((p) => p.status === 'VERIFIED');
+  const allPaymentsVerified = (deal.payments || []).length > 0 && (deal.payments || []).every((p) => p.status === 'VERIFIED');
+
+  deal.documents = deal.documents.map((doc) => {
+    if (doc.documentType === 'PAYMENT_PROOF' && !doc.isVerified) {
+      const isMatched = verifiedPayments.some((p) =>
+        (p.paymentProofUrl && p.paymentProofUrl === doc.fileUrl) ||
+        (doc.title && (
+          doc.title.toLowerCase().includes('tranche #' + p.trancheNumber) ||
+          doc.title.toLowerCase().includes('tranche ' + p.trancheNumber) ||
+          (p.trancheNumber === 1 && !doc.title.toLowerCase().includes('tranche'))
+        ))
+      ) || allPaymentsVerified;
+
+      if (isMatched) {
+        return { ...doc, isVerified: true, verifiedByRole: 'ACCOUNTS' };
+      }
+    }
+    return doc;
+  });
+}
+
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const { stage, roleFilter, search } = req.query;
@@ -234,6 +283,8 @@ router.get('/', authenticateToken, async (req, res) => {
 
     const totalPages = isAll ? 1 : Math.max(1, Math.ceil(total / (limit || 20)));
 
+    deals.forEach(formatDealDocuments);
+
     return res.json({
       deals,
       pagination: {
@@ -326,6 +377,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
       }
     }
 
+    formatDealDocuments(deal);
     return res.json({ deal });
   } catch (error) {
     console.error('Fetch deal error:', error);
@@ -542,6 +594,262 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, re
 });
 
 // -----------------------------------------------------------------------------
+
+// -----------------------------------------------------------------------------
+// PUT /api/deals/:id - BDM / Admin Edits & Re-enters Deal Details and Re-submits Application
+// -----------------------------------------------------------------------------
+router.put('/:id', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res) => {
+  try {
+    const dealId = req.params.id;
+    const deal = await prisma.deal.findUnique({
+      where: { id: dealId },
+      include: {
+        client: { include: { directors: true } },
+        services: true,
+        payments: true,
+        documents: true,
+        coBdms: true,
+      },
+    });
+
+    if (!deal) {
+      return res.status(404).json({ error: 'Deal not found.' });
+    }
+
+    const isOwner =
+      req.user.role === 'ADMIN' ||
+      deal.bdmId === req.user.id ||
+      deal.coBdms.some((cb) => cb.id === req.user.id);
+
+    if (!isOwner) {
+      return res.status(403).json({ error: 'You are not authorized to edit this deal.' });
+    }
+
+    const {
+      companyName,
+      clientName,
+      clientEmail,
+      clientPhone,
+      gstStatus,
+      gstin,
+      panNumber,
+      billingAddress,
+      address,
+      city,
+      state,
+      pincode,
+      consultantName,
+      industry,
+      sector,
+      remarks,
+      paymentRemarks,
+      accountName,
+      receivingAccount,
+      cashCollectorName,
+      coBdmIds,
+      directors,
+      services,
+      standardAmount,
+      totalAmount,
+      amountReceived,
+      paymentType,
+      paymentMode,
+      transactionReference,
+      paymentDate,
+      resubmit,
+    } = req.body;
+
+    if (!companyName || !clientName || !clientEmail || !clientPhone) {
+      return res.status(400).json({ error: 'Company Name, Client Name, Email, and Phone are mandatory.' });
+    }
+
+    if (!panNumber || !panNumber.trim()) {
+      return res.status(400).json({ error: 'Company PAN number is mandatory.' });
+    }
+
+    if (!services || services.length === 0) {
+      return res.status(400).json({ error: 'At least one service line item must be selected.' });
+    }
+
+    const selectedAccount = (accountName || receivingAccount || deal.receivingAccount || 'Corporatemart private limited').trim();
+    const isCashPayment = paymentMode === 'CASH';
+
+    if (isCashPayment && (!cashCollectorName || !cashCollectorName.trim())) {
+      return res.status(400).json({ error: 'For Cash payment, collector name is mandatory.' });
+    }
+
+    for (const s of services) {
+      const std = parseFloat(s.standardAmount) || 0;
+      const dealAmt = parseFloat(s.dealAmount !== undefined ? s.dealAmount : s.serviceFee) || 0;
+      if (std > 0 && dealAmt > std) {
+        return res.status(400).json({
+          error: `Deal amount (₹${dealAmt.toLocaleString('en-IN')}) cannot be greater than standard amount (₹${std.toLocaleString('en-IN')}) for service "${s.serviceName}".`,
+        });
+      }
+    }
+
+    const totalVal = parseFloat(totalAmount) || 0;
+    const receivedVal = parseFloat(amountReceived) || 0;
+    const pendingVal = Math.max(0, totalVal - receivedVal);
+    const standardVal = parseFloat(standardAmount) || totalVal;
+
+    if (totalVal <= 0) {
+      return res.status(400).json({ error: 'Total deal amount must be greater than zero.' });
+    }
+
+    if (receivedVal <= 0) {
+      return res.status(400).json({ error: 'Amount received must be greater than zero.' });
+    }
+
+    const validCoBdmIds = Array.isArray(coBdmIds)
+      ? coBdmIds.filter((id) => id && typeof id === 'string' && id !== req.user.id)
+      : [];
+
+    let newStage = deal.stage;
+    let discrepancyCleared = deal.currentDiscrepancy;
+    if (resubmit) {
+      if (deal.stage === 'STAGE_05_LEGAL_REJECTED') {
+        newStage = 'STAGE_05_LEGAL_VERIFICATION';
+      } else {
+        newStage = 'STAGE_04_ACCOUNTS_VERIFICATION';
+      }
+      discrepancyCleared = null;
+    }
+
+    const updatedDeal = await prisma.$transaction(async (tx) => {
+      // 1. Update Client
+      await tx.client.update({
+        where: { id: deal.clientId },
+        data: {
+          companyName: companyName.trim().toUpperCase(),
+          clientName: clientName.trim().toUpperCase(),
+          email: clientEmail.trim().toUpperCase(),
+          phone: clientPhone.trim(),
+          gstStatus: Boolean(gstStatus),
+          gstin: gstin ? gstin.trim().toUpperCase() : null,
+          panNumber: panNumber.trim().toUpperCase(),
+          billingAddress: (address || billingAddress || '').trim().toUpperCase() || null,
+          city: city ? city.trim().toUpperCase() : null,
+          state: state ? state.trim().toUpperCase() : null,
+          pincode: pincode ? pincode.trim() : null,
+          consultantName: consultantName ? consultantName.trim().toUpperCase() : null,
+          industry: industry ? industry.trim().toUpperCase() : null,
+          sector: sector ? sector.trim().toUpperCase() : null,
+        },
+      });
+
+      // 2. Update Directors
+      await tx.director.deleteMany({ where: { clientId: deal.clientId } });
+      if (directors && Array.isArray(directors) && directors.length > 0) {
+        await tx.director.createMany({
+          data: directors
+            .filter((d) => d.name && d.name.trim().length > 0)
+            .map((d) => ({
+              clientId: deal.clientId,
+              name: d.name.trim().toUpperCase(),
+              din: d.din ? d.din.trim().toUpperCase() : null,
+              pan: d.pan ? d.pan.trim().toUpperCase() : null,
+              email: d.email ? d.email.trim().toUpperCase() : null,
+              phone: d.phone ? d.phone.trim() : null,
+            })),
+        });
+      }
+
+      // 3. Update Services
+      await tx.dealService.deleteMany({ where: { dealId: deal.id } });
+      await tx.dealService.createMany({
+        data: services.map((s) => ({
+          dealId: deal.id,
+          serviceName: s.serviceName ? s.serviceName.trim().toUpperCase() : s.serviceName,
+          standardAmount: s.standardAmount ? parseFloat(s.standardAmount) : null,
+          serviceFee: parseFloat(s.serviceFee || s.dealAmount) || 0,
+          govtFee: s.gstAmount !== undefined ? parseFloat(s.gstAmount) : (s.govtFee ? parseFloat(s.govtFee) : null),
+          status: 'PENDING',
+        })),
+      });
+
+      // 4. Update Initial Payment (Tranche 1)
+      const finalTxRef = isCashPayment
+        ? (transactionReference && transactionReference.trim() ? transactionReference.trim().toUpperCase() : `CASH: COLLECTED BY ${cashCollectorName.trim().toUpperCase()}`)
+        : (transactionReference && transactionReference.trim() ? transactionReference.trim().toUpperCase() : `${(paymentMode || 'Online').toUpperCase()} - ${selectedAccount.toUpperCase()}`);
+
+      const tranche1 = deal.payments.find((p) => p.trancheNumber === 1);
+      if (tranche1) {
+        await tx.payment.update({
+          where: { id: tranche1.id },
+          data: {
+            amount: receivedVal,
+            paymentDate: paymentDate ? new Date(paymentDate) : tranche1.paymentDate,
+            paymentMode: paymentMode || tranche1.paymentMode,
+            transactionReference: finalTxRef,
+            accountName: selectedAccount.toUpperCase(),
+            cashCollectorName: isCashPayment ? cashCollectorName.trim().toUpperCase() : null,
+            status: resubmit ? 'PENDING_VERIFICATION' : tranche1.status,
+            remarks: (paymentRemarks || remarks || '').trim().toUpperCase() || null,
+          },
+        });
+      }
+
+      // 5. Update Deal Record
+      const updated = await tx.deal.update({
+        where: { id: deal.id },
+        data: {
+          standardAmount: standardVal,
+          totalAmount: totalVal,
+          amountReceived: receivedVal,
+          pendingAmount: pendingVal,
+          receivingAccount: selectedAccount.toUpperCase(),
+          paymentType: paymentType || (pendingVal > 0 ? 'PART_PAYMENT' : 'FULL_PAYMENT'),
+          remarks: (paymentRemarks || remarks || '').trim().toUpperCase() || null,
+          isBdmEntryComplete: true,
+          bdmHandoverAt: resubmit ? new Date() : deal.bdmHandoverAt,
+          stage: newStage,
+          currentDiscrepancy: discrepancyCleared,
+          isAccountsVerified: (resubmit && newStage === 'STAGE_04_ACCOUNTS_VERIFICATION') ? false : deal.isAccountsVerified,
+          isLegalVerified: (resubmit && (newStage === 'STAGE_04_ACCOUNTS_VERIFICATION' || newStage === 'STAGE_05_LEGAL_VERIFICATION')) ? false : deal.isLegalVerified,
+          coBdms: {
+            set: validCoBdmIds.map((id) => ({ id })),
+          },
+        },
+        include: {
+          client: { include: { directors: true } },
+          services: true,
+          payments: true,
+          documents: true,
+          coBdms: true,
+        },
+      });
+
+      return updated;
+    });
+
+    const auditAction = resubmit ? 'DEAL_RESUBMITTED_BY_BDM' : 'DEAL_UPDATED_BY_BDM';
+    const targetDeptName = newStage === 'STAGE_05_LEGAL_VERIFICATION' ? 'Legal' : 'Accounts';
+    const auditRemarks = resubmit
+      ? `BDM ${req.user.fullName} updated deal details, re-entered information, and re-submitted application to ${targetDeptName} for verification.`
+      : `BDM ${req.user.fullName} updated deal details.`;
+
+    await recordAuditLog({
+      dealId: deal.id,
+      userId: req.user.id,
+      action: auditAction,
+      fromStage: deal.stage,
+      toStage: updatedDeal.stage,
+      remarks: auditRemarks,
+    });
+
+    return res.json({
+      message: resubmit
+        ? `Deal #${updatedDeal.dealCode} successfully updated and re-submitted to ${targetDeptName} for verification!`
+        : `Deal #${updatedDeal.dealCode} details updated successfully.`,
+      deal: updatedDeal,
+    });
+  } catch (error) {
+    console.error('Update deal error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to update deal.' });
+  }
+});
+
 // POST /api/deals/:id/resubmit (and legacy /:id/handover) - Resubmit Rejected Deal to Accounts
 // -----------------------------------------------------------------------------
 const handleDealResubmit = async (req, res) => {
@@ -574,12 +882,15 @@ const handleDealResubmit = async (req, res) => {
       return res.status(400).json({ error: 'Company PAN card image/document must be uploaded before submission.' });
     }
 
+    const targetStage = deal.stage === 'STAGE_05_LEGAL_REJECTED' ? 'STAGE_05_LEGAL_VERIFICATION' : 'STAGE_04_ACCOUNTS_VERIFICATION';
+    const targetDept = targetStage === 'STAGE_05_LEGAL_VERIFICATION' ? 'Legal' : 'Accounts';
+
     const updated = await prisma.deal.update({
       where: { id: deal.id },
       data: {
         isBdmEntryComplete: true,
         bdmHandoverAt: new Date(),
-        stage: 'STAGE_04_ACCOUNTS_VERIFICATION',
+        stage: targetStage,
         currentDiscrepancy: null,
       },
     });
@@ -587,13 +898,13 @@ const handleDealResubmit = async (req, res) => {
     await recordAuditLog({
       dealId: deal.id,
       userId: req.user.id,
-      action: 'RESUBMIT_TO_ACCOUNTS',
+      action: targetStage === 'STAGE_05_LEGAL_VERIFICATION' ? 'RESUBMIT_TO_LEGAL' : 'RESUBMIT_TO_ACCOUNTS',
       fromStage: deal.stage,
-      toStage: 'STAGE_04_ACCOUNTS_VERIFICATION',
-      remarks: `BDM ${req.user.fullName} resubmitted file to Accounts for verification.`,
+      toStage: targetStage,
+      remarks: `BDM ${req.user.fullName} resubmitted file to ${targetDept} for verification.`,
     });
 
-    return res.json({ message: 'File successfully forwarded to Accounts for verification.', deal: updated });
+    return res.json({ message: `File successfully forwarded to ${targetDept} for verification.`, deal: updated });
   } catch (error) {
     console.error('Submission error:', error);
     return res.status(500).json({ error: 'Failed to complete submission.' });
@@ -652,6 +963,17 @@ router.post('/:id/accounts-verify', authenticateToken, requireRoles('ACCOUNTS', 
           where: {
             dealId: deal.id,
             documentType: 'COMPANY_PAN',
+          },
+          data: {
+            isVerified: true,
+            verifiedByRole: 'ACCOUNTS',
+          },
+        }),
+        // Also auto-verify initial payment proof documents
+        prisma.document.updateMany({
+          where: {
+            dealId: deal.id,
+            documentType: 'PAYMENT_PROOF',
           },
           data: {
             isVerified: true,
@@ -1007,6 +1329,21 @@ router.post(
               amountReceived: newAmountReceived,
               pendingAmount: newPendingAmount,
               paymentType: isFullyPaid ? 'FULL_PAYMENT' : 'PART_PAYMENT',
+            },
+          }),
+          prisma.document.updateMany({
+            where: {
+              dealId: deal.id,
+              documentType: 'PAYMENT_PROOF',
+              OR: [
+                ...(paymentToVerify.paymentProofUrl ? [{ fileUrl: paymentToVerify.paymentProofUrl }] : []),
+                { title: { contains: 'Tranche #' + paymentToVerify.trancheNumber } },
+                { title: { contains: 'Tranche ' + paymentToVerify.trancheNumber } },
+              ],
+            },
+            data: {
+              isVerified: true,
+              verifiedByRole: 'ACCOUNTS',
             },
           }),
         ]);
@@ -1365,6 +1702,15 @@ router.patch('/:id/services/:serviceId', authenticateToken, requireRoles('OPERAT
       remarks: `Service "${updatedService.serviceName}" updated.${updateData.status ? ` Status: ${updatedService.status}.` : ''}${feeMsg}`,
     });
 
+    if (updateData.status === 'COMPLETED') {
+      notifyCustomerStageChange({
+        dealId: req.params.id,
+        event: 'INDIVIDUAL_SERVICE_COMPLETED',
+        serviceName: updatedService.serviceName,
+        notes: notes || undefined,
+      }).catch((e) => console.error('[EmailService] Service milestone email error:', e));
+    }
+
     return res.json({ message: 'Service updated.', service: updatedService, totalAmount: newDealTotal });
   } catch (error) {
     console.error('Service update error:', error);
@@ -1672,6 +2018,95 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Delete deal error:', error);
     return res.status(500).json({ error: error.message || 'Failed to delete deal.' });
+  }
+});
+
+/**
+ * POST /api/deals/:id/send-email-update
+ * Send manual custom email notification to the customer with optional document attachments
+ */
+router.post('/:id/send-email-update', authenticateToken, async (req, res) => {
+  try {
+    const { subject, message, documentIds, attachAgreement, attachCertificates } = req.body;
+    const deal = await prisma.deal.findUnique({
+      where: { id: req.params.id },
+      include: { client: true, documents: true },
+    });
+
+    if (!deal) return res.status(404).json({ error: 'Deal not found.' });
+    if (!deal.client?.email) return res.status(400).json({ error: 'Client has no email address configured.' });
+
+    await notifyCustomerStageChange({
+      dealId: deal.id,
+      event: 'CUSTOM_UPDATE',
+      customSubject: subject || `Update Regarding Deal #${deal.dealCode} | Corporate Mart`,
+      notes: message,
+      documentIds,
+      attachAgreement,
+      attachCertificates,
+    });
+
+    const docCountNote = documentIds?.length ? ` [Attached ${documentIds.length} document(s)]` : '';
+    await recordAuditLog({
+      dealId: deal.id,
+      userId: req.user.id,
+      action: 'EMAIL_SENT_TO_CLIENT',
+      remarks: `Manual email update dispatched to ${deal.client.email} by ${req.user.fullName}. Subject: "${subject || 'Status Update'}"${docCountNote}`,
+    });
+
+    return res.json({ message: `Email successfully queued and sent to ${deal.client.email}.` });
+  } catch (err) {
+    console.error('Manual email update error:', err);
+    return res.status(500).json({ error: err.message || 'Failed to send email update.' });
+  }
+});
+
+/**
+ * POST /api/deals/test-email
+ * System testing endpoint to verify Microsoft Graph email connectivity
+ */
+router.post('/test-email', authenticateToken, async (req, res) => {
+  try {
+    const recipient = req.body.to || req.user.email;
+    const subject = req.body.subject || 'Corporate Mart CRM - Status & Tranche Notification Test';
+
+    const testHtml = buildStageEmailHtml({
+      clientName: req.body.clientName || req.user.fullName || 'Valued Client',
+      companyName: req.body.companyName || 'Corporate Mart Client Corp',
+      dealCode: req.body.dealCode || 'CM-2026-0002',
+      totalAmount: 20060,
+      amountReceived: 10000,
+      pendingAmount: 10060,
+      stepCompleted: 'Account & Advance Payment Verification Completed',
+      stepStarted: 'Legal Documentation & Drafting Started',
+      description: 'Your advance payment has been reconciled and approved by the accounts department. Our legal compliance team has commenced drafting your ROC incorporation and registration documents.',
+      remarks: 'All payment proofs and documentation verified. Zero discrepancies noted.',
+      payments: [
+        {
+          trancheNumber: 1,
+          amount: 10000,
+          paymentDate: new Date(),
+          paymentMode: 'IMPS/UPI',
+          transactionReference: 'TXN891238910',
+          status: 'VERIFIED',
+        },
+      ],
+      services: ['Private Limited Company Incorporation', 'GST Registration & Filing', 'Trademark Application'],
+      bdmName: req.user.fullName || 'Corporate Mart Account Manager',
+      bdmPhone: req.user.phone || '+91 98765 43210',
+      bdmEmail: req.user.email || 'Admin@corporate-mart.com',
+    });
+
+    await sendEmail({
+      to: recipient,
+      subject,
+      html: testHtml,
+    });
+
+    return res.json({ success: true, message: `Test email successfully sent to ${recipient}` });
+  } catch (err) {
+    console.error('Test email failed:', err);
+    return res.status(500).json({ error: err.message || 'Failed to send test email.' });
   }
 });
 

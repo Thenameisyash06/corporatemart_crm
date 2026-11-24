@@ -350,6 +350,7 @@ export default function AdminDashboard({
   initialStats = null,
   stats = null,
   onCollectBalance,
+  onEditDeal,
   highlightLeadId,
 }) {
   const [loading, setLoading] = useState(false);
@@ -1083,6 +1084,7 @@ export default function AdminDashboard({
             currentUser={currentUser || { role: 'ADMIN' }}
             onSelectDeal={(id) => onOpenDossier(id)}
             onCollectBalance={onCollectBalance}
+            onEditDeal={onEditDeal}
           />
         </div>
       )}

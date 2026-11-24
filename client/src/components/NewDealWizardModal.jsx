@@ -13,6 +13,7 @@ import {
   UserPlus,
   IndianRupee,
   Wallet,
+  Search,
 } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from '../context/ToastContext';
@@ -22,17 +23,91 @@ import { CORPORATEMART_SERVICES_CATALOG, SERVICES_BY_CATEGORY } from '../constan
 
 export const DEFAULT_SERVICES = CORPORATEMART_SERVICES_CATALOG;
 
-export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initialData }) {
+export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initialData, dealToEdit, currentUser }) {
   if (!isOpen) return null;
+
+  const loggedInUser = currentUser || (() => {
+    try {
+      return JSON.parse(localStorage.getItem('user'));
+    } catch (e) {
+      return null;
+    }
+  })();
 
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [serviceSearchQuery, setServiceSearchQuery] = useState('');
+  const isEditMode = Boolean(dealToEdit);
+  const [existingDocs, setExistingDocs] = useState([]);
+  const [deletedDocIds, setDeletedDocIds] = useState([]);
 
 
   useEffect(() => {
     if (isOpen) {
-      if (initialData) {
+      if (dealToEdit) {
+        // Pre-fill every detail from dealToEdit
+        setForm({
+          companyName: dealToEdit.client?.companyName || '',
+          clientName: dealToEdit.client?.clientName || '',
+          clientEmail: dealToEdit.client?.email || '',
+          clientPhone: dealToEdit.client?.phone || '',
+          coBdmIds: (dealToEdit.coBdms || []).map((b) => b.id),
+          panNumber: dealToEdit.client?.panNumber || '',
+          gstStatus: Boolean(dealToEdit.client?.gstStatus),
+          gstin: dealToEdit.client?.gstin || '',
+          consultantName: dealToEdit.client?.consultantName || '',
+          industry: dealToEdit.client?.industry || '',
+          sector: dealToEdit.client?.sector || '',
+          billingAddress: dealToEdit.client?.billingAddress || '',
+          city: dealToEdit.client?.city || '',
+          state: dealToEdit.client?.state || '',
+          pincode: dealToEdit.client?.pincode || '',
+          remarks: dealToEdit.remarks || '',
+          accountName: dealToEdit.payments?.[0]?.accountName || dealToEdit.receivingAccount || RECEIVING_ACCOUNTS[0],
+          cashCollectorName: dealToEdit.payments?.[0]?.cashCollectorName || '',
+          directors: (dealToEdit.client?.directors && dealToEdit.client.directors.length > 0)
+            ? dealToEdit.client.directors.map((d) => ({
+                name: d.name || '',
+                din: d.din || '',
+                pan: d.pan || '',
+                email: d.email || '',
+                phone: d.phone || '',
+              }))
+            : [
+                { name: '', din: '', pan: '', email: '', phone: '' },
+                { name: '', din: '', pan: '', email: '', phone: '' },
+              ],
+          services: (dealToEdit.services && dealToEdit.services.length > 0)
+            ? dealToEdit.services.map((s) => ({
+                serviceName: s.serviceName,
+                standardAmount: s.standardAmount || s.serviceFee,
+                dealAmount: s.serviceFee,
+                serviceFee: s.serviceFee,
+                gstAmount: s.govtFee !== undefined && s.govtFee !== null ? s.govtFee : Math.round(parseFloat(s.serviceFee || 0) * 0.18),
+              }))
+            : [
+                {
+                  serviceName: DEFAULT_SERVICES[0].name,
+                  standardAmount: DEFAULT_SERVICES[0].standardAmount,
+                  dealAmount: DEFAULT_SERVICES[0].standardAmount,
+                  gstAmount: Math.round((parseFloat(DEFAULT_SERVICES[0].standardAmount) || 0) * 0.18),
+                },
+              ],
+          standardAmount: String(dealToEdit.standardAmount || ''),
+          totalAmount: String(dealToEdit.totalAmount || ''),
+          amountReceived: String(dealToEdit.payments?.[0]?.amount || dealToEdit.amountReceived || ''),
+          paymentType: dealToEdit.paymentType || 'PART_PAYMENT',
+          paymentMode: dealToEdit.payments?.[0]?.paymentMode || 'UPI',
+          transactionReference: dealToEdit.payments?.[0]?.transactionReference || '',
+          paymentDate: dealToEdit.payments?.[0]?.paymentDate ? dealToEdit.payments[0].paymentDate.split('T')[0] : new Date().toISOString().split('T')[0],
+        });
+        setExistingDocs(dealToEdit.documents || []);
+        setDeletedDocIds([]);
+        setCompanyPanFile(null);
+        setPaymentProofFile(null);
+        setKycFiles([]);
+      } else if (initialData) {
         setForm((prev) => ({
           ...prev,
           companyName: initialData.companyName || '',
@@ -51,6 +126,8 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
             { name: '', din: '', pan: '', email: '', phone: '' },
           ],
         }));
+        setExistingDocs([]);
+        setDeletedDocIds([]);
       } else {
         setForm({
           companyName: '',
@@ -88,17 +165,19 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
             (parseFloat(DEFAULT_SERVICES[0].standardAmount) || 0) +
             Math.round((parseFloat(DEFAULT_SERVICES[0].standardAmount) || 0) * 0.18)
           ),
-          amountReceived: '10000',
+          amountReceived: '',
           paymentType: 'PART_PAYMENT',
           paymentMode: 'UPI',
           transactionReference: '',
           paymentDate: new Date().toISOString().split('T')[0],
         });
+        setExistingDocs([]);
+        setDeletedDocIds([]);
       }
       setStep(1);
       setError(null);
     }
-  }, [initialData, isOpen]);
+  }, [dealToEdit, initialData, isOpen]);
 
   // Form State
   const [form, setForm] = useState({
@@ -142,7 +221,7 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
       (parseFloat(DEFAULT_SERVICES[0].standardAmount) || 0) +
       Math.round((parseFloat(DEFAULT_SERVICES[0].standardAmount) || 0) * 0.18)
     ),
-    amountReceived: '10000',
+    amountReceived: '',
     paymentType: 'PART_PAYMENT',
     paymentMode: 'UPI',
     transactionReference: '',
@@ -395,7 +474,8 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
         return false;
       }
     } else {
-      if (!paymentProofFile) {
+      const hasProofOnFile = Boolean(paymentProofFile || (isEditMode && existingDocs.some(d => d.documentType === 'PAYMENT_PROOF' && !deletedDocIds.includes(d.id))));
+      if (!hasProofOnFile) {
         const msg = 'Payment Verification: Please attach the bank transfer screenshot or payment receipt for Accounts audit.';
         setError(msg);
         toast.warning(msg, 'Payment Proof Required');
@@ -419,7 +499,7 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
     setSubmitting(true);
 
     try {
-      const dealRes = await api.post('/deals', {
+      const payload = {
         ...form,
         standardAmount: standardVal,
         totalAmount: totalVal,
@@ -437,9 +517,30 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
             gstAmount: gstFee,
           };
         }),
-      });
+      };
 
-      const dealId = dealRes.data.dealId;
+      let targetDealId = null;
+      if (isEditMode) {
+        targetDealId = dealToEdit.id;
+        await api.put(`/deals/${targetDealId}`, {
+          ...payload,
+          resubmit: true,
+        });
+
+        // Delete any documents marked for removal
+        for (const docId of deletedDocIds) {
+          try {
+            await api.delete(`/documents/${docId}`);
+          } catch (e) {
+            console.warn('Failed to delete doc:', docId, e);
+          }
+        }
+      } else {
+        const dealRes = await api.post('/deals', payload);
+        targetDealId = dealRes.data.dealId;
+      }
+
+      const dealId = targetDealId;
 
       // 1. Upload mandatory Company PAN document
       if (companyPanFile) {
@@ -477,7 +578,12 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
         });
       }
 
-      toast.success('New deal created successfully! Dispatched to Accounts Desk.');
+      if (isEditMode) {
+        const targetDept = dealToEdit.stage === 'STAGE_05_LEGAL_REJECTED' ? 'Legal' : 'Accounts';
+        toast.success(`Deal #${dealToEdit.dealCode} details updated and re-submitted to ${targetDept} for verification!`);
+      } else {
+        toast.success('New deal created successfully! Dispatched to Accounts Desk.');
+      }
       onSuccess(dealId);
       onClose();
     } catch (err) {
@@ -500,9 +606,11 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
           <div>
             <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
               <Building className="w-4 h-4 text-slate-700" />
-              New Deal & Client Onboarding Wizard
+              {isEditMode ? `Edit & Re-Submit Deal Application — ${dealToEdit.dealCode}` : 'New Deal & Client Onboarding Wizard'}
             </h2>
-            <p className="text-xs text-slate-500">Stages 01 – 03: Sales / BDM File Entry</p>
+            <p className="text-xs text-slate-500">
+              {isEditMode ? 'Fix discrepancies, re-enter details, replace documents, and re-submit for verification' : 'Stages 01 – 03: Sales / BDM File Entry'}
+            </p>
           </div>
           <button
             onClick={onClose}
@@ -511,6 +619,21 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Rejection Discrepancy Banner if editing rejected deal */}
+        {isEditMode && dealToEdit.currentDiscrepancy && (
+          <div className="bg-rose-50 border-b border-rose-200 px-6 py-2.5 flex items-center justify-between text-xs text-rose-900">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+              <span>
+                <strong>Rejection Reason ({dealToEdit.stage.includes('LEGAL') ? 'Legal Department' : 'Accounts Department'}):</strong> {dealToEdit.currentDiscrepancy}
+              </span>
+            </div>
+            <span className="text-[10px] font-mono font-bold bg-rose-100 text-rose-800 px-2 py-0.5 rounded border border-rose-200">
+              {dealToEdit.stage}
+            </span>
+          </div>
+        )}
 
         {/* Step Indicator */}
         <div className="grid grid-cols-3 border-b border-slate-200 bg-white text-xs text-center font-medium">
@@ -725,6 +848,17 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
                     <label className="text-xs text-slate-700 font-semibold block mb-1">
                       Company PAN Image / Document <span className="text-slate-400 font-normal">(Optional)</span>
                     </label>
+                    {isEditMode && existingDocs.some(d => (d.documentType === 'COMPANY_PAN' || d.documentType === 'KYC_PAN') && !deletedDocIds.includes(d.id)) && !companyPanFile && (
+                      <div className="mb-2 p-2 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center justify-between text-xs text-emerald-800">
+                        <div className="flex items-center gap-1.5 truncate">
+                          <Check className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                          <span className="truncate font-medium">
+                            Current File: {existingDocs.find(d => (d.documentType === 'COMPANY_PAN' || d.documentType === 'KYC_PAN') && !deletedDocIds.includes(d.id))?.title}
+                          </span>
+                        </div>
+                        <span className="text-[10px] bg-white text-emerald-700 px-2 py-0.5 rounded border border-emerald-200 font-bold">On File</span>
+                      </div>
+                    )}
                     <div className="relative">
                       <input
                         type="file"
@@ -1002,6 +1136,116 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
                   </button>
                 </div>
 
+                {/* Quick Search & Add Service Bar */}
+                <div className="relative">
+                  <div className="flex items-center gap-2 p-2 bg-slate-50 border border-slate-300 rounded-lg focus-within:border-slate-800 focus-within:bg-white focus-within:ring-1 focus-within:ring-slate-800 transition">
+                    <Search className="w-4 h-4 text-slate-400 ml-1 flex-shrink-0" />
+                    <input
+                      type="text"
+                      value={serviceSearchQuery}
+                      onChange={(e) => setServiceSearchQuery(e.target.value)}
+                      placeholder="Search any service from catalog (e.g. Private Limited, GST, Trademark, ISO, FSSAI, MSME, Valuation)..."
+                      className="w-full bg-transparent text-xs text-slate-900 placeholder-slate-400 focus:outline-none"
+                    />
+                    {serviceSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setServiceSearchQuery('')}
+                        className="p-1 text-slate-400 hover:text-slate-600 rounded"
+                        title="Clear search"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Search Results Dropdown Menu */}
+                  {serviceSearchQuery.trim() && (
+                    <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-64 overflow-y-auto bg-white border border-slate-300 rounded-xl shadow-2xl divide-y divide-slate-100 text-xs">
+                      {CORPORATEMART_SERVICES_CATALOG
+                        .filter((item) =>
+                          item.name.toLowerCase().includes(serviceSearchQuery.toLowerCase()) ||
+                          item.category.toLowerCase().includes(serviceSearchQuery.toLowerCase())
+                        )
+                        .slice(0, 20)
+                        .map((item) => (
+                          <div
+                            key={item.name}
+                            onClick={() => {
+                              const newSvc = {
+                                serviceName: item.name,
+                                standardAmount: item.standardAmount,
+                                dealAmount: item.standardAmount,
+                                gstAmount: Math.round((parseFloat(item.standardAmount) || 0) * 0.18),
+                              };
+
+                              if (
+                                form.services.length === 1 &&
+                                (!form.services[0].serviceName || form.services[0].serviceName === DEFAULT_SERVICES[0].name)
+                              ) {
+                                setForm((prev) => {
+                                  const updatedServices = [newSvc];
+                                  const newStandard = parseFloat(item.standardAmount) || 0;
+                                  const newGst = Math.round(newStandard * 0.18);
+                                  return {
+                                    ...prev,
+                                    services: updatedServices,
+                                    standardAmount: String(newStandard),
+                                    totalAmount: String(newStandard + newGst),
+                                  };
+                                });
+                              } else {
+                                setForm((prev) => {
+                                  const updatedServices = [...prev.services, newSvc];
+                                  const newStandard = updatedServices.reduce(
+                                    (sum, s) => sum + (parseFloat(s.standardAmount) || 0),
+                                    0
+                                  );
+                                  const newTotal = updatedServices.reduce(
+                                    (sum, s) =>
+                                      sum +
+                                      (parseFloat(s.dealAmount !== undefined ? s.dealAmount : s.serviceFee) || 0) +
+                                      (parseFloat(s.gstAmount) || 0),
+                                    0
+                                  );
+                                  return {
+                                    ...prev,
+                                    services: updatedServices,
+                                    standardAmount: String(newStandard),
+                                    totalAmount: String(newTotal),
+                                  };
+                                });
+                              }
+                              setServiceSearchQuery('');
+                            }}
+                            className="p-2.5 hover:bg-slate-50 cursor-pointer flex items-center justify-between transition group"
+                          >
+                            <div className="pr-3">
+                              <div className="font-bold text-slate-900 group-hover:text-indigo-700">{item.name}</div>
+                              <div className="text-[10px] text-slate-500">{item.category}</div>
+                            </div>
+                            <div className="flex items-center gap-2.5 flex-shrink-0">
+                              <span className="font-mono font-bold text-slate-900">
+                                ₹{Number(item.standardAmount).toLocaleString('en-IN')}
+                              </span>
+                              <span className="px-2 py-1 bg-slate-900 text-white text-[10px] font-bold rounded group-hover:bg-indigo-600 transition">
+                                + Add
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      {CORPORATEMART_SERVICES_CATALOG.filter((item) =>
+                        item.name.toLowerCase().includes(serviceSearchQuery.toLowerCase()) ||
+                        item.category.toLowerCase().includes(serviceSearchQuery.toLowerCase())
+                      ).length === 0 && (
+                        <div className="p-4 text-center text-slate-500">
+                          No services found matching "{serviceSearchQuery}"
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <div className="space-y-3">
                   {form.services.map((s, index) => (
                     <div
@@ -1115,6 +1359,7 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
                     <input
                       type="number"
                       value={form.amountReceived}
+                      placeholder=""
                       onChange={(e) => setForm({ ...form, amountReceived: e.target.value })}
                       className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-emerald-700 font-bold font-mono focus:outline-none focus:border-slate-800"
                     />
@@ -1182,6 +1427,17 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
                       <label className="text-xs text-slate-800 font-bold block mb-1">
                         Payment Proof / Screenshot <span className="text-rose-500">*</span>
                       </label>
+                      {isEditMode && existingDocs.some(d => d.documentType === 'PAYMENT_PROOF' && !deletedDocIds.includes(d.id)) && !paymentProofFile && (
+                        <div className="mb-2 p-2 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center justify-between text-xs text-emerald-800">
+                          <div className="flex items-center gap-1.5 truncate">
+                            <Check className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                            <span className="truncate font-medium">
+                              Current File: {existingDocs.find(d => d.documentType === 'PAYMENT_PROOF' && !deletedDocIds.includes(d.id))?.title}
+                            </span>
+                          </div>
+                          <span className="text-[10px] bg-white text-emerald-700 px-2 py-0.5 rounded border border-emerald-200 font-bold">On File</span>
+                        </div>
+                      )}
                       <input
                         type="file"
                         required
@@ -1226,6 +1482,40 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
                   Attach Director PAN, Aadhaar, Electricity Bill, MOA/AOA, and DSC documents for verification.
                 </p>
               </div>
+
+              {/* Existing documents in edit mode */}
+              {isEditMode && existingDocs.filter(d => d.documentType !== 'COMPANY_PAN' && d.documentType !== 'PAYMENT_PROOF' && !deletedDocIds.includes(d.id)).length > 0 && (
+                <div className="space-y-2 mb-3">
+                  <div className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
+                    <span>Current Dossier Documents ({existingDocs.filter(d => d.documentType !== 'COMPANY_PAN' && d.documentType !== 'PAYMENT_PROOF' && !deletedDocIds.includes(d.id)).length})</span>
+                    <span className="text-[11px] text-slate-400 font-normal lowercase">click trash to replace/remove rejected file</span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                    {existingDocs
+                      .filter(d => d.documentType !== 'COMPANY_PAN' && d.documentType !== 'PAYMENT_PROOF' && !deletedDocIds.includes(d.id))
+                      .map((doc) => (
+                        <div
+                          key={doc.id}
+                          className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between text-xs"
+                        >
+                          <div className="flex items-center gap-2 truncate mr-2">
+                            <FileText className="w-4 h-4 text-slate-500 flex-shrink-0" />
+                            <span className="text-slate-900 font-medium truncate" title={doc.title}>{doc.title}</span>
+                            <span className="text-[10px] text-slate-500 font-mono px-1.5 py-0.2 bg-white border border-slate-200 rounded">{doc.documentType}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setDeletedDocIds(prev => [...prev, doc.id])}
+                            className="text-rose-600 hover:text-rose-800 p-1 rounded hover:bg-rose-50 transition"
+                            title="Remove this document from dossier"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
 
               {/* Multi-file batch upload */}
               <div className="border-2 border-dashed border-slate-200 hover:border-slate-400 rounded-xl p-5 text-center bg-slate-50/50 transition">
@@ -1314,7 +1604,7 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
                 disabled={submitting}
                 className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-md text-xs font-semibold transition flex items-center gap-1.5 shadow-sm disabled:opacity-50"
               >
-                {submitting ? 'Creating Deal...' : 'Save & Initialize Deal Record'}
+                {submitting ? (isEditMode ? 'Re-submitting...' : 'Creating Deal...') : (isEditMode ? 'Save Changes & Re-Submit Application' : 'Save & Initialize Deal Record')}
               </button>
             )}
           </div>

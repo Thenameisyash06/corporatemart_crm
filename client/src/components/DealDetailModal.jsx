@@ -20,6 +20,11 @@ import {
   Building,
   MapPin,
   Trash2,
+  Mail,
+  Pencil,
+  Plus,
+  UploadCloud,
+  AlertCircle,
 } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from '../context/ToastContext';
@@ -38,7 +43,7 @@ const STAGES_LIST = [
   { key: 'STAGE_09_RM_HANDOVER', label: '09. RM Success' },
 ];
 
-export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, onRefreshParent }) {
+export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, onRefreshParent, onEditDeal }) {
   if (!isOpen || !dealId) return null;
 
   const [deal, setDeal] = useState(null);
@@ -61,6 +66,69 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
   });
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deletingDeal, setDeletingDeal] = useState(false);
+
+  // Manual Customer Email Update State
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [emailForm, setEmailForm] = useState({ subject: '', message: '', documentIds: [] });
+  const [sendingEmail, setSendingEmail] = useState(false);
+
+  // Vault document upload state
+  const [uploadDocFile, setUploadDocFile] = useState(null);
+  const [uploadDocType, setUploadDocType] = useState('OTHER');
+  const [uploadDocTitle, setUploadDocTitle] = useState('');
+  const [isUploadingDoc, setIsUploadingDoc] = useState(false);
+
+  const handleUploadVaultDoc = async () => {
+    if (!uploadDocFile) return;
+    try {
+      setIsUploadingDoc(true);
+      const formData = new FormData();
+      formData.append('dealId', deal.id);
+      formData.append('documentType', uploadDocType || 'OTHER');
+      formData.append('title', uploadDocTitle.trim() || uploadDocFile.name);
+      formData.append('file', uploadDocFile);
+      await api.post('/documents/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      toast.success('Document uploaded to deal vault!');
+      setUploadDocFile(null);
+      setUploadDocTitle('');
+      await fetchDeal();
+      if (onRefreshParent) onRefreshParent();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to upload document.');
+    } finally {
+      setIsUploadingDoc(false);
+    }
+  };
+
+  const handleDeleteDocument = async (docId, title) => {
+    if (!window.confirm(`Are you sure you want to remove "${title}" from this deal?`)) return;
+    try {
+      await api.delete(`/documents/${docId}`);
+      toast.success('Document deleted successfully.');
+      await fetchDeal();
+      if (onRefreshParent) onRefreshParent();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to delete document.');
+    }
+  };
+
+  const handleSendEmailUpdate = async () => {
+    try {
+      setSendingEmail(true);
+      const res = await api.post(`/deals/${deal.id}/send-email-update`, emailForm);
+      toast.success(res.data?.message || 'Status email update sent to customer.');
+      setEmailModalOpen(false);
+      setEmailForm({ subject: '', message: '', documentIds: [] });
+      await fetchDeal();
+      if (onRefreshParent) onRefreshParent();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to send email to client.');
+    } finally {
+      setSendingEmail(false);
+    }
+  };
 
   const handleDeleteDeal = async () => {
     try {
@@ -319,6 +387,33 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
               {STAGE_CONFIG[deal.stage]?.label}
             </span>
 
+            {/* Email Client Button */}
+            {deal.client?.email && (
+              <button
+                type="button"
+                onClick={() => {
+                  const autoDocIds = [];
+                  (deal?.documents || []).forEach((d) => {
+                    if (d.documentType === 'LEGAL_AGREEMENT' || d.documentType === 'FINAL_DELIVERABLE_CERTIFICATE') {
+                      autoDocIds.push(d.id);
+                    }
+                  });
+                  setEmailForm({
+                    subject: `Status Update - Deal #${deal.dealCode} | Corporate Mart`,
+                    message: `Your service dossier has advanced to ${STAGE_CONFIG[deal.stage]?.label || deal.stage}. Our operations and compliance specialists are actively progressing your filing.`,
+                    documentIds: autoDocIds,
+                  });
+                  setEmailModalOpen(true);
+                }}
+                disabled={actionLoading || deletingDeal}
+                className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 transition shadow-2xs"
+                title={`Send manual status email update to ${deal.client.email}`}
+              >
+                <Mail className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Email Client</span>
+              </button>
+            )}
+
             {/* Delete Deal Button */}
             {(currentUser?.role === 'ADMIN' || currentUser?.role === 'BDM' || currentUser?.id === deal.bdmId) && (
               <button
@@ -393,8 +488,22 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
                 Current Position: {STAGE_CONFIG[deal.stage]?.label}
               </div>
               {deal.currentDiscrepancy && (
-                <div className="text-xs text-rose-700 font-semibold mt-1">
-                  Remark: "{deal.currentDiscrepancy}"
+                <div className="mt-2 p-2.5 bg-rose-50 border border-rose-200 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-rose-900">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+                    <span>
+                      <strong>{deal.stage.includes('LEGAL') ? 'Legal Deficiency' : 'Accounts Discrepancy'}:</strong> "{deal.currentDiscrepancy}"
+                    </span>
+                  </div>
+                  {(currentUser?.role === 'BDM' || currentUser?.role === 'ADMIN') && onEditDeal && (
+                    <button
+                      onClick={() => onEditDeal(deal)}
+                      className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-xs font-semibold flex items-center gap-1 shadow-xs transition flex-shrink-0 cursor-pointer"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      <span>Fix & Re-enter Application</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -403,14 +512,26 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
             <div className="flex items-center space-x-2.5">
               {/* RESUBMISSION FOR REJECTED / DISCREPANCY DEALS */}
               {deal.stage.includes('REJECTED') && (currentUser?.role === 'BDM' || currentUser?.role === 'ADMIN') && (
-                <button
-                  onClick={handleResubmit}
-                  disabled={actionLoading}
-                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition"
-                >
-                  <Send className="w-4 h-4" />
-                  <span>Resubmit File to Accounts</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  {onEditDeal && (
+                    <button
+                      onClick={() => onEditDeal(deal)}
+                      className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition cursor-pointer"
+                      title="Edit all deal details, replace rejected documents, and resubmit"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      <span>Edit & Re-Submit Application</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={handleResubmit}
+                    disabled={actionLoading}
+                    className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition cursor-pointer"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Quick Resubmit to {deal.stage === 'STAGE_05_LEGAL_REJECTED' ? 'Legal' : 'Accounts'}</span>
+                  </button>
+                </div>
               )}
 
               {/* STAGE 04 ACCOUNTS GATE */}
@@ -995,34 +1116,111 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
 
           {/* TAB 3: DOCUMENTS */}
           {activeTab === 'documents' && (
-            <div className="space-y-3">
+            <div className="space-y-4">
+              {/* Inline Upload Bar for BDM / Admin */}
+              {(currentUser?.role === 'BDM' || currentUser?.role === 'ADMIN') && (
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                  <div className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                    <UploadCloud className="w-4 h-4 text-indigo-600" />
+                    <span>Attach New Document to Deal Vault</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <select
+                      value={uploadDocType}
+                      onChange={(e) => setUploadDocType(e.target.value)}
+                      className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:outline-none focus:border-slate-800"
+                    >
+                      <option value="COMPANY_PAN">Company PAN Card</option>
+                      <option value="PAYMENT_PROOF">Payment Proof / Receipt</option>
+                      <option value="KYC_PAN">Director PAN Card</option>
+                      <option value="KYC_AADHAAR">Director Aadhaar Card</option>
+                      <option value="ADDRESS_PROOF">Registered Address Proof</option>
+                      <option value="INCORPORATION_FORM">Incorporation / Government Form</option>
+                      <option value="BOARD_RESOLUTION">Board Resolution</option>
+                      <option value="OTHER">Other Compliance Document</option>
+                    </select>
+
+                    <input
+                      type="text"
+                      value={uploadDocTitle}
+                      onChange={(e) => setUploadDocTitle(e.target.value)}
+                      placeholder="Document Title (e.g. Corrected PAN Card)"
+                      className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-slate-800"
+                    />
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="file"
+                        id="modal-vault-file-input"
+                        onChange={(e) => setUploadDocFile(e.target.files?.[0] || null)}
+                        className="text-xs text-slate-600 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-slate-900 file:text-white flex-1"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleUploadVaultDoc}
+                        disabled={!uploadDocFile || isUploadingDoc}
+                        className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition shadow-xs disabled:opacity-40 whitespace-nowrap"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>{isUploadingDoc ? 'Uploading...' : 'Upload'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {deal.documents?.map((doc) => (
-                  <div
-                    key={doc.id}
-                    className="p-3.5 bg-slate-50/80 border border-slate-200 rounded-xl flex items-center justify-between text-xs shadow-xs"
-                  >
-                    <div className="flex items-center space-x-3 truncate">
-                      <div className="p-2 bg-white border border-slate-200 text-slate-700 rounded-lg shadow-xs">
-                        <FileText className="w-5 h-5" />
-                      </div>
-                      <div className="truncate">
-                        <div className="font-semibold text-sm text-slate-900 truncate">{doc.title}</div>
-                        <div className="text-xs text-slate-500 font-mono mt-0.5">
-                          {doc.documentType} • {(doc.fileSize / 1024).toFixed(0)} KB
+                {(!deal.documents || deal.documents.length === 0) ? (
+                  <div className="col-span-2 p-8 text-center text-slate-400 text-xs border border-dashed border-slate-200 rounded-xl">
+                    No documents currently uploaded to this deal vault.
+                  </div>
+                ) : (
+                  deal.documents.map((doc) => (
+                    <div
+                      key={doc.id}
+                      className="p-3.5 bg-slate-50/80 border border-slate-200 rounded-xl flex items-center justify-between text-xs shadow-xs"
+                    >
+                      <div className="flex items-center space-x-3 truncate mr-2">
+                        <div className="p-2 bg-white border border-slate-200 text-slate-700 rounded-lg shadow-xs flex-shrink-0">
+                          <FileText className="w-5 h-5 text-indigo-600" />
+                        </div>
+                        <div className="truncate">
+                          <div className="font-semibold text-sm text-slate-900 truncate" title={doc.title}>{doc.title}</div>
+                          <div className="text-xs text-slate-500 font-mono mt-0.5 flex items-center gap-2">
+                            <span className="px-1.5 py-0.2 bg-white border border-slate-200 rounded font-sans font-bold text-slate-700 text-[10px]">
+                              {doc.documentType}
+                            </span>
+                            <span>{(doc.fileSize / 1024).toFixed(0)} KB</span>
+                            {doc.isVerified && (
+                              <span className="text-emerald-700 font-sans font-bold text-[10px]">✓ Verified</span>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <button
-                      onClick={() => handlePreviewDocument(doc.id)}
-                      className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 rounded-md border border-slate-300 text-xs font-semibold flex items-center gap-1.5 transition flex-shrink-0 shadow-sm"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                      <span>Preview</span>
-                    </button>
-                  </div>
-                ))}
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handlePreviewDocument(doc.id)}
+                          className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 rounded-md border border-slate-300 text-xs font-semibold flex items-center gap-1 transition shadow-xs"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Preview</span>
+                        </button>
+                        {(currentUser?.role === 'BDM' || currentUser?.role === 'ADMIN') && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteDocument(doc.id, doc.title)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition"
+                            title="Delete Document"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}
@@ -1187,6 +1385,164 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
                 className="flex-1 py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold transition disabled:opacity-50 flex items-center justify-center gap-1.5"
               >
                 {deletingDeal ? 'Deleting...' : 'Yes, Delete Deal'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOMER EMAIL UPDATE MODAL */}
+      {emailModalOpen && (
+        <div className="fixed inset-0 z-70 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 max-w-lg w-full shadow-2xl animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-700">
+                  <Mail className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Email Customer Update</h3>
+                  <p className="text-[11px] text-slate-500">Send an official Corporate Mart notification email</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEmailModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-700 rounded-md"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3.5 text-xs">
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-medium">To Recipient:</span>
+                  <span className="font-bold text-slate-900 font-mono">{deal.client?.email}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-medium">Company:</span>
+                  <span className="font-semibold text-slate-800">{deal.client?.companyName}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-medium">Current Position:</span>
+                  <span className="font-semibold text-indigo-700">{STAGE_CONFIG[deal.stage]?.label || deal.stage}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Email Subject</label>
+                <input
+                  type="text"
+                  value={emailForm.subject}
+                  onChange={(e) => setEmailForm({ ...emailForm, subject: e.target.value })}
+                  placeholder="Subject line..."
+                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs font-medium text-slate-900 focus:outline-none focus:border-slate-800"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Custom Message / Milestone Note</label>
+                <textarea
+                  rows={4}
+                  value={emailForm.message}
+                  onChange={(e) => setEmailForm({ ...emailForm, message: e.target.value })}
+                  placeholder="Enter custom progress note or instructions for the customer..."
+                  className="w-full bg-white border border-slate-300 rounded-lg p-3 text-xs text-slate-900 focus:outline-none focus:border-slate-800 leading-relaxed"
+                />
+              </div>
+
+              {/* Attach Documents Selector */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="font-bold text-slate-700 block text-xs">Attach Documents (Agreement, Certificates, KYC)</label>
+                  <span className="text-[11px] font-semibold text-indigo-700 font-mono">
+                    {emailForm.documentIds.length} attached
+                  </span>
+                </div>
+
+                {(!deal.documents || deal.documents.length === 0) ? (
+                  <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-400 text-xs text-center">
+                    No documents currently uploaded to this deal dossier.
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto p-2 bg-slate-50 border border-slate-200 rounded-lg">
+                    {deal.documents.map((doc) => {
+                      const isChecked = emailForm.documentIds.includes(doc.id);
+                      const isAgreement = doc.documentType === 'LEGAL_AGREEMENT';
+                      const isCertificate = doc.documentType === 'FINAL_DELIVERABLE_CERTIFICATE';
+
+                      return (
+                        <label
+                          key={doc.id}
+                          className={`flex items-center justify-between p-2 rounded-md border text-xs cursor-pointer transition ${
+                            isChecked
+                              ? 'bg-indigo-50/90 border-indigo-300 text-slate-900 font-semibold shadow-2xs'
+                              : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100/70'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 truncate mr-2">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                const newIds = e.target.checked
+                                  ? [...emailForm.documentIds, doc.id]
+                                  : emailForm.documentIds.filter((id) => id !== doc.id);
+                                setEmailForm({ ...emailForm, documentIds: newIds });
+                              }}
+                              className="rounded text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <span className="truncate">{doc.title || doc.fileName}</span>
+                          </div>
+                          <span
+                            className={`text-[10px] px-1.5 py-0.5 rounded border uppercase font-mono flex-shrink-0 ${
+                              isAgreement
+                                ? 'bg-purple-100 text-purple-800 border-purple-200 font-bold'
+                                : isCertificate
+                                ? 'bg-emerald-100 text-emerald-800 border-emerald-200 font-bold'
+                                : 'bg-slate-100 text-slate-600 border-slate-200'
+                            }`}
+                          >
+                            {isAgreement ? '📜 Agreement' : isCertificate ? '🎓 Certificate' : doc.documentType}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700">
+                ℹ️ The customer will receive an official high-contrast status email with deal details, step update, and complete payment tranche ledger breakdown.
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 mt-5 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={sendingEmail}
+                onClick={() => setEmailModalOpen(false)}
+                className="flex-1 py-2 px-3 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg text-xs font-semibold transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={sendingEmail || !deal.client?.email}
+                onClick={handleSendEmailUpdate}
+                className="flex-1 py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold transition disabled:opacity-50 flex items-center justify-center gap-1.5 shadow-sm"
+              >
+                {sendingEmail ? (
+                  <>
+                    <Clock className="w-3.5 h-3.5 animate-spin" />
+                    <span>Sending Email...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Send Notification</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

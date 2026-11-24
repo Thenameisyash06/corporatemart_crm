@@ -55,6 +55,7 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
   const [agreementFile, setAgreementFile] = useState(null);
   const [uploadingAgreement, setUploadingAgreement] = useState(false);
   const [isReplacingAgreement, setIsReplacingAgreement] = useState(false);
+  const [isEmailingAgreement, setIsEmailingAgreement] = useState(false);
 
   const fetchLegalQueue = async () => {
     try {
@@ -136,6 +137,30 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
       });
     } finally {
       setUploadingAgreement(false);
+    }
+  };
+
+  const handleEmailAgreementToClient = async () => {
+    if (!selectedDeal || !selectedDeal.client?.email) {
+      setFeedback({ type: 'warning', message: 'No client email address configured for this deal.' });
+      return;
+    }
+    try {
+      setIsEmailingAgreement(true);
+      setFeedback(null);
+      await api.post(`/deals/${selectedDeal.id}/send-email-update`, {
+        subject: `Executed Legal Service Agreement - Deal #${selectedDeal.dealCode} | Corporate Mart`,
+        message: `Please find attached your formal executed Legal Service Agreement drafted and scrutinized by the Corporate Mart Legal Department for ${selectedDeal.client?.companyName || 'your company'}. Please retain this official document for your statutory compliance records.`,
+        attachAgreement: true,
+      });
+      setFeedback({
+        type: 'success',
+        message: `Legal Service Agreement email dispatched with attachment to ${selectedDeal.client.email}!`,
+      });
+    } catch (err) {
+      setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to dispatch email with agreement.' });
+    } finally {
+      setIsEmailingAgreement(false);
     }
   };
 
@@ -877,15 +902,25 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
                             onClick={() => handlePreviewDoc(legalAgreementDoc.id)}
                             className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
                           >
-                            <Eye className="w-3.5 h-3.5" /> Preview Agreement
+                            <Eye className="w-3.5 h-3.5" /> Preview
                           </button>
                         )}
+                        <button
+                          type="button"
+                          onClick={handleEmailAgreementToClient}
+                          disabled={actionLoading || isEmailingAgreement}
+                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 transition shadow-xs disabled:opacity-50"
+                          title={`Email agreement to ${selectedDeal.client?.email || 'client'}`}
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span>{isEmailingAgreement ? 'Sending...' : 'Email Agreement'}</span>
+                        </button>
                         <button
                           type="button"
                           onClick={() => setIsReplacingAgreement(true)}
                           className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 rounded-md text-xs font-semibold border border-slate-300 flex items-center gap-1.5 transition shadow-xs"
                         >
-                          <RotateCcw className="w-3.5 h-3.5" /> Re-upload / Replace
+                          <RotateCcw className="w-3.5 h-3.5" /> Re-upload
                         </button>
                       </div>
                     </div>
