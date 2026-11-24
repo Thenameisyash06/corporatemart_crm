@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Building2,
   LogOut,
@@ -7,10 +7,12 @@ import {
   Users,
   Briefcase,
   UserPlus,
+  User,
 } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from '../context/ToastContext';
 import MeetingNotificationDropdown from './MeetingNotificationDropdown';
+import UserProfileModal from './UserProfileModal';
 
 export default function Navbar({
   currentUser,
@@ -19,7 +21,8 @@ export default function Navbar({
   todayMeetings = [],
   onNavigateToLms,
 }) {
-  const [switching, setSwitching] = React.useState(false);
+  const [switching, setSwitching] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
 
   const handleQuickSwitch = async (roleObj) => {
     try {
@@ -118,20 +121,46 @@ export default function Navbar({
           </button>
 
           {currentUser ? (
-            <div className="flex items-center pl-3 border-l border-slate-200 space-x-3">
-              <div className="text-right">
-                <div className="text-sm font-bold text-slate-900 leading-tight">{currentUser.fullName}</div>
-                <div className="flex items-center justify-end space-x-1 mt-0.5">
-                  <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-700">
-                    {currentUser.role} PORTAL
-                  </span>
+            <div className="flex items-center pl-3 border-l border-slate-200 space-x-2">
+              {/* User Profile Button */}
+              <button
+                type="button"
+                onClick={() => setIsProfileOpen(true)}
+                title="Click to view Profile & Change Password"
+                className="flex items-center space-x-2.5 p-1 -m-1 rounded-xl hover:bg-slate-100 transition-colors group cursor-pointer text-left"
+              >
+                {/* Profile Avatar Icon */}
+                <div className="relative">
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-600 to-indigo-500 text-white font-bold text-xs flex items-center justify-center ring-2 ring-indigo-100 shadow-xs group-hover:ring-indigo-300 transition-all">
+                    {currentUser.fullName
+                      ? currentUser.fullName
+                          .trim()
+                          .split(/\s+/)
+                          .map((n) => n[0])
+                          .slice(0, 2)
+                          .join('')
+                          .toUpperCase()
+                      : <User className="w-4 h-4" />}
+                  </div>
+                  <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-white" title="Active" />
                 </div>
-              </div>
+
+                <div className="hidden sm:block text-right">
+                  <div className="text-sm font-bold text-slate-900 leading-tight group-hover:text-indigo-600 transition-colors">
+                    {currentUser.fullName}
+                  </div>
+                  <div className="flex items-center justify-end space-x-1 mt-0.5">
+                    <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-700">
+                      {currentUser.role} PORTAL
+                    </span>
+                  </div>
+                </div>
+              </button>
 
               <button
                 onClick={handleLogout}
                 title="Sign out"
-                className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors ml-1"
               >
                 <LogOut className="w-4 h-4" />
               </button>
@@ -141,6 +170,18 @@ export default function Navbar({
           )}
         </div>
       </div>
+
+      {/* User Profile & Password Modal */}
+      <UserProfileModal
+        isOpen={isProfileOpen}
+        onClose={() => setIsProfileOpen(false)}
+        currentUser={currentUser}
+        onUserUpdated={(updatedUser) => {
+          if (onUserChange) {
+            onUserChange(updatedUser);
+          }
+        }}
+      />
     </header>
   );
 }
