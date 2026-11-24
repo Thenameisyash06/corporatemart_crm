@@ -57,6 +57,29 @@ class ErrorBoundary extends Component {
   }
 }
 
+// Globally prevent mouse-wheel scrolling on number inputs from accidentally changing values
+if (typeof window !== 'undefined') {
+  window.addEventListener(
+    'wheel',
+    () => {
+      if (document.activeElement && document.activeElement.type === 'number') {
+        document.activeElement.blur();
+      }
+    },
+    { passive: true }
+  );
+
+  document.addEventListener(
+    'wheel',
+    (e) => {
+      if (e.target && e.target.tagName === 'INPUT' && e.target.type === 'number') {
+        e.target.blur();
+      }
+    },
+    { passive: true }
+  );
+}
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <ErrorBoundary>

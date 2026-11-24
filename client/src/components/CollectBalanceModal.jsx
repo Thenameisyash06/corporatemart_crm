@@ -239,6 +239,7 @@ export default function CollectBalanceModal({ deal, isOpen, onClose, onSuccess }
                 step="any"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
+                onWheel={(e) => e.target.blur()}
                 max={currentPending}
                 className="w-full bg-white border border-slate-300 rounded-lg p-2.5 font-mono font-bold text-sm text-slate-900 focus:outline-none focus:border-slate-800"
                 required

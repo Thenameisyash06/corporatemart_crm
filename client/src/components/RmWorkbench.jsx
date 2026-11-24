@@ -657,6 +657,7 @@ export default function RmWorkbench({ currentUser, onRefreshParent, onOpenDossie
                             min="1"
                             value={editingTotalDealAmount}
                             onChange={(e) => setEditingTotalDealAmount(e.target.value)}
+                            onWheel={(e) => e.target.blur()}
                             className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 text-xs font-bold text-slate-900 focus:outline-none focus:border-slate-800"
                           />
                         </div>
@@ -802,6 +803,7 @@ export default function RmWorkbench({ currentUser, onRefreshParent, onOpenDossie
                                     min="0"
                                     value={editingSvcAmount}
                                     onChange={(e) => setEditingSvcAmount(e.target.value)}
+                                    onWheel={(e) => e.target.blur()}
                                     className="w-24 bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs font-bold text-slate-900 focus:outline-none focus:border-slate-800"
                                   />
                                   <button
@@ -940,6 +942,7 @@ export default function RmWorkbench({ currentUser, onRefreshParent, onOpenDossie
                                     min="0"
                                     value={editingSvcAmount}
                                     onChange={(e) => setEditingSvcAmount(e.target.value)}
+                                    onWheel={(e) => e.target.blur()}
                                     className="w-24 bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs font-bold text-slate-900 focus:outline-none focus:border-slate-800"
                                   />
                                   <button
