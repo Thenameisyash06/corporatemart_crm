@@ -717,6 +717,7 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
                         min="1"
                         value={editingTotalAmount}
                         onChange={(e) => setEditingTotalAmount(e.target.value)}
+                        onWheel={(e) => e.target.blur()}
                         className="w-36 bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-900 focus:outline-none focus:border-slate-800"
                       />
                     </div>
@@ -1025,6 +1026,7 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
                                 min="0"
                                 value={editingServiceFee}
                                 onChange={(e) => setEditingServiceFee(e.target.value)}
+                                onWheel={(e) => e.target.blur()}
                                 className="w-24 bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs font-bold text-slate-900 focus:outline-none focus:border-slate-800"
                               />
                               <button

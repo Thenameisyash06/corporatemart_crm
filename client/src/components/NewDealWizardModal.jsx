@@ -1295,6 +1295,7 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
                           max={s.standardAmount}
                           value={s.dealAmount !== undefined ? s.dealAmount : (s.serviceFee || '')}
                           onChange={(e) => handleDealAmountChange(index, e.target.value)}
+                          onWheel={(e) => e.target.blur()}
                           placeholder={`Max ₹${Number(s.standardAmount || 0).toLocaleString('en-IN')}`}
                           className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-slate-800 font-mono font-bold"
                         />
@@ -1361,6 +1362,7 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
                       value={form.amountReceived}
                       placeholder=""
                       onChange={(e) => setForm({ ...form, amountReceived: e.target.value })}
+                      onWheel={(e) => e.target.blur()}
                       className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-emerald-700 font-bold font-mono focus:outline-none focus:border-slate-800"
                     />
                   </div>

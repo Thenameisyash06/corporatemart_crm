@@ -2947,6 +2947,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                     step="any"
                     value={form.dealValue}
                     onChange={(e) => setForm({ ...form, dealValue: e.target.value })}
+                    onWheel={(e) => e.target.blur()}
                     placeholder="e.g. 10000, 10240"
                     className="w-full h-10 bg-slate-50 border border-slate-300 rounded-xl pl-8 pr-3 text-xs text-slate-900 focus:bg-white focus:border-slate-800 focus:outline-none font-mono tabular-nums font-bold transition-colors"
                   />

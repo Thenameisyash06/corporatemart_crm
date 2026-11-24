@@ -146,6 +146,7 @@ export default function DashboardStats({
                     type="number"
                     value={targetInput}
                     onChange={(e) => setTargetInput(e.target.value)}
+                    onWheel={(e) => e.target.blur()}
                     className="w-28 bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800"
                     autoFocus
                   />

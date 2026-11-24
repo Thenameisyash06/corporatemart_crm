@@ -1394,6 +1394,7 @@ export default function AdminDashboard({
                           type="number"
                           value={targetInputValue}
                           onChange={(e) => setTargetInputValue(e.target.value)}
+                          onWheel={(e) => e.target.blur()}
                           className="w-full bg-white border border-slate-300 rounded px-2 py-1 text-xs text-slate-900 font-bold focus:outline-none focus:border-indigo-600"
                           autoFocus
                         />
@@ -1988,6 +1989,7 @@ export default function AdminDashboard({
                     step="1000"
                     value={memberFormData.salesTarget}
                     onChange={(e) => setMemberFormData({ ...memberFormData, salesTarget: e.target.value })}
+                    onWheel={(e) => e.target.blur()}
                     className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-slate-900 focus:outline-none focus:border-indigo-600 font-semibold"
                   />
                 </div>
