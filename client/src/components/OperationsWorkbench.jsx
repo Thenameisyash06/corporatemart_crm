@@ -624,20 +624,21 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
   // ---------------------------------------------------------------------------
   // DOCUMENT VAULT & FILE ATTACHMENT HANDLERS
   // ---------------------------------------------------------------------------
-  const handleDirectDeliverableUpload = async (dealId) => {
-    if (!dealId || !deliverableFile) return;
+  const handleDirectDeliverableUpload = async (dealId, fileOverride = null) => {
+    const fileToUpload = fileOverride || deliverableFile;
+    if (!dealId || !fileToUpload) return;
     try {
       setIsUploadingDoc(true);
       setFeedback(null);
       const formData = new FormData();
       formData.append('dealId', dealId);
       formData.append('documentType', 'FINAL_DELIVERABLE_CERTIFICATE');
-      formData.append('title', `Final Deliverable Certificate - ${deliverableFile.name}`);
-      formData.append('file', deliverableFile);
+      formData.append('title', `Final Deliverable Certificate - ${fileToUpload.name}`);
+      formData.append('file', fileToUpload);
       await api.post('/documents/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setFeedback({ type: 'success', message: `Deliverable certificate "${deliverableFile.name}" attached successfully!` });
+      setFeedback({ type: 'success', message: `Deliverable certificate "${fileToUpload.name}" attached successfully!` });
       setDeliverableFile(null);
       const fileInput = document.getElementById('deliverable-file-input');
       if (fileInput) fileInput.value = '';
@@ -1354,18 +1355,33 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                         ) : (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                             {activeDeal.documents.map((doc) => {
-                              const isPaymentProofVerified =
-                                doc.documentType === 'PAYMENT_PROOF' &&
-                                ((activeDeal.payments || []).some(
-                                  (p) =>
-                                    p.status === 'VERIFIED' &&
-                                    ((p.paymentProofUrl && p.paymentProofUrl === doc.fileUrl) ||
-                                      (doc.title && (
-                                        doc.title.toLowerCase().includes('tranche #' + p.trancheNumber) ||
-                                        doc.title.toLowerCase().includes('tranche ' + p.trancheNumber) ||
-                                        (p.trancheNumber === 1 && !doc.title.toLowerCase().includes('tranche'))
-                                      )))
-                                ) || ((activeDeal.payments || []).length > 0 && (activeDeal.payments || []).every((p) => p.status === 'VERIFIED')));
+                              const isPaymentProofVerified = (() => {
+                                if (doc.documentType !== 'PAYMENT_PROOF') return false;
+                                const verifiedPayments = (activeDeal.payments || []).filter((p) => p.status === 'VERIFIED');
+                                if (verifiedPayments.length === 0) return false;
+                                if ((activeDeal.payments || []).length > 0 && (activeDeal.payments || []).every((p) => p.status === 'VERIFIED')) return true;
+                                const paymentProofDocs = (activeDeal.documents || []).filter((d) => d.documentType === 'PAYMENT_PROOF');
+                                const docIdx = paymentProofDocs.findIndex((d) => d.id === doc.id);
+                                if (docIdx !== -1 && docIdx < verifiedPayments.length) return true;
+                                return verifiedPayments.some((p) => {
+                                  if (p.paymentProofUrl && p.paymentProofUrl === doc.fileUrl) return true;
+                                  if (p.transactionReference && doc.title && doc.title.toLowerCase().includes(p.transactionReference.toLowerCase())) return true;
+                                  if (!doc.title) return false;
+                                  const tLower = doc.title.toLowerCase();
+                                  const trNum = String(p.trancheNumber || '');
+                                  return (
+                                    (trNum && (
+                                      tLower.includes('tranche #' + trNum) ||
+                                      tLower.includes('tranche ' + trNum) ||
+                                      tLower.includes('tranche-' + trNum) ||
+                                      tLower.includes('tranche_' + trNum) ||
+                                      tLower.includes('tranche' + trNum) ||
+                                      tLower.includes('#' + trNum)
+                                    )) ||
+                                    (p.trancheNumber === 1 && !tLower.includes('tranche'))
+                                  );
+                                });
+                              })();
                               const isDocVerified = Boolean(doc.isVerified || isPaymentProofVerified);
 
                               return (
@@ -2560,18 +2576,33 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         {activeDossierDeal.documents.map((doc) => {
-                          const isPaymentProofVerified =
-                            doc.documentType === 'PAYMENT_PROOF' &&
-                            ((activeDossierDeal.payments || []).some(
-                              (p) =>
-                                p.status === 'VERIFIED' &&
-                                ((p.paymentProofUrl && p.paymentProofUrl === doc.fileUrl) ||
-                                  (doc.title && (
-                                    doc.title.toLowerCase().includes('tranche #' + p.trancheNumber) ||
-                                    doc.title.toLowerCase().includes('tranche ' + p.trancheNumber) ||
-                                    (p.trancheNumber === 1 && !doc.title.toLowerCase().includes('tranche'))
-                                  )))
-                            ) || ((activeDossierDeal.payments || []).length > 0 && (activeDossierDeal.payments || []).every((p) => p.status === 'VERIFIED')));
+                          const isPaymentProofVerified = (() => {
+                            if (doc.documentType !== 'PAYMENT_PROOF') return false;
+                            const verifiedPayments = (activeDossierDeal.payments || []).filter((p) => p.status === 'VERIFIED');
+                            if (verifiedPayments.length === 0) return false;
+                            if ((activeDossierDeal.payments || []).length > 0 && (activeDossierDeal.payments || []).every((p) => p.status === 'VERIFIED')) return true;
+                            const paymentProofDocs = (activeDossierDeal.documents || []).filter((d) => d.documentType === 'PAYMENT_PROOF');
+                            const docIdx = paymentProofDocs.findIndex((d) => d.id === doc.id);
+                            if (docIdx !== -1 && docIdx < verifiedPayments.length) return true;
+                            return verifiedPayments.some((p) => {
+                              if (p.paymentProofUrl && p.paymentProofUrl === doc.fileUrl) return true;
+                              if (p.transactionReference && doc.title && doc.title.toLowerCase().includes(p.transactionReference.toLowerCase())) return true;
+                              if (!doc.title) return false;
+                              const tLower = doc.title.toLowerCase();
+                              const trNum = String(p.trancheNumber || '');
+                              return (
+                                (trNum && (
+                                  tLower.includes('tranche #' + trNum) ||
+                                  tLower.includes('tranche ' + trNum) ||
+                                  tLower.includes('tranche-' + trNum) ||
+                                  tLower.includes('tranche_' + trNum) ||
+                                  tLower.includes('tranche' + trNum) ||
+                                  tLower.includes('#' + trNum)
+                                )) ||
+                                (p.trancheNumber === 1 && !tLower.includes('tranche'))
+                              );
+                            });
+                          })();
                           const isDocVerified = Boolean(doc.isVerified || isPaymentProofVerified);
 
                           return (
@@ -2587,13 +2618,13 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                 <div className="font-semibold text-slate-900 truncate" title={doc.title}>
                                   {doc.title}
                                 </div>
-                                <div className="text-[10px] text-slate-500 font-mono mt-0.5 truncate flex items-center gap-1.5">
+                                <div className="text-[10px] text-slate-500 font-mono mt-0.5 truncate flex items-center gap-1.5 flex-wrap">
                                   <span className="px-1.5 py-0.2 rounded font-sans font-bold bg-white text-slate-700 border border-slate-200">
                                     {doc.documentType}
                                   </span>
                                   {doc.fileSize && <span>{(doc.fileSize / 1024).toFixed(0)} KB</span>}
                                   {isDocVerified && (
-                                    <span className="text-emerald-700 font-bold font-sans">✓ Verified</span>
+                                    <span className="text-emerald-700 font-bold font-sans whitespace-nowrap">✓ Verified</span>
                                   )}
                                 </div>
                               </div>
@@ -2698,8 +2729,8 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                 {/* DELIVERABLE CERTIFICATE UPLOAD & STAGE ACTIONS */}
                 <div className="bg-white border border-slate-200 rounded-xl p-4.5 space-y-3.5 shadow-xs">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                      Deliverable Certificate & Completion Gate
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                      <FileCheck className="w-4 h-4 text-emerald-600" /> Deliverable Certificate & Completion Gate
                     </h4>
                     <button
                       type="button"
@@ -2707,8 +2738,8 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                         const fileInput = document.getElementById('deliverable-file-input');
                         if (fileInput) fileInput.click();
                       }}
-                      className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
-                      title="Add or Attach Deliverable Certificates"
+                      className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 transition shadow-xs cursor-pointer flex-shrink-0"
+                      title="Upload & Attach Final Deliverable Certificate"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>Add Documents</span>
@@ -2722,8 +2753,14 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                     <input
                       id="deliverable-file-input"
                       type="file"
-                      accept="application/pdf,image/*"
-                      onChange={(e) => setDeliverableFile(e.target.files?.[0] || null)}
+                      accept="application/pdf,image/*,.doc,.docx"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setDeliverableFile(file);
+                          await handleDirectDeliverableUpload(activeDossierDeal.id, file);
+                        }
+                      }}
                       className="text-xs text-slate-700 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-slate-900 file:text-white hover:file:bg-slate-800"
                     />
                     {deliverableFile && (

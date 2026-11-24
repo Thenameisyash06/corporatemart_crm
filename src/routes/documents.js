@@ -67,16 +67,39 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
       },
     });
 
-    // If this is payment proof, link it to the pending payment
+    // If this is payment proof, link it to the corresponding payment and verify if payment is verified
     if (documentType === 'PAYMENT_PROOF') {
-      const firstPayment = await prisma.payment.findFirst({
-        where: { dealId: deal.id, paymentProofUrl: '' },
+      const targetPayment = await prisma.payment.findFirst({
+        where: {
+          dealId: deal.id,
+          OR: [{ paymentProofUrl: '' }, { paymentProofUrl: null }],
+        },
+        orderBy: { trancheNumber: 'asc' },
       });
-      if (firstPayment) {
+      if (targetPayment) {
         await prisma.payment.update({
-          where: { id: firstPayment.id },
+          where: { id: targetPayment.id },
           data: { paymentProofUrl: uploadResult.path },
         });
+        if (targetPayment.status === 'VERIFIED') {
+          await prisma.document.update({
+            where: { id: docRecord.id },
+            data: { isVerified: true, verifiedByRole: 'ACCOUNTS' },
+          });
+          docRecord.isVerified = true;
+          docRecord.verifiedByRole = 'ACCOUNTS';
+        }
+      } else {
+        // If all payments on the deal are verified, auto-verify this proof
+        const allPayments = await prisma.payment.findMany({ where: { dealId: deal.id } });
+        if (allPayments.length > 0 && allPayments.every((p) => p.status === 'VERIFIED')) {
+          await prisma.document.update({
+            where: { id: docRecord.id },
+            data: { isVerified: true, verifiedByRole: 'ACCOUNTS' },
+          });
+          docRecord.isVerified = true;
+          docRecord.verifiedByRole = 'ACCOUNTS';
+        }
       }
     }
 

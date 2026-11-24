@@ -163,19 +163,40 @@ function formatDealDocuments(deal) {
   if (!deal || !deal.documents) return;
   const verifiedPayments = (deal.payments || []).filter((p) => p.status === 'VERIFIED');
   const allPaymentsVerified = (deal.payments || []).length > 0 && (deal.payments || []).every((p) => p.status === 'VERIFIED');
+  const paymentProofDocs = deal.documents.filter((d) => d.documentType === 'PAYMENT_PROOF');
 
   deal.documents = deal.documents.map((doc) => {
     if (doc.documentType === 'PAYMENT_PROOF' && !doc.isVerified) {
-      const isMatched = verifiedPayments.some((p) =>
-        (p.paymentProofUrl && p.paymentProofUrl === doc.fileUrl) ||
-        (doc.title && (
-          doc.title.toLowerCase().includes('tranche #' + p.trancheNumber) ||
-          doc.title.toLowerCase().includes('tranche ' + p.trancheNumber) ||
-          (p.trancheNumber === 1 && !doc.title.toLowerCase().includes('tranche'))
-        ))
-      ) || allPaymentsVerified;
+      const docIndex = paymentProofDocs.findIndex((d) => d.id === doc.id);
+      const isMatched =
+        allPaymentsVerified ||
+        (docIndex !== -1 && docIndex < verifiedPayments.length) ||
+        verifiedPayments.some((p) => {
+          if (p.paymentProofUrl && p.paymentProofUrl === doc.fileUrl) return true;
+          if (p.transactionReference && doc.title && doc.title.toLowerCase().includes(p.transactionReference.toLowerCase())) return true;
+          if (!doc.title) return false;
+          const tLower = doc.title.toLowerCase();
+          const trNum = String(p.trancheNumber || '');
+          if (trNum && (
+            tLower.includes('tranche #' + trNum) ||
+            tLower.includes('tranche ' + trNum) ||
+            tLower.includes('tranche-' + trNum) ||
+            tLower.includes('tranche_' + trNum) ||
+            tLower.includes('tranche' + trNum) ||
+            tLower.includes('#' + trNum) ||
+            (p.trancheNumber === 1 && !tLower.includes('tranche'))
+          )) {
+            return true;
+          }
+          return false;
+        });
 
       if (isMatched) {
+        // Asynchronously persist verification flag in database
+        prisma.document.update({
+          where: { id: doc.id },
+          data: { isVerified: true, verifiedByRole: 'ACCOUNTS' },
+        }).catch(() => {});
         return { ...doc, isVerified: true, verifiedByRole: 'ACCOUNTS' };
       }
     }
@@ -1337,8 +1358,12 @@ router.post(
               documentType: 'PAYMENT_PROOF',
               OR: [
                 ...(paymentToVerify.paymentProofUrl ? [{ fileUrl: paymentToVerify.paymentProofUrl }] : []),
-                { title: { contains: 'Tranche #' + paymentToVerify.trancheNumber } },
-                { title: { contains: 'Tranche ' + paymentToVerify.trancheNumber } },
+                { title: { contains: 'Tranche #' + paymentToVerify.trancheNumber, mode: 'insensitive' } },
+                { title: { contains: 'Tranche ' + paymentToVerify.trancheNumber, mode: 'insensitive' } },
+                { title: { contains: 'Tranche-' + paymentToVerify.trancheNumber, mode: 'insensitive' } },
+                { title: { contains: 'Tranche' + paymentToVerify.trancheNumber, mode: 'insensitive' } },
+                { title: { contains: '#' + paymentToVerify.trancheNumber, mode: 'insensitive' } },
+                ...(paymentToVerify.transactionReference ? [{ title: { contains: paymentToVerify.transactionReference, mode: 'insensitive' } }] : []),
               ],
             },
             data: {
@@ -1347,6 +1372,20 @@ router.post(
             },
           }),
         ]);
+
+        // If all payments on this deal are now verified or paid, ensure all attached payment proof docs are verified
+        if (isFullyPaid || (deal.payments || []).every((p) => p.id === paymentToVerify.id || p.status === 'VERIFIED')) {
+          await prisma.document.updateMany({
+            where: {
+              dealId: deal.id,
+              documentType: 'PAYMENT_PROOF',
+            },
+            data: {
+              isVerified: true,
+              verifiedByRole: 'ACCOUNTS',
+            },
+          });
+        }
 
         await recordAuditLog({
           dealId: deal.id,
