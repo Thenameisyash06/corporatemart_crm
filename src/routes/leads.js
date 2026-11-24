@@ -530,6 +530,7 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       upcomingEdcCount: 0,
       overdueEdcCount: 0,
       pendingFollowupsCount: 0,
+      myPendingFollowupsCount: 0,
       totalEstimatedValue: 0,
       activeFunnelValue: 0,
       hotFunnelValue: 0,
@@ -601,14 +602,16 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       const stage = l.leadStatus || 'OPEN';
       const rawCs = (l.clientStatus || 'warm').toLowerCase();
       const bdm1 = (l.bdmName1 || '').trim();
-      // Pending Follow-ups: active leads whose follow-up date exceeded current date
+      // Pending Follow-ups / Overdue Meeting Date & Follow-up Date
+      let isOverdue = false;
       if (stage !== 'CLOSED_WON' && stage !== 'CLOSED_LOST' && rawCs !== 'lost' && rawCs !== 'closed') {
+        const candidateDates = [];
         let fus = [];
         if (Array.isArray(l.followUps)) fus = l.followUps;
         else if (typeof l.followUps === 'string') {
           try { fus = JSON.parse(l.followUps); } catch {}
         }
-        if (fus && fus.length > 0) {
+        if (Array.isArray(fus) && fus.length > 0) {
           const sorted = [...fus].sort((a, b) => {
             const da = a.date ? new Date(a.date).getTime() : (a.addedAt ? new Date(a.addedAt).getTime() : 0);
             const db = b.date ? new Date(b.date).getTime() : (b.addedAt ? new Date(b.addedAt).getTime() : 0);
@@ -616,12 +619,20 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
           });
           const latestFu = sorted[0];
           if (latestFu && latestFu.date && (latestFu.status || '').toLowerCase() !== 'closed' && (latestFu.status || '').toLowerCase() !== 'lost') {
-            const todayStr = now.toISOString().split('T')[0];
-            const fuDateStr = latestFu.date.includes('T') ? latestFu.date.split('T')[0] : latestFu.date;
-            if (fuDateStr < todayStr) {
-              analytics.pendingFollowupsCount++;
-            }
+            candidateDates.push(latestFu.date.includes('T') ? latestFu.date.split('T')[0] : latestFu.date);
           }
+        }
+        if (l.nextFollowUpDate) {
+          candidateDates.push(new Date(l.nextFollowUpDate).toISOString().split('T')[0]);
+        }
+        if (l.meetingDate) {
+          candidateDates.push(new Date(l.meetingDate).toISOString().split('T')[0]);
+        }
+
+        const todayStr = now.toISOString().split('T')[0];
+        isOverdue = candidateDates.some((dStr) => Boolean(dStr && dStr < todayStr));
+        if (isOverdue) {
+          analytics.pendingFollowupsCount++;
         }
       }
 
@@ -654,6 +665,10 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       );
       const isCountedInMyFunnel = isAdmin || isOwnLead;
 
+      if (isOverdue && isCountedInMyFunnel) {
+        analytics.myPendingFollowupsCount++;
+      }
+
       // Monthly categorization (This Month vs Next Month)
       const effDate = l.nextFollowUpDate
         ? new Date(l.nextFollowUpDate)
@@ -683,7 +698,10 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       }
 
       // Check if lead matches the active month tab view
-      const matchesActiveMonth = targetMonth === 'NEXT_MONTH' ? isNextMonth : isThisMonth;
+      const matchesActiveMonth =
+        monthFilter === 'PENDING_FOLLOWUPS'
+          ? isOverdue
+          : (targetMonth === 'NEXT_MONTH' ? isNextMonth : isThisMonth);
 
       // Check if lead matches table-level search and dropdown filters
       let matchesTableFilter = true;
@@ -1080,25 +1098,27 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
         const cs = (l.clientStatus || '').toLowerCase();
         if (cs === 'lost' || cs === 'closed') return;
 
+        const candidateDates = [];
         let fus = [];
         if (Array.isArray(l.followUps)) fus = l.followUps;
         else if (typeof l.followUps === 'string') {
           try { fus = JSON.parse(l.followUps); } catch {}
         }
-        let targetDateStr = null;
         if (Array.isArray(fus) && fus.length > 0) {
           const latest = [...fus].sort((a, b) => new Date(b.addedAt || b.date).getTime() - new Date(a.addedAt || a.date).getTime())[0];
           if (latest && latest.date && (latest.status || '').toLowerCase() !== 'closed' && (latest.status || '').toLowerCase() !== 'lost') {
-            targetDateStr = latest.date.includes('T') ? latest.date.split('T')[0] : latest.date;
+            candidateDates.push(latest.date.includes('T') ? latest.date.split('T')[0] : latest.date);
           }
         }
-        if (!targetDateStr) {
-          if (l.nextFollowUpDate) {
-            targetDateStr = new Date(l.nextFollowUpDate).toISOString().split('T')[0];
-          } else if (l.meetingDate) {
-            targetDateStr = new Date(l.meetingDate).toISOString().split('T')[0];
-          }
+        if (l.nextFollowUpDate) {
+          candidateDates.push(new Date(l.nextFollowUpDate).toISOString().split('T')[0]);
         }
+        if (l.meetingDate) {
+          candidateDates.push(new Date(l.meetingDate).toISOString().split('T')[0]);
+        }
+
+        const overdueDates = candidateDates.filter((d) => d && d < todayStr).sort();
+        const targetDateStr = overdueDates[0] || candidateDates[0] || null;
         if (targetDateStr && targetDateStr < todayStr) {
           pendingFollowupsCount++;
           const targetDateObj = new Date(targetDateStr);
@@ -1115,25 +1135,27 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
         if (l.leadStatus !== 'CLOSED_WON' && l.leadStatus !== 'CLOSED_LOST') {
           const cs = (l.clientStatus || '').toLowerCase();
           if (cs !== 'lost' && cs !== 'closed') {
+            const candidateDates = [];
             let fus = [];
             if (Array.isArray(l.followUps)) fus = l.followUps;
             else if (typeof l.followUps === 'string') {
               try { fus = JSON.parse(l.followUps); } catch {}
             }
-            let targetDateStr = null;
             if (Array.isArray(fus) && fus.length > 0) {
               const latest = [...fus].sort((a, b) => new Date(b.addedAt || b.date).getTime() - new Date(a.addedAt || a.date).getTime())[0];
               if (latest && latest.date && (latest.status || '').toLowerCase() !== 'closed' && (latest.status || '').toLowerCase() !== 'lost') {
-                targetDateStr = latest.date.includes('T') ? latest.date.split('T')[0] : latest.date;
+                candidateDates.push(latest.date.includes('T') ? latest.date.split('T')[0] : latest.date);
               }
             }
-            if (!targetDateStr) {
-              if (l.nextFollowUpDate) {
-                targetDateStr = new Date(l.nextFollowUpDate).toISOString().split('T')[0];
-              } else if (l.meetingDate) {
-                targetDateStr = new Date(l.meetingDate).toISOString().split('T')[0];
-              }
+            if (l.nextFollowUpDate) {
+              candidateDates.push(new Date(l.nextFollowUpDate).toISOString().split('T')[0]);
             }
+            if (l.meetingDate) {
+              candidateDates.push(new Date(l.meetingDate).toISOString().split('T')[0]);
+            }
+
+            const overdueDates = candidateDates.filter((d) => d && d < todayStr).sort();
+            const targetDateStr = overdueDates[0] || candidateDates[0] || null;
             if (targetDateStr && targetDateStr < todayStr) {
               isOverdue = true;
               overdueDays = Math.max(1, Math.floor((todayDateObj.getTime() - new Date(targetDateStr).getTime()) / (1000 * 60 * 60 * 24)));

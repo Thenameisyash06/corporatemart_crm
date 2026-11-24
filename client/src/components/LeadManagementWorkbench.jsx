@@ -375,7 +375,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     return sorted[0] || null;
   };
 
-  // Helper to determine if lead's follow-up is overdue and calculate exact days overdue
+  // Helper to determine if lead's follow-up or meeting is overdue and calculate exact days overdue
   const getLeadOverdueInfo = useCallback((lead) => {
     if (!lead) return { isOverdue: false, daysOverdue: 0, targetDateStr: null };
     const lStatus = (lead.leadStatus || '').toUpperCase();
@@ -387,8 +387,11 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       return { isOverdue: false, daysOverdue: 0, targetDateStr: null };
     }
 
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const candidateDates = [];
     const fus = getFollowUpsList(lead);
-    let targetDateStr = null;
     if (fus && fus.length > 0) {
       const sorted = [...fus].sort((a, b) => {
         const da = a.date ? new Date(a.date).getTime() : (a.addedAt ? new Date(a.addedAt).getTime() : 0);
@@ -397,34 +400,61 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       });
       const latest = sorted[0];
       if (latest && latest.date && (latest.status || '').toLowerCase() !== 'closed' && (latest.status || '').toLowerCase() !== 'lost') {
-        targetDateStr = latest.date.includes('T') ? latest.date.split('T')[0] : latest.date;
+        const dStr = latest.date.includes('T') ? latest.date.split('T')[0] : latest.date;
+        if (dStr) candidateDates.push(dStr);
       }
     }
-    if (!targetDateStr) {
-      if (lead.nextFollowUpDate) {
-        targetDateStr = new Date(lead.nextFollowUpDate).toISOString().split('T')[0];
-      } else if (lead.meetingDate) {
-        targetDateStr = new Date(lead.meetingDate).toISOString().split('T')[0];
+    if (lead.nextFollowUpDate) {
+      try {
+        const nfu = new Date(lead.nextFollowUpDate);
+        if (!isNaN(nfu.getTime())) {
+          candidateDates.push(nfu.toISOString().split('T')[0]);
+        }
+      } catch {}
+    }
+    if (lead.meetingDate) {
+      try {
+        const md = new Date(lead.meetingDate);
+        if (!isNaN(md.getTime())) {
+          candidateDates.push(md.toISOString().split('T')[0]);
+        }
+      } catch {}
+    }
+
+    if (candidateDates.length === 0) return { isOverdue: false, daysOverdue: 0, targetDateStr: null };
+
+    // Calculate diff for each candidate date against today
+    let mostOverdue = null;
+    let maxOverdueDays = 0;
+    let earliestUpcoming = null;
+
+    for (const dStr of candidateDates) {
+      const parts = dStr.split('-');
+      if (parts.length < 3) continue;
+      const [y, m, d] = parts.map(Number);
+      if (!y || !m || !d) continue;
+      const targetDate = new Date(y, m - 1, d);
+      targetDate.setHours(0, 0, 0, 0);
+
+      const diffTime = today.getTime() - targetDate.getTime();
+      if (diffTime > 0) {
+        const days = Math.max(1, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
+        if (days > maxOverdueDays) {
+          maxOverdueDays = days;
+          mostOverdue = dStr;
+        }
+      } else {
+        if (!earliestUpcoming || targetDate.getTime() < earliestUpcoming.time) {
+          earliestUpcoming = { str: dStr, time: targetDate.getTime() };
+        }
       }
     }
 
-    if (!targetDateStr) return { isOverdue: false, daysOverdue: 0, targetDateStr: null };
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const dateParts = targetDateStr.split('-');
-    if (dateParts.length < 3) return { isOverdue: false, daysOverdue: 0, targetDateStr: null };
-    const [y, m, d] = dateParts.map(Number);
-    if (!y || !m || !d) return { isOverdue: false, daysOverdue: 0, targetDateStr: null };
-    const targetDate = new Date(y, m - 1, d);
-    targetDate.setHours(0, 0, 0, 0);
-
-    const diffTime = today.getTime() - targetDate.getTime();
-    if (diffTime > 0) {
-      const daysOverdue = Math.max(1, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
-      return { isOverdue: true, daysOverdue, targetDateStr };
+    if (maxOverdueDays > 0 && mostOverdue) {
+      return { isOverdue: true, daysOverdue: maxOverdueDays, targetDateStr: mostOverdue };
     }
-    return { isOverdue: false, daysOverdue: 0, targetDateStr };
+
+    return { isOverdue: false, daysOverdue: 0, targetDateStr: earliestUpcoming ? earliestUpcoming.str : candidateDates[0] };
   }, []);
 
   const isLeadFollowUpExceeded = useCallback((lead) => {
@@ -1150,12 +1180,17 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     return Object.values(map).sort((a, b) => b.maxOverdue - a.maxOverdue || b.count - a.count);
   }, [allOverdueLeads, getLeadOverdueInfo]);
 
-  // Count of leads whose follow-up date exceeded the current date
+  // Count of leads whose follow-up or meeting date exceeded the current date
   const calculatedPendingFollowups = useMemo(() => {
     return allOverdueLeads.length;
   }, [allOverdueLeads]);
 
-  const displayPendingFollowupsCount = analytics?.pendingFollowupsCount ?? calculatedPendingFollowups;
+  const displayPendingFollowupsCount = useMemo(() => {
+    if (isAdmin) {
+      return Math.max(analytics?.pendingFollowupsCount ?? 0, calculatedPendingFollowups);
+    }
+    return Math.max(analytics?.myPendingFollowupsCount ?? 0, calculatedPendingFollowups);
+  }, [isAdmin, analytics?.pendingFollowupsCount, analytics?.myPendingFollowupsCount, calculatedPendingFollowups]);
 
   // Memoized BDM Funnel Ranking (for Leaderboard - Leaders first, then members)
   const bdmFunnelList = useMemo(() => {
@@ -2912,10 +2947,10 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                   <input
                     type="number"
                     min="0"
-                    step="500"
+                    step="any"
                     value={form.dealValue}
                     onChange={(e) => setForm({ ...form, dealValue: e.target.value })}
-                    placeholder="e.g. 50000"
+                    placeholder="e.g. 10000, 10240"
                     className="w-full h-10 bg-slate-50 border border-slate-300 rounded-xl pl-8 pr-3 text-xs text-slate-900 focus:bg-white focus:border-slate-800 focus:outline-none font-mono tabular-nums font-bold transition-colors"
                   />
                 </div>
@@ -3525,6 +3560,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
               onClick={() => {
                 setSelectedMonthFilter('PENDING_FOLLOWUPS');
                 setPage(1);
+                fetchLeads(1, limit, 'PENDING_FOLLOWUPS');
               }}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer border ${selectedMonthFilter === 'PENDING_FOLLOWUPS'
                 ? 'bg-rose-700 text-white border-rose-700 shadow-xs'
