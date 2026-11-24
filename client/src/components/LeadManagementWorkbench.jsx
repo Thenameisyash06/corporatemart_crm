@@ -556,6 +556,13 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     return leads.find((l) => (l.mobileNo || '').trim() === p) || null;
   }, [form.mobileNo, leads]);
 
+  // Real-time check for duplicate company name in form (match characters only, ignore symbols/spaces)
+  const duplicateCompanyLead = useMemo(() => {
+    const norm = (form.companyName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!norm) return null;
+    return leads.find((l) => (l.companyName || '').toLowerCase().replace(/[^a-z0-9]/g, '') === norm) || null;
+  }, [form.companyName, leads]);
+
   // Duplicate Phone Number Popup State (shows with clear message & cancel/edit option)
   const [duplicatePhonePopup, setDuplicatePhonePopup] = useState(null);
   const duplicatePhoneTimerRef = useRef(null);
@@ -1573,6 +1580,13 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     const exact10DigitPhoneRegex = /^[6-9]\d{9}$/;
     if (!exact10DigitPhoneRegex.test(cleanPhone)) {
       toast.warning('Mobile number must be exactly 10 digits starting with 6, 7, 8, or 9 (do not include +91, spaces, or dashes).', 'Invalid Mobile Format');
+      return;
+    }
+    if (duplicateCompanyLead) {
+      toast.warning(
+        `A lead with company name "${duplicateCompanyLead.companyName}" already exists in LMS. Company Name must be strictly unique.`,
+        'Duplicate Company Name'
+      );
       return;
     }
     if (duplicatePhoneLead) {
@@ -2646,9 +2660,15 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                     value={form.companyName}
                     onChange={(e) => setForm({ ...form, companyName: e.target.value })}
                     placeholder="e.g. Acme Innovations Pvt Ltd"
-                    className="w-full h-10 bg-slate-50 border border-slate-300 rounded-xl pl-9 pr-3 text-xs text-slate-900 focus:bg-white focus:border-slate-800 focus:outline-none transition-colors"
+                    className={`w-full h-10 bg-slate-50 border rounded-xl pl-9 pr-3 text-xs text-slate-900 focus:bg-white focus:outline-none transition-colors ${duplicateCompanyLead ? 'border-rose-400 focus:border-rose-500 bg-rose-50/30' : 'border-slate-300 focus:border-slate-800'}`}
                   />
                 </div>
+                {duplicateCompanyLead && (
+                  <p className="text-[11px] text-rose-600 mt-1 font-medium flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                    <span>A lead with company name "{duplicateCompanyLead.companyName}" already exists in LMS.</span>
+                  </p>
+                )}
               </div>
 
               <div>

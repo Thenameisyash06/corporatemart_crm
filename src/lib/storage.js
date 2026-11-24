@@ -86,10 +86,29 @@ async function deleteFile(filePath) {
   return true;
 }
 
+/**
+ * Download a file buffer from storage
+ * @param {string} filePath
+ * @returns {Promise<Buffer>}
+ */
+async function downloadFile(filePath) {
+  const cleanPath = filePath.startsWith(`${BUCKET_NAME}/`)
+    ? filePath.replace(`${BUCKET_NAME}/`, '')
+    : filePath;
+
+  const { data, error } = await supabase.storage.from(BUCKET_NAME).download(cleanPath);
+  if (error) {
+    throw new Error(`Failed to download file from storage: ${error.message}`);
+  }
+  const arrayBuffer = await data.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
 module.exports = {
   supabase,
   BUCKET_NAME,
   uploadFile,
   getSignedUrl,
+  downloadFile,
   deleteFile,
 };

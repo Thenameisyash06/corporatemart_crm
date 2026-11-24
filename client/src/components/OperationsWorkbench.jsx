@@ -201,6 +201,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
   const [uploadDocFile, setUploadDocFile] = useState(null);
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
   const [previewDoc, setPreviewDoc] = useState(null);
+  const [isEmailingCerts, setIsEmailingCerts] = useState(false);
 
   // Filters for Specialist & Manager
   const [searchQuery, setSearchQuery] = useState('');
@@ -332,6 +333,26 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
   }, [allServices, currentUser]);
 
   // Unassigned General Pool
+  // Deals assigned specifically to the logged-in Operations Manager
+  const managerDossierDeals = useMemo(() => {
+    return deals.filter((d) => {
+      const isDealAssigned =
+        (currentUser?.id && d.assignedOpsUserId === currentUser.id) ||
+        (currentUser?.email && d.assignedOpsUser?.email === currentUser.email);
+      const hasAssignedService = (d.services || []).some(
+        (s) =>
+          (currentUser?.id && s.assignedOpsUserId === currentUser.id) ||
+          (currentUser?.email && s.assignedOpsUser?.email === currentUser.email)
+      );
+      return isDealAssigned || hasAssignedService;
+    });
+  }, [deals, currentUser?.id, currentUser?.email]);
+
+  const activeDossierDeal = useMemo(() => {
+    if (!selectedDeal) return managerDossierDeals[0] || null;
+    return managerDossierDeals.find((d) => d.id === selectedDeal.id) || managerDossierDeals[0] || null;
+  }, [selectedDeal, managerDossierDeals]);
+
   const poolServices = useMemo(() => {
     return allServices.filter((s) => !s.assignedOpsUserId);
   }, [allServices]);
@@ -554,6 +575,31 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
     }
   };
 
+  const handleEmailCertificatesToClient = async (dealTarget) => {
+    const target = dealTarget || selectedDeal;
+    if (!target || !target.client?.email) {
+      setFeedback({ type: 'warning', message: 'No client email address configured for this deal.' });
+      return;
+    }
+    try {
+      setIsEmailingCerts(true);
+      setFeedback(null);
+      await api.post(`/deals/${target.id}/send-email-update`, {
+        subject: `Official Service Deliverable Certificates - Deal #${target.dealCode} | Corporate Mart`,
+        message: `We are pleased to deliver your official service certificate(s) and completion documents for ${target.client?.companyName || 'your company'}. Please find the official files attached to this notification for your compliance and regulatory records.`,
+        attachCertificates: true,
+      });
+      setFeedback({
+        type: 'success',
+        message: `Service certificate email dispatched with attachment to ${target.client.email}!`,
+      });
+    } catch (err) {
+      setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to dispatch email with certificates.' });
+    } finally {
+      setIsEmailingCerts(false);
+    }
+  };
+
   const handleDeliverToClient = async (dealTarget) => {
     const target = dealTarget || selectedDeal;
     if (!target) return;
@@ -578,6 +624,32 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
   // ---------------------------------------------------------------------------
   // DOCUMENT VAULT & FILE ATTACHMENT HANDLERS
   // ---------------------------------------------------------------------------
+  const handleDirectDeliverableUpload = async (dealId) => {
+    if (!dealId || !deliverableFile) return;
+    try {
+      setIsUploadingDoc(true);
+      setFeedback(null);
+      const formData = new FormData();
+      formData.append('dealId', dealId);
+      formData.append('documentType', 'FINAL_DELIVERABLE_CERTIFICATE');
+      formData.append('title', `Final Deliverable Certificate - ${deliverableFile.name}`);
+      formData.append('file', deliverableFile);
+      await api.post('/documents/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setFeedback({ type: 'success', message: `Deliverable certificate "${deliverableFile.name}" attached successfully!` });
+      setDeliverableFile(null);
+      const fileInput = document.getElementById('deliverable-file-input');
+      if (fileInput) fileInput.value = '';
+      await fetchOpsData();
+      if (onRefreshParent) onRefreshParent();
+    } catch (err) {
+      setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to upload certificate.' });
+    } finally {
+      setIsUploadingDoc(false);
+    }
+  };
+
   const handleUploadDocument = async (dealId) => {
     if (!dealId) {
       setFeedback({ type: 'error', message: 'No active deal selected to attach document.' });
@@ -725,7 +797,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                 <FileCheck className="w-3.5 h-3.5 text-cyan-600" />
                 <span>Deal Dossier & Dispatch</span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-cyan-50 text-cyan-700">
-                  {deals.length}
+                  {managerDossierDeals.length}
                 </span>
               </button>
             </>
@@ -1281,7 +1353,22 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                           </div>
                         ) : (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                            {activeDeal.documents.map((doc) => (
+                            {activeDeal.documents.map((doc) => {
+                              const isPaymentProofVerified =
+                                doc.documentType === 'PAYMENT_PROOF' &&
+                                ((activeDeal.payments || []).some(
+                                  (p) =>
+                                    p.status === 'VERIFIED' &&
+                                    ((p.paymentProofUrl && p.paymentProofUrl === doc.fileUrl) ||
+                                      (doc.title && (
+                                        doc.title.toLowerCase().includes('tranche #' + p.trancheNumber) ||
+                                        doc.title.toLowerCase().includes('tranche ' + p.trancheNumber) ||
+                                        (p.trancheNumber === 1 && !doc.title.toLowerCase().includes('tranche'))
+                                      )))
+                                ) || ((activeDeal.payments || []).length > 0 && (activeDeal.payments || []).every((p) => p.status === 'VERIFIED')));
+                              const isDocVerified = Boolean(doc.isVerified || isPaymentProofVerified);
+
+                              return (
                               <div
                                 key={doc.id}
                                 className="p-3 bg-slate-50/80 hover:bg-slate-100/70 border border-slate-200 rounded-xl flex items-center justify-between text-xs transition"
@@ -1299,7 +1386,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                         {doc.documentType}
                                       </span>
                                       {doc.fileSize && <span>{(doc.fileSize / 1024).toFixed(0)} KB</span>}
-                                      {doc.isVerified && (
+                                      {isDocVerified && (
                                         <span className="text-emerald-700 font-bold font-sans">✓ Verified</span>
                                       )}
                                     </div>
@@ -1325,7 +1412,8 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                   </button>
                                 </div>
                               </div>
-                            ))}
+                            );
+                            })}
                           </div>
                         )}
                       </div>
@@ -1920,21 +2008,6 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                 ))}
               </select>
 
-              {/* Status Filter */}
-              <select
-                value={selectedStatusFilter}
-                onChange={(e) => setSelectedStatusFilter(e.target.value)}
-                className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 font-medium focus:outline-none focus:border-slate-800"
-              >
-                <option value="ALL">All Milestones</option>
-                <option value="PENDING">PENDING</option>
-                <option value="IN_PROGRESS">IN_PROGRESS</option>
-                <option value="GOVT_SUBMITTED">GOVT_SUBMITTED</option>
-                <option value="QUERY_RAISED">QUERY_RAISED</option>
-                <option value="APPROVED">APPROVED</option>
-                <option value="COMPLETED">COMPLETED</option>
-              </select>
-
               {/* Urgency Filter */}
               <select
                 value={selectedUrgencyFilter}
@@ -1979,22 +2052,19 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
           {/* Services Allocation Matrix Table */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse min-w-[850px]">
+              <table className="w-full text-left text-xs border-collapse min-w-[750px]">
                 <thead>
                   <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[11px]">
                     <th className="py-3 px-4">Deal / Client</th>
                     <th className="py-3 px-4">Service Task & Sector</th>
                     <th className="py-3 px-4">Assigned Specialist</th>
-                    <th className="py-3 px-4">Milestone Status</th>
-                    <th className="py-3 px-4">SRN / Govt Application</th>
                     <th className="py-3 px-4">Target Deadline</th>
-                    <th className="py-3 px-4 text-center">Manager Self-Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                   {filteredServices.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-12 text-center text-slate-400 text-xs">
+                      <td colSpan={4} className="py-12 text-center text-slate-400 text-xs">
                         No service tasks found matching current filters.
                       </td>
                     </tr>
@@ -2006,14 +2076,14 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                       return (
                         <tr key={svc.id} className="hover:bg-slate-50/70 transition">
                           {/* Deal / Client */}
-                          <td className="py-3 px-4">
+                          <td className="py-3.5 px-4">
                             <div className="flex items-center gap-1.5">
                               <span className="font-mono font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 text-[11px]">
                                 {svc.dealCode}
                               </span>
                               <button
                                 onClick={() => onOpenDossier(svc.dealId)}
-                                title="Open Deal Dossier"
+                                title="Open Deal Dossier Modal"
                                 className="text-slate-400 hover:text-slate-800"
                               >
                                 <ExternalLink className="w-3.5 h-3.5" />
@@ -2022,16 +2092,12 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                             <div className="font-bold text-slate-900 mt-1 truncate max-w-[180px]">
                               {svc.companyName}
                             </div>
-                            <div className="text-[11px] text-slate-500">
-                              {svc.clientName}
-                            </div>
+                            <div className="text-[11px] text-slate-500">{svc.clientName}</div>
                           </td>
 
                           {/* Service Task & Sector */}
-                          <td className="py-3 px-4">
-                            <div className="font-bold text-slate-900 text-sm">
-                              {svc.serviceName}
-                            </div>
+                          <td className="py-3.5 px-4">
+                            <div className="font-bold text-slate-900 text-sm">{svc.serviceName}</div>
                             <div className="flex items-center gap-1.5 mt-1">
                               <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold border ${sectorMeta.badgeColor}`}>
                                 {sectorMeta.name}
@@ -2042,106 +2108,56 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                             </div>
                           </td>
 
-                          {/* Assigned Specialist & Quick Reassign */}
-                          <td className="py-3 px-4 min-w-[200px]">
-                            <div className="flex flex-col gap-1">
-                              <select
-                                value={svc.assignedOpsUserId || ''}
-                                onChange={(e) =>
-                                  handleUpdateService(svc.dealId, svc.id, {
-                                    assignedOpsUserId: e.target.value || null,
-                                  })
-                                }
-                                disabled={actionLoading}
-                                className={`w-full text-xs font-semibold rounded-lg px-2.5 py-1.5 border focus:outline-none ${
-                                  svc.assignedOpsUserId
-                                    ? 'bg-white border-slate-300 text-slate-900'
-                                    : 'bg-amber-50/70 border-amber-300 text-amber-800'
-                                }`}
-                              >
-                                <option value="">-- Unassigned (Open in Pool) --</option>
-                                <optgroup label="Sector Recommended Specialists">
-                                  {opsTeam
-                                    .filter((m) =>
-                                      sectorMeta.specialists.some((name) => m.fullName.includes(name.split(' ')[0]))
-                                    )
-                                    .map((m) => (
-                                      <option key={m.id} value={m.id}>
-                                        ⭐ {m.fullName}
-                                      </option>
-                                    ))}
-                                </optgroup>
-                                <optgroup label="Other Operations Members">
-                                  {opsTeam
-                                    .filter(
-                                      (m) =>
-                                        !sectorMeta.specialists.some((name) => m.fullName.includes(name.split(' ')[0]))
-                                    )
-                                    .map((m) => (
-                                      <option key={m.id} value={m.id}>
-                                        {m.fullName}
-                                      </option>
-                                    ))}
-                                </optgroup>
-                              </select>
-
-                              {isAssignedToMe && (
-                                <span className="text-[10px] text-indigo-700 font-bold flex items-center gap-1">
-                                  <UserCheck className="w-3 h-3" /> Assigned to You (Manager)
-                                </span>
-                              )}
-                            </div>
-                          </td>
-
-                          {/* Milestone Status */}
-                          <td className="py-3 px-4 min-w-[150px]">
+                          {/* Assigned Specialist */}
+                          <td className="py-3.5 px-4 min-w-[200px]">
                             <select
-                              value={svc.status}
+                              value={svc.assignedOpsUserId || ''}
                               onChange={(e) =>
                                 handleUpdateService(svc.dealId, svc.id, {
-                                  status: e.target.value,
-                                  completedAt: e.target.value === 'COMPLETED' ? new Date().toISOString() : null,
+                                  assignedOpsUserId: e.target.value || null,
                                 })
                               }
                               disabled={actionLoading}
                               className={`w-full text-xs font-semibold rounded-lg px-2.5 py-1.5 border focus:outline-none ${
-                                svc.status === 'COMPLETED'
-                                  ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                                  : svc.status === 'GOVT_SUBMITTED'
-                                  ? 'bg-blue-50 border-blue-300 text-blue-800'
-                                  : svc.status === 'IN_PROGRESS'
-                                  ? 'bg-purple-50 border-purple-300 text-purple-800'
-                                  : svc.status === 'QUERY_RAISED'
-                                  ? 'bg-rose-50 border-rose-300 text-rose-800'
-                                  : 'bg-slate-50 border-slate-300 text-slate-700'
+                                svc.assignedOpsUserId
+                                  ? 'bg-white border-slate-300 text-slate-900'
+                                  : 'bg-amber-50/70 border-amber-300 text-amber-800'
                               }`}
                             >
-                              <option value="PENDING">PENDING</option>
-                              <option value="IN_PROGRESS">IN_PROGRESS (Drafting)</option>
-                              <option value="GOVT_SUBMITTED">GOVT_SUBMITTED (Filed)</option>
-                              <option value="QUERY_RAISED">QUERY_RAISED (Resubmit)</option>
-                              <option value="APPROVED">APPROVED (Cleared)</option>
-                              <option value="COMPLETED">COMPLETED</option>
+                              <option value="">-- Unassigned (Open in Pool) --</option>
+                              <optgroup label="Sector Recommended Specialists">
+                                {opsTeam
+                                  .filter((m) =>
+                                    sectorMeta.specialists.some((name) => m.fullName.includes(name.split(' ')[0]))
+                                  )
+                                  .map((m) => (
+                                    <option key={m.id} value={m.id}>
+                                      ⭐ {m.fullName}
+                                    </option>
+                                  ))}
+                              </optgroup>
+                              <optgroup label="Other Operations Members">
+                                {opsTeam
+                                  .filter(
+                                    (m) =>
+                                      !sectorMeta.specialists.some((name) => m.fullName.includes(name.split(' ')[0]))
+                                  )
+                                  .map((m) => (
+                                    <option key={m.id} value={m.id}>
+                                      {m.fullName}
+                                    </option>
+                                  ))}
+                              </optgroup>
                             </select>
+                            {isAssignedToMe && (
+                              <div className="text-[10px] text-indigo-700 font-semibold mt-1">
+                                Assigned to You
+                              </div>
+                            )}
                           </td>
 
-                          {/* SRN / Govt Application Input */}
-                          <td className="py-3 px-4 min-w-[150px]">
-                            <input
-                              type="text"
-                              defaultValue={svc.govApplicationNumber || ''}
-                              placeholder="e.g. SRN2918237"
-                              onBlur={(e) =>
-                                handleUpdateService(svc.dealId, svc.id, {
-                                  govApplicationNumber: e.target.value.trim() || null,
-                                })
-                              }
-                              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs font-mono text-slate-800 placeholder-slate-400 focus:bg-white focus:border-slate-800 focus:outline-none"
-                            />
-                          </td>
-
-                          {/* Target Deadline Date */}
-                          <td className="py-3 px-4 min-w-[150px]">
+                          {/* Target Deadline */}
+                          <td className="py-3.5 px-4 min-w-[150px]">
                             <input
                               type="date"
                               defaultValue={
@@ -2170,25 +2186,6 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                   {svc.deadlineStatus}
                                 </span>
                               </div>
-                            )}
-                          </td>
-
-                          {/* Manager Self-Action / Claim Service */}
-                          <td className="py-3 px-4 text-center">
-                            {!isAssignedToMe ? (
-                              <button
-                                onClick={() => handleSelfAssignService(svc.dealId, svc.id)}
-                                disabled={actionLoading}
-                                className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-900 hover:text-white text-slate-800 rounded-lg text-xs font-semibold flex items-center gap-1 transition mx-auto shadow-xs whitespace-nowrap"
-                                title="Take this service and work on it yourself"
-                              >
-                                <User className="w-3.5 h-3.5" />
-                                <span>Take Task</span>
-                              </button>
-                            ) : (
-                              <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md text-[11px] font-bold inline-flex items-center gap-1">
-                                <CheckCircle2 className="w-3.5 h-3.5" /> Mine
-                              </span>
                             )}
                           </td>
                         </tr>
@@ -2312,7 +2309,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
           <div className="lg:col-span-4 bg-white border border-slate-200 rounded-xl flex flex-col overflow-hidden shadow-xs">
             <div className="p-3.5 border-b border-slate-200 bg-slate-50/70 flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-600">
-                Operations Queue ({deals.length})
+                Operations Queue ({managerDossierDeals.length})
               </span>
               <button
                 onClick={fetchOpsData}
@@ -2323,13 +2320,13 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
             </div>
 
             <div className="flex-1 overflow-y-auto divide-y divide-slate-100 p-2.5 space-y-1.5">
-              {deals.length === 0 ? (
+              {managerDossierDeals.length === 0 ? (
                 <div className="p-10 text-center text-slate-400 text-sm">
                   <CheckCircle2 className="w-7 h-7 text-slate-300 mx-auto mb-2" />
-                  No active operations files in queue.
+                  No operations files currently assigned to you.
                 </div>
               ) : (
-                deals.map((d) => {
+                managerDossierDeals.map((d) => {
                   const isSelected = selectedDeal?.id === d.id;
                   const isReadyDelivery = d.stage === 'STAGE_07_SERVICE_COMPLETED';
 
@@ -2377,67 +2374,36 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
           {/* RIGHT PANE: Execution & Deliverable Desk (8 cols) */}
           <div className="lg:col-span-8 bg-white border border-slate-200 rounded-xl flex flex-col overflow-hidden shadow-xs">
-            {selectedDeal ? (
+            {activeDossierDeal ? (
               <div className="flex-1 overflow-y-auto p-5 space-y-5">
                 {/* Header */}
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-3.5 border-b border-slate-200 gap-3">
                   <div>
                     <div className="flex items-center space-x-2.5">
                       <span className="font-mono text-xs font-bold text-slate-800 px-2.5 py-1 rounded-md bg-slate-100 border border-slate-200">
-                        {selectedDeal.dealCode}
+                        {activeDossierDeal.dealCode}
                       </span>
-                      <h3 className="text-base font-bold text-slate-900">{selectedDeal.client.companyName}</h3>
+                      <h3 className="text-base font-bold text-slate-900">{activeDossierDeal.client.companyName}</h3>
                     </div>
                     <p className="text-xs text-slate-600 mt-1">
-                      Client: <strong className="text-slate-800">{selectedDeal.client.clientName}</strong> ({selectedDeal.client.phone}) • Accounts & Legal Verified: <strong className="text-emerald-700">✓ Yes</strong>
+                      Client: <strong className="text-slate-800">{activeDossierDeal.client.clientName}</strong> ({activeDossierDeal.client.phone}) • Accounts & Legal Verified: <strong className="text-emerald-700">✓ Yes</strong>
                     </p>
                   </div>
 
                   <button
-                    onClick={() => onOpenDossier(selectedDeal.id)}
+                    onClick={() => onOpenDossier(activeDossierDeal.id)}
                     className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-md border border-slate-300 flex items-center gap-1.5 transition shadow-xs"
                   >
                     <Eye className="w-4 h-4" /> View Full Dossier
                   </button>
                 </div>
 
-                {/* LEAD OPERATIONS EXECUTIVE ASSIGNMENT */}
-                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                  <div className="flex items-center space-x-3">
-                    <span className="p-2 rounded-lg bg-white border border-slate-200 text-slate-700 shadow-xs">
-                      <UserCheck className="w-4 h-4" />
-                    </span>
-                    <div>
-                      <span className="text-xs text-slate-500 block font-medium">Lead Operations Executive</span>
-                      <span className="text-sm font-semibold text-slate-900">
-                        {selectedDeal.assignedOpsUser ? selectedDeal.assignedOpsUser.fullName : 'Unassigned (Open in Pool)'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    <select
-                      value={selectedDeal.assignedOpsUserId || ''}
-                      onChange={(e) => handleAssignDealLead(e.target.value || null)}
-                      disabled={actionLoading}
-                      className="bg-white border border-slate-300 text-slate-800 text-xs font-medium rounded-md px-2.5 py-1.5 focus:outline-none focus:border-slate-800"
-                    >
-                      <option value="">-- Assign Lead Exec --</option>
-                      {opsTeam.map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {u.fullName}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
                 {/* SERVICES IN THIS DEAL (Only Unassigned/Operable Tasks Shown to Manager) */}
                 {(() => {
-                  const managerOperableServices = (selectedDeal.services || []).filter(
+                  const managerOperableServices = (activeDossierDeal.services || []).filter(
                     (svc) => !svc.assignedOpsUserId || (currentUser?.id && svc.assignedOpsUserId === currentUser.id)
                   );
-                  const assignedToSpecialistsCount = (selectedDeal.services || []).length - managerOperableServices.length;
+                  const assignedToSpecialistsCount = (activeDossierDeal.services || []).length - managerOperableServices.length;
 
                   return (
                     <div className="space-y-3.5">
@@ -2501,7 +2467,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                   <select
                                     value={svc.assignedOpsUserId || ''}
                                     onChange={(e) =>
-                                      handleUpdateService(selectedDeal.id, svc.id, {
+                                      handleUpdateService(activeDossierDeal.id, svc.id, {
                                         assignedOpsUserId: e.target.value || null,
                                       })
                                     }
@@ -2523,7 +2489,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                     defaultValue={svc.govApplicationNumber || ''}
                                     placeholder="e.g. SRN29182371"
                                     onBlur={(e) =>
-                                      handleUpdateService(selectedDeal.id, svc.id, {
+                                      handleUpdateService(activeDossierDeal.id, svc.id, {
                                         govApplicationNumber: e.target.value.trim() || null,
                                       })
                                     }
@@ -2536,7 +2502,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                   <select
                                     defaultValue={svc.status}
                                     onChange={(e) =>
-                                      handleUpdateService(selectedDeal.id, svc.id, {
+                                      handleUpdateService(activeDossierDeal.id, svc.id, {
                                         status: e.target.value,
                                         completedAt: e.target.value === 'COMPLETED' ? new Date().toISOString() : null,
                                       })
@@ -2564,22 +2530,51 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                 <div className="bg-white border border-slate-200 rounded-xl p-4.5 space-y-3.5 shadow-xs">
                   <div className="flex items-center justify-between">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                      <FolderOpen className="w-4 h-4 text-cyan-600" /> Deal Dossier Documents ({selectedDeal.documents?.length || 0})
+                      <FolderOpen className="w-4 h-4 text-cyan-600" /> Deal Dossier Documents ({activeDossierDeal.documents?.length || 0})
                     </h4>
-                    <span className="text-[11px] text-slate-500">
-                      KYC, Forms, Agreements, & Deliverables
-                    </span>
+                    <div className="flex items-center gap-2.5">
+                      <span className="hidden sm:inline text-[11px] text-slate-500">
+                        KYC, Forms, Agreements, & Deliverables
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const fileInput = document.getElementById('ops-doc-file-input');
+                          if (fileInput) fileInput.click();
+                        }}
+                        className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-md text-xs font-semibold flex items-center gap-1 transition shadow-xs cursor-pointer"
+                        title="Attach Document to Dossier"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add Document</span>
+                      </button>
+                    </div>
                   </div>
 
                   <div className="space-y-2">
-                    {!selectedDeal.documents || selectedDeal.documents.length === 0 ? (
+                    {!activeDossierDeal.documents || activeDossierDeal.documents.length === 0 ? (
                       <div className="p-6 text-center text-slate-400 text-xs border border-dashed border-slate-200 rounded-lg">
                         <Paperclip className="w-5 h-5 mx-auto mb-1 text-slate-300" />
                         No files currently attached to this deal.
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        {selectedDeal.documents.map((doc) => (
+                        {activeDossierDeal.documents.map((doc) => {
+                          const isPaymentProofVerified =
+                            doc.documentType === 'PAYMENT_PROOF' &&
+                            ((activeDossierDeal.payments || []).some(
+                              (p) =>
+                                p.status === 'VERIFIED' &&
+                                ((p.paymentProofUrl && p.paymentProofUrl === doc.fileUrl) ||
+                                  (doc.title && (
+                                    doc.title.toLowerCase().includes('tranche #' + p.trancheNumber) ||
+                                    doc.title.toLowerCase().includes('tranche ' + p.trancheNumber) ||
+                                    (p.trancheNumber === 1 && !doc.title.toLowerCase().includes('tranche'))
+                                  )))
+                            ) || ((activeDossierDeal.payments || []).length > 0 && (activeDossierDeal.payments || []).every((p) => p.status === 'VERIFIED')));
+                          const isDocVerified = Boolean(doc.isVerified || isPaymentProofVerified);
+
+                          return (
                           <div
                             key={doc.id}
                             className="p-3 bg-slate-50/80 hover:bg-slate-100/70 border border-slate-200 rounded-xl flex items-center justify-between text-xs transition"
@@ -2597,7 +2592,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                     {doc.documentType}
                                   </span>
                                   {doc.fileSize && <span>{(doc.fileSize / 1024).toFixed(0)} KB</span>}
-                                  {doc.isVerified && (
+                                  {isDocVerified && (
                                     <span className="text-emerald-700 font-bold font-sans">✓ Verified</span>
                                   )}
                                 </div>
@@ -2623,7 +2618,8 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                               </button>
                             </div>
                           </div>
-                        ))}
+                        );
+                        })}
                       </div>
                     )}
                   </div>
@@ -2682,7 +2678,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
                         <button
                           type="button"
-                          onClick={() => handleUploadDocument(selectedDeal.id)}
+                          onClick={() => handleUploadDocument(activeDossierDeal.id)}
                           disabled={!uploadDocFile || isUploadingDoc}
                           className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition disabled:opacity-40 whitespace-nowrap self-stretch sm:self-auto justify-center"
                         >
@@ -2701,28 +2697,68 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
                 {/* DELIVERABLE CERTIFICATE UPLOAD & STAGE ACTIONS */}
                 <div className="bg-white border border-slate-200 rounded-xl p-4.5 space-y-3.5 shadow-xs">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                    Deliverable Certificate & Completion Gate
-                  </h4>
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                      Deliverable Certificate & Completion Gate
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const fileInput = document.getElementById('deliverable-file-input');
+                        if (fileInput) fileInput.click();
+                      }}
+                      className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+                      title="Add or Attach Deliverable Certificates"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Documents</span>
+                    </button>
+                  </div>
 
                   <div className="p-3.5 bg-slate-50/70 border border-slate-200 rounded-lg space-y-2">
                     <label className="text-xs font-semibold text-slate-800 block">
                       Upload Final Deliverable (Certificate of Incorporation, License, Registration PDF):
                     </label>
                     <input
+                      id="deliverable-file-input"
                       type="file"
                       accept="application/pdf,image/*"
                       onChange={(e) => setDeliverableFile(e.target.files?.[0] || null)}
                       className="text-xs text-slate-700 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-slate-900 file:text-white hover:file:bg-slate-800"
                     />
                     {deliverableFile && (
-                      <div className="text-xs text-emerald-700 font-medium flex items-center gap-1.5 mt-1.5">
-                        <Check className="w-4 h-4" /> Selected: {deliverableFile.name} ({(deliverableFile.size / 1024).toFixed(0)} KB)
+                      <div className="text-xs text-emerald-700 font-medium flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mt-2 p-2 bg-emerald-50 rounded-md border border-emerald-200">
+                        <div className="flex items-center gap-1.5">
+                          <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                          <span>Selected: {deliverableFile.name} ({(deliverableFile.size / 1024).toFixed(0)} KB)</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDirectDeliverableUpload(activeDossierDeal.id)}
+                          disabled={isUploadingDoc}
+                          className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded text-xs font-semibold flex items-center gap-1 shadow-xs transition disabled:opacity-50"
+                        >
+                          <UploadCloud className="w-3.5 h-3.5" />
+                          <span>{isUploadingDoc ? 'Uploading...' : 'Upload Certificate'}</span>
+                        </button>
                       </div>
                     )}
                     {hasDeliverable && (
-                      <div className="text-xs text-emerald-800 font-semibold pt-1">
-                        ✓ Final Certificate on file in Object Storage.
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pt-2 border-t border-slate-200">
+                        <div className="text-xs text-emerald-800 font-semibold flex items-center gap-1.5">
+                          <Check className="w-4 h-4 text-emerald-600" />
+                          <span>Final Certificate on file in Object Storage.</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleEmailCertificatesToClient(activeDossierDeal)}
+                          disabled={actionLoading || isEmailingCerts}
+                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 transition shadow-xs disabled:opacity-50"
+                          title={`Email service certificate(s) to ${activeDossierDeal.client?.email || 'client'}`}
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span>{isEmailingCerts ? 'Sending...' : 'Email Certificate to Client'}</span>
+                        </button>
                       </div>
                     )}
                   </div>
@@ -2732,18 +2768,18 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                     <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-start gap-2.5">
                       <Lock className="w-4 h-4 text-amber-700 mt-0.5 flex-shrink-0" />
                       <span className="leading-relaxed">
-                        <strong>Part-Payment Hold:</strong> Client has ₹{Number(selectedDeal.pendingAmount).toLocaleString('en-IN')} pending balance. Service completion is permitted, but final certificate dispatch (Stage 08) requires balance verification by Accounts Desk.
+                        <strong>Part-Payment Hold:</strong> Client has ₹{Number(activeDossierDeal.pendingAmount).toLocaleString('en-IN')} pending balance. Service completion is permitted, but final certificate dispatch (Stage 08) requires balance verification by Accounts Desk.
                       </span>
                     </div>
                   )}
 
                   {/* Stage Action Buttons */}
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2.5 border-t border-slate-100">
-                    {selectedDeal.stage === 'STAGE_06_OPERATIONS_PROCESSING' && (
+                    {activeDossierDeal.stage === 'STAGE_06_OPERATIONS_PROCESSING' && (
                       <div className="w-full flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                         {(() => {
-                          const incompleteCount = (selectedDeal.services || []).filter((s) => s.status !== 'COMPLETED').length;
-                          const totalServices = (selectedDeal.services || []).length;
+                          const incompleteCount = (activeDossierDeal.services || []).filter((s) => s.status !== 'COMPLETED').length;
+                          const totalServices = (activeDossierDeal.services || []).length;
                           const allDone = totalServices > 0 && incompleteCount === 0;
 
                           return (
@@ -2775,7 +2811,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                       </div>
                     )}
 
-                    {selectedDeal.stage === 'STAGE_07_SERVICE_COMPLETED' && (
+                    {activeDossierDeal.stage === 'STAGE_07_SERVICE_COMPLETED' && (
                       <button
                         onClick={handleDeliverToClient}
                         disabled={actionLoading || isPartPaymentPending}

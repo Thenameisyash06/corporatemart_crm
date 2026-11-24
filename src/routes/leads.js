@@ -1259,7 +1259,22 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
       });
     }
 
-    // 2. Duplicate check by mobile number (Phone numbers must be strictly unique in LMS)
+    // 2. Duplicate check by Company Name & Mobile Number (Both must be strictly unique in LMS)
+    // Only match characters/words, ignore symbols/punctuation
+    const normCompanyName = (companyName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!normCompanyName) {
+      return res.status(400).json({ error: 'Company Name must contain valid alphanumeric characters.' });
+    }
+    const existingCompanyLeads = await prisma.$queryRawUnsafe(
+      `SELECT "id", "companyName" FROM "leads" WHERE REGEXP_REPLACE(LOWER("companyName"), '[^a-z0-9]', '', 'g') = $1 LIMIT 1`,
+      normCompanyName
+    );
+    if (existingCompanyLeads && existingCompanyLeads.length > 0) {
+      return res.status(400).json({
+        error: `A lead with company name "${existingCompanyLeads[0].companyName}" already exists in LMS. Company Name must be strictly unique.`,
+      });
+    }
+
     const existingPhoneLeads = await prisma.$queryRawUnsafe(
       `SELECT "id", "companyName" FROM "leads" WHERE "mobileNo" = $1 LIMIT 1`,
       cleanPhone
@@ -1543,8 +1558,23 @@ router.patch('/:id', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req
     let pIdx = 1;
 
     if (companyName !== undefined) {
+      const cleanCompany = (companyName || '').trim();
+      const normCompany = cleanCompany.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (!normCompany) {
+        return res.status(400).json({ error: 'Company Name must contain valid alphanumeric characters.' });
+      }
+      const existingCompanyLeads = await prisma.$queryRawUnsafe(
+        `SELECT "id", "companyName" FROM "leads" WHERE REGEXP_REPLACE(LOWER("companyName"), '[^a-z0-9]', '', 'g') = $1 AND "id" != $2 LIMIT 1`,
+        normCompany,
+        id
+      );
+      if (existingCompanyLeads && existingCompanyLeads.length > 0) {
+        return res.status(400).json({
+          error: `A lead with company name "${existingCompanyLeads[0].companyName}" already exists in LMS. Company Name must be strictly unique.`,
+        });
+      }
       updates.push(`"companyName" = $${pIdx++}`);
-      params.push(companyName.trim().toUpperCase());
+      params.push(cleanCompany.toUpperCase());
     }
     if (directorName !== undefined) {
       updates.push(`"directorName" = $${pIdx++}`);
