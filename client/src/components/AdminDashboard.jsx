@@ -384,6 +384,7 @@ export default function AdminDashboard({
 
   // Clients tab filter & search
   const [clientSearch, setClientSearch] = useState('');
+  const [deletingClientId, setDeletingClientId] = useState(null);
 
   // Target editing state
   const [editingTargetUserId, setEditingTargetUserId] = useState(null);
@@ -772,6 +773,25 @@ export default function AdminDashboard({
       toast.error(err.response?.data?.error || err.message || 'Failed to remove employee.');
     } finally {
       setDeletingLoading(false);
+    }
+  };
+
+  const handleDeleteClient = async (client) => {
+    if (!client?.id) return;
+    const confirmed = window.confirm(
+      `Are you sure you want to permanently delete "${client.companyName}" from the database?`
+    );
+    if (!confirmed) return;
+
+    setDeletingClientId(client.id);
+    try {
+      await api.delete(`/dashboard/clients/${client.id}`);
+      setClients((prev) => prev.filter((item) => item.id !== client.id));
+      toast.success(`Client "${client.companyName}" removed from database.`);
+    } catch (err) {
+      toast.error(err.response?.data?.error || err.message || 'Failed to delete client.');
+    } finally {
+      setDeletingClientId(null);
     }
   };
 
@@ -1866,12 +1886,13 @@ export default function AdminDashboard({
                     <th className="py-3 px-4 text-right">Total Business</th>
                     <th className="py-3 px-4 text-right">Paid</th>
                     <th className="py-3 px-4 text-right">Balance</th>
+                    <th className="py-3 px-4 text-center">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                   {filteredClients.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="py-12 text-center text-slate-400">
+                      <td colSpan={9} className="py-12 text-center text-slate-400">
                         No clients found matching your query.
                       </td>
                     </tr>
@@ -1921,6 +1942,17 @@ export default function AdminDashboard({
                         </td>
                         <td className="py-3 px-4 text-right font-semibold text-amber-600">
                           ₹{Number(c.pendingAmount || 0).toLocaleString('en-IN')}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteClient(c)}
+                            disabled={deletingClientId === c.id}
+                            title={`Delete ${c.companyName}`}
+                            className="inline-flex items-center justify-center p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 hover:text-rose-700 border border-transparent hover:border-rose-200 transition disabled:opacity-40"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </td>
                       </tr>
                     ))

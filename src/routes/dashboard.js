@@ -626,4 +626,36 @@ router.get('/clients', authenticateToken, requireRoles('ADMIN', 'BDM', 'RM'), as
   }
 });
 
+/**
+ * DELETE /api/dashboard/clients/:id
+ * Remove a client from the database (Admin only, requires 0 active deals)
+ */
+router.delete('/clients/:id', authenticateToken, requireRoles('ADMIN'), async (req, res) => {
+  try {
+    const client = await prisma.client.findUnique({
+      where: { id: req.params.id },
+      include: { _count: { select: { deals: true } } },
+    });
+
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found.' });
+    }
+
+    if (client._count.deals > 0) {
+      return res.status(400).json({
+        error: `Cannot delete "${client.companyName}" because it still has ${client._count.deals} deal(s). Delete associated deals first.`,
+      });
+    }
+
+    await prisma.client.delete({
+      where: { id: req.params.id },
+    });
+
+    return res.json({ message: `Client "${client.companyName}" removed from database.` });
+  } catch (error) {
+    console.error('Delete client error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to delete client.' });
+  }
+});
+
 module.exports = router;

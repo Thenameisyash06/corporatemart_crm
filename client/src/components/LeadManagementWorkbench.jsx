@@ -2929,7 +2929,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
               {/* MEETING DATE */}
               <div>
                 <label className="text-xs font-semibold text-slate-700 block mb-1.5">
-                  Meeting Date
+                  Meeting Date(First Follow-Up)
                 </label>
                 <div className="relative">
                   <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
