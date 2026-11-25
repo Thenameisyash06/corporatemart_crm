@@ -774,6 +774,18 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
           totalPages: 1,
         });
       }
+
+      // Notify parent dashboards (e.g. AdminDashboard LMS tab badge) of the latest This Month count
+      try {
+        const thisMonthLeadsCount = res.data.analytics?.thisMonthCount ?? res.data.pagination?.total ?? (res.data.leads || []).length;
+        window.dispatchEvent(new CustomEvent('lms_leads_changed', {
+          detail: {
+            thisMonthCount: thisMonthLeadsCount,
+            total: res.data.pagination?.total,
+            analytics: res.data.analytics,
+          }
+        }));
+      } catch (_) {}
     } catch (err) {
       console.error('Failed to fetch leads:', err);
       setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to load leads.' });
@@ -3822,13 +3834,19 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                               <option key={ms} value={ms}>{ms}</option>
                             ))}
                           </select>
-                          <div className="text-[10px] text-slate-500 font-medium mt-0.5 flex items-center gap-1 whitespace-nowrap overflow-hidden text-ellipsis">
+                          <div className="text-[10px] text-slate-500 font-medium mt-0.5 flex items-center gap-1 whitespace-nowrap overflow-hidden text-ellipsis flex-wrap">
                             {lead.meetingDate && (
                               <span title={`Meeting on ${new Date(lead.meetingDate).toLocaleDateString('en-IN')}`}>
                                 📅 {new Date(lead.meetingDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
                               </span>
                             )}
-                            {lead.meetingDate && lead.nextFollowUpDate && <span className="text-slate-300">•</span>}
+                            {lead.meetingDate && lead.expectedDateOfCloser && <span className="text-slate-300">•</span>}
+                            {lead.expectedDateOfCloser && (
+                              <span className="text-indigo-600 font-semibold cursor-pointer" onClick={() => toggleLeadExpand(lead.id)} title={`EDC Target: ${new Date(lead.expectedDateOfCloser).toLocaleDateString('en-IN')}. Click to edit.`}>
+                                🎯 EDC: {new Date(lead.expectedDateOfCloser).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                              </span>
+                            )}
+                            {(lead.meetingDate || lead.expectedDateOfCloser) && lead.nextFollowUpDate && <span className="text-slate-300">•</span>}
                             {lead.nextFollowUpDate && (
                               <span title={`Next Follow-up on ${new Date(lead.nextFollowUpDate).toLocaleDateString('en-IN')}`}>
                                 Follow-up: {new Date(lead.nextFollowUpDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
@@ -4065,18 +4083,35 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                                   </div>
                                 </div>
 
-                                {/* 6. Expected Date of Closer (EDC) */}
+                                {/* 6. Expected Date of Closer (EDC) - Editable */}
                                 <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/70">
-                                  <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
-                                    <Clock className="w-3 h-3 text-slate-400" /> EDC Target
-                                  </span>
-                                  <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${edcBadge.color}`}>
-                                      {edcBadge.label}
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                                      <Clock className="w-3 h-3 text-indigo-500" /> Expected Date of Closer (EDC)
                                     </span>
-                                    <span className="text-[11px] text-slate-600 font-semibold">
-                                      {lead.expectedDateOfCloser ? new Date(lead.expectedDateOfCloser).toLocaleDateString('en-IN') : 'Not Set'}
-                                    </span>
+                                    {edcBadge && (
+                                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${edcBadge.color}`}>
+                                        {edcBadge.label}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="mt-1">
+                                    <input
+                                      type="date"
+                                      min={getTodayDateStr()}
+                                      value={lead.expectedDateOfCloser ? new Date(lead.expectedDateOfCloser).toISOString().split('T')[0] : ''}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        const currentToday = getTodayDateStr();
+                                        if (val && val < currentToday) {
+                                          toast.warning('Expected Date of Closer (EDC) cannot be in the past. Please select today or an upcoming date.');
+                                          return;
+                                        }
+                                        handleQuickUpdateLead(lead.id, { expectedDateOfCloser: val || null });
+                                      }}
+                                      className="bg-white border border-slate-200 rounded px-2 py-1 text-xs font-semibold text-slate-800 focus:outline-none focus:border-indigo-400 cursor-pointer w-full shadow-2xs font-mono"
+                                      title="Click to set or change Expected Date of Closer (EDC)"
+                                    />
                                   </div>
                                 </div>
                               </div>
