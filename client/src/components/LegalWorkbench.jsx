@@ -129,7 +129,7 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
       });
       setFeedback({
         type: 'success',
-        message: 'Legal Agreement uploaded successfully and stored in vault! Queued for client handover email.',
+        message: `Legal Service Agreement uploaded to vault. Click "Clear Compliance & Forward to Operations" below to complete legal process and dispatch the agreement email to ${selectedDeal.client?.email || 'the client'}.`,
       });
       setAgreementFile(null);
       setIsReplacingAgreement(false);
@@ -174,6 +174,14 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
 
   const handleApprove = async () => {
     if (!selectedDeal) return;
+    const hasAgreement = Boolean(legalAgreementDoc || selectedDeal.legalAgreementUrl);
+    if (!hasAgreement) {
+      setFeedback({
+        type: 'error',
+        message: 'Please upload the finalized Legal Service Agreement before completing legal clearance and proceeding to Operations.',
+      });
+      return;
+    }
     try {
       setActionLoading(true);
       setFeedback(null);
@@ -181,7 +189,10 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
         action: 'APPROVE',
         notes: 'Legal scrutiny passed. All KYC, statutory documents, and entity details verified.',
       });
-      setFeedback({ type: 'success', message: `Deal ${selectedDeal.dealCode} cleared and forwarded to Operations!` });
+      setFeedback({
+        type: 'success',
+        message: `Deal ${selectedDeal.dealCode} cleared and forwarded to Operations! Official agreement email dispatched to ${selectedDeal.client?.email || 'client'}.`,
+      });
       await fetchLegalQueue();
       onRefreshParent();
     } catch (err) {
@@ -872,7 +883,7 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
                     <FileText className="w-4 h-4 text-brand-600 flex-shrink-0 mt-0.5" />
                     <div>
                       <p className="leading-relaxed">
-                        Upload the finalized legal service agreement drafted by the Legal department. This document is saved securely in storage and attached to the deal record (ready for client email dispatch when handover notification is implemented in the future).
+                        Upload the finalized legal service agreement drafted by the Legal department. This document is saved securely in storage and attached to the deal record (uploaded agreements are automatically dispatched with complete deal details and attached PDF to the client's registered email upon upload and legal approval).
                       </p>
                     </div>
                   </div>

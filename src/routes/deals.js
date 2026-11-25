@@ -1527,6 +1527,10 @@ router.post('/:id/legal-verify', authenticateToken, requireRoles('LEGAL', 'ADMIN
 
     const deal = await prisma.deal.findUnique({
       where: { id: req.params.id },
+      include: {
+        client: true,
+        documents: true,
+      },
     });
 
     if (!deal) {
@@ -1534,6 +1538,17 @@ router.post('/:id/legal-verify', authenticateToken, requireRoles('LEGAL', 'ADMIN
     }
 
     if (action === 'APPROVE') {
+      const hasAgreement = Boolean(
+        deal.legalAgreementUrl ||
+        (deal.documents && deal.documents.some((d) => d.documentType === 'LEGAL_AGREEMENT'))
+      );
+
+      if (!hasAgreement) {
+        return res.status(400).json({
+          error: 'Please upload the finalized Legal Service Agreement before completing legal clearance and proceeding to Operations.',
+        });
+      }
+
       await prisma.deal.update({
         where: { id: deal.id },
         data: {
@@ -1554,6 +1569,16 @@ router.post('/:id/legal-verify', authenticateToken, requireRoles('LEGAL', 'ADMIN
         fromStage: deal.stage,
         toStage: 'STAGE_06_OPERATIONS_PROCESSING',
         remarks: `Legal team ${req.user.fullName} cleared compliance and documents. Forwarded to Operations. ${notes || ''}`,
+      });
+
+      // Dispatch single official legal completion email with agreement attached to the client
+      await notifyCustomerStageChange({
+        dealId: deal.id,
+        event: 'LEGAL_APPROVED',
+        notes: notes || undefined,
+        attachAgreement: true,
+      }).catch((err) => {
+        console.error('[Deals] Failed to dispatch legal approved customer notification:', err);
       });
 
       return res.json({ message: 'Legal scrutiny passed. File forwarded to Operations queue.' });
@@ -1682,19 +1707,69 @@ router.patch('/:id/services/:serviceId', authenticateToken, requireRoles('OPERAT
   try {
     const { assignedOpsUserId, status, govApplicationNumber, notes, completedAt, targetCompletionDate, serviceFee, dealAmount } = req.body;
 
+    // Fetch existing service and parent deal details for validation
+    const currentService = await prisma.dealService.findUnique({
+      where: { id: req.params.serviceId },
+      include: {
+        deal: {
+          include: {
+            payments: true,
+            documents: true,
+          },
+        },
+      },
+    });
+
+    if (!currentService) {
+      return res.status(404).json({ error: 'Service task not found.' });
+    }
+
+    // Requirement 3: Once a service is completed, it cannot be changed or edited again
+    if (currentService.status === 'COMPLETED') {
+      return res.status(400).json({
+        error: `Service "${currentService.serviceName}" has already been COMPLETED and is locked. Completed services cannot be edited or modified again.`,
+      });
+    }
+
+    // Requirements 1 & 2: When setting status to 'COMPLETED'
+    if (status === 'COMPLETED') {
+      const parentDeal = currentService.deal;
+      const totalAmount = Math.round(Number(parentDeal?.totalAmount || 0));
+      const amountReceived = Math.round(Number(parentDeal?.amountReceived || 0));
+      const pendingAmount = Math.max(0, Math.round(Number(parentDeal?.pendingAmount || (totalAmount - amountReceived))));
+      const hasUnverifiedPayments = (parentDeal?.payments || []).some((p) => p.status !== 'VERIFIED');
+
+      // Requirement 1: If payment is pending, service can't complete
+      if (pendingAmount > 0 || hasUnverifiedPayments || !parentDeal?.isAccountsVerified) {
+        return res.status(400).json({
+          error: `Service cannot be marked as COMPLETED because payment is pending (Pending Balance: ₹${pendingAmount.toLocaleString('en-IN')}). All payment tranches must be verified and cleared before completing this service.`,
+        });
+      }
+
+      // Requirement 2: If deliverable not submitted, service can't complete
+      const dealDocuments = parentDeal?.documents || [];
+      const hasDeliverable = dealDocuments.some(
+        (d) =>
+          d.documentType === 'FINAL_DELIVERABLE_CERTIFICATE' ||
+          d.documentType === 'DELIVERABLE_CERTIFICATE' ||
+          (d.title && d.title.toLowerCase().includes('deliverable')) ||
+          (d.title && d.title.toLowerCase().includes('certificate'))
+      );
+
+      if (!hasDeliverable) {
+        return res.status(400).json({
+          error: `Service cannot be marked as COMPLETED because no filing deliverable or certificate has been submitted yet. Please upload and submit the filing deliverable certificate before completing this service.`,
+        });
+      }
+    }
+
     const updateData = {};
     if (assignedOpsUserId !== undefined) {
       const resolvedUserId = await resolveOpsUserId(assignedOpsUserId);
       if (resolvedUserId) {
         const effectiveDate = targetCompletionDate !== undefined ? targetCompletionDate : null;
-        if (!effectiveDate) {
-          const currentSvc = await prisma.dealService.findUnique({
-            where: { id: req.params.serviceId },
-            select: { targetCompletionDate: true },
-          });
-          if (!currentSvc?.targetCompletionDate) {
-            return res.status(400).json({ error: 'Target Deadline is mandatory when assigning a specialist.' });
-          }
+        if (!effectiveDate && !currentService.targetCompletionDate) {
+          return res.status(400).json({ error: 'Target Deadline is mandatory when assigning a specialist.' });
         }
       }
       updateData.assignedOpsUserId = resolvedUserId;
@@ -1714,11 +1789,7 @@ router.patch('/:id/services/:serviceId', authenticateToken, requireRoles('OPERAT
         return res.status(403).json({ error: 'Target completion deadline can only be set or modified by the Operations Manager.' });
       }
       if (!targetCompletionDate) {
-        const currentSvc = await prisma.dealService.findUnique({
-          where: { id: req.params.serviceId },
-          select: { assignedOpsUserId: true },
-        });
-        if (currentSvc?.assignedOpsUserId && updateData.assignedOpsUserId !== null) {
+        if (currentService.assignedOpsUserId && updateData.assignedOpsUserId !== null) {
           return res.status(400).json({ error: 'Target Deadline is mandatory and cannot be cleared for an assigned service.' });
         }
       }
@@ -1726,6 +1797,8 @@ router.patch('/:id/services/:serviceId', authenticateToken, requireRoles('OPERAT
     }
     if (completedAt !== undefined) {
       updateData.completedAt = completedAt ? new Date(completedAt) : null;
+    } else if (status === 'COMPLETED') {
+      updateData.completedAt = new Date();
     }
     if (serviceFee !== undefined || dealAmount !== undefined) {
       const feeVal = parseFloat(serviceFee !== undefined ? serviceFee : dealAmount);

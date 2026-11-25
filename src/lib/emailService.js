@@ -401,10 +401,10 @@ async function notifyCustomerStageChange({
 
       // 5. LEGAL APPROVED -> STAGE_06_OPERATIONS_PROCESSING
       case 'LEGAL_APPROVED':
-        subject = `Legal Clearance Approved & Operations Filing Started - Deal #${dealCode} | Corporate Mart`;
-        stepCompleted = 'Step 2: Legal Scrutiny & Document Clearance Completed';
+        subject = `Legal Clearance Approved & Service Agreement Dispatched - Deal #${dealCode} | Corporate Mart`;
+        stepCompleted = 'Step 2: Legal Scrutiny, Document Clearance & Agreement Execution Completed';
         stepStarted = 'Step 3: Operations Processing & Government Filing Started';
-        description = `Your legal scrutiny and KYC documentation have been cleared by our Legal Desk. Your file is now assigned to our Operations & Compliance Team for formal filing, portal submissions, and processing.`;
+        description = `Your statutory legal scrutiny, entity verification, and legal service agreement execution have been approved by our Legal Desk. Your formal executed Legal Service Agreement is attached to this notification for your statutory compliance records. Your dossier has been forwarded to our Operations & Compliance Team for government filing.`;
         break;
 
       // 6. LEGAL REJECTED
@@ -481,12 +481,27 @@ async function notifyCustomerStageChange({
     // 1. Legal Agreement (for Legal approval or explicit attachAgreement flag)
     const isLegalEvent = event === 'LEGAL_APPROVED' || attachAgreement;
     if (isLegalEvent) {
-      const legalDoc = allDealDocs.find(
-        (d) =>
-          d.documentType === 'LEGAL_AGREEMENT' ||
-          (deal.legalAgreementUrl && d.fileUrl === deal.legalAgreementUrl) ||
-          d.title?.toLowerCase().includes('legal service agreement')
-      );
+      let legalDoc = allDealDocs
+        .filter(
+          (d) =>
+            d.documentType === 'LEGAL_AGREEMENT' ||
+            (deal.legalAgreementUrl && d.fileUrl === deal.legalAgreementUrl) ||
+            d.title?.toLowerCase().includes('legal service agreement') ||
+            d.fileName?.toLowerCase().includes('agreement')
+        )
+        .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))[0];
+
+      if (!legalDoc && deal.legalAgreementUrl) {
+        legalDoc = {
+          id: 'deal-legal-agreement',
+          title: `Legal Service Agreement - ${deal.client?.companyName || dealCode}`,
+          fileName: 'Legal_Service_Agreement.pdf',
+          fileUrl: deal.legalAgreementUrl,
+          mimeType: 'application/pdf',
+          documentType: 'LEGAL_AGREEMENT',
+        };
+      }
+
       if (legalDoc && !docsToAttach.some((d) => d.id === legalDoc.id)) {
         docsToAttach.push(legalDoc);
       }
@@ -534,7 +549,7 @@ async function notifyCustomerStageChange({
           contentType: doc.mimeType || 'application/pdf',
           contentBytes: fileBuffer.toString('base64'),
         });
-        attachedDocsSummary.push(`${doc.title || doc.fileName} (${doc.documentType.replace(/_/g, ' ')})`);
+        attachedDocsSummary.push(`${doc.title || doc.fileName} (${(doc.documentType || 'LEGAL_AGREEMENT').replace(/_/g, ' ')})`);
       } catch (dlErr) {
         console.warn(`[EmailService] Could not attach file "${doc.fileName || doc.title}":`, dlErr.message);
       }
@@ -561,20 +576,18 @@ async function notifyCustomerStageChange({
 
     console.log(`[EmailService] Dispatching stage update email to "${clientEmail}" for Deal ${dealCode} (Event: ${event}, Attachments: ${attachments.length})...`);
 
-    // Asynchronously send email so API requests remain snappy
-    sendEmail({
-      to: clientEmail,
-      subject,
-      html,
-      fromName: 'Corporate Mart',
-      attachments,
-    })
-      .then(() => {
-        console.log(`[EmailService] ✓ Email delivered to ${clientEmail} for Deal ${dealCode} (${attachments.length} attachment(s))`);
-      })
-      .catch((err) => {
-        console.error(`[EmailService] ✗ Failed to send email to ${clientEmail}:`, err.message);
+    try {
+      await sendEmail({
+        to: clientEmail,
+        subject,
+        html,
+        fromName: 'Corporate Mart',
+        attachments,
       });
+      console.log(`[EmailService] ✓ Email delivered to ${clientEmail} for Deal ${dealCode} (${attachments.length} attachment(s))`);
+    } catch (sendErr) {
+      console.error(`[EmailService] ✗ Failed to send email to ${clientEmail}:`, sendErr.message);
+    }
   } catch (error) {
     console.error('[EmailService] Error in notifyCustomerStageChange:', error);
   }
