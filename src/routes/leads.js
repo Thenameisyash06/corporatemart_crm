@@ -1733,7 +1733,7 @@ router.post('/:id/follow-up', authenticateToken, requireRoles('BDM', 'ADMIN'), a
   try {
     await ensureLeadsTable();
     const { id } = req.params;
-    const { date, status, remarks } = req.body;
+    const { date, status, remarks, expectedDateOfCloser } = req.body;
 
     if (!date) {
       return res.status(400).json({ error: 'Follow-up date is mandatory.' });
@@ -1745,6 +1745,23 @@ router.post('/:id/follow-up', authenticateToken, requireRoles('BDM', 'ADMIN'), a
     }
     if (!status) {
       return res.status(400).json({ error: 'Follow-up status is mandatory.' });
+    }
+
+    // Optional EDC validation: cannot be in the past
+    let finalEdcDate = null;
+    let shouldUpdateEdc = false;
+    if (expectedDateOfCloser !== undefined) {
+      shouldUpdateEdc = true;
+      if (expectedDateOfCloser && expectedDateOfCloser.toString().trim()) {
+        const edcStr = expectedDateOfCloser.toString().trim();
+        if (isBeforeToday(edcStr)) {
+          return res.status(400).json({
+            error: 'Expected Date of Closer (EDC) cannot be in the past. Please select today or an upcoming date.',
+          });
+        }
+        finalEdcDate = new Date(edcStr);
+        if (isNaN(finalEdcDate.getTime())) finalEdcDate = null;
+      }
     }
 
     const validStatuses = ['Hot', 'Warm', 'Closed', 'Lost'];
@@ -1768,6 +1785,7 @@ router.post('/:id/follow-up', authenticateToken, requireRoles('BDM', 'ADMIN'), a
       date: date,
       status: matchedStatus.toUpperCase(),
       remarks: remarks && remarks.trim() ? remarks.trim().toUpperCase() : null,
+      expectedDateOfCloser: finalEdcDate ? finalEdcDate.toISOString() : (shouldUpdateEdc ? null : (lead.expectedDateOfCloser ? new Date(lead.expectedDateOfCloser).toISOString() : null)),
       addedAt: new Date().toISOString(),
       addedById: req.user.id,
       addedByName: req.user.fullName ? req.user.fullName.toUpperCase() : 'BDM',
@@ -1786,21 +1804,32 @@ router.post('/:id/follow-up', authenticateToken, requireRoles('BDM', 'ADMIN'), a
       finalLeadStatus = 'CLOSED_WON';
     }
 
-    // Atomic SQL JSONB append to prevent race conditions and update nextFollowUpDate
+    // Atomic SQL JSONB append to prevent race conditions and update nextFollowUpDate and EDC
     const followUpDateObj = new Date(date);
+    const queryParams = [
+      JSON.stringify([newEntry]),
+      finalClientStatus,
+      finalLeadStatus,
+      isNaN(followUpDateObj.getTime()) ? new Date() : followUpDateObj,
+    ];
+    let edcSqlClause = '';
+    if (shouldUpdateEdc) {
+      queryParams.push(finalEdcDate);
+      edcSqlClause = `, "expectedDateOfCloser" = $${queryParams.length}`;
+    }
+    queryParams.push(id);
+    const idParamPos = queryParams.length;
+
     await prisma.$executeRawUnsafe(
       `UPDATE "leads" SET 
         "followUps" = COALESCE("followUps", '[]'::jsonb) || $1::jsonb,
         "clientStatus" = $2,
         "leadStatus" = $3,
-        "nextFollowUpDate" = $4,
+        "nextFollowUpDate" = $4
+        ${edcSqlClause},
         "updatedAt" = NOW()
-      WHERE "id" = $5`,
-      JSON.stringify([newEntry]),
-      finalClientStatus,
-      finalLeadStatus,
-      isNaN(followUpDateObj.getTime()) ? new Date() : followUpDateObj,
-      id
+      WHERE "id" = $${idParamPos}`,
+      ...queryParams
     );
 
     const [updated] = await prisma.$queryRawUnsafe(`SELECT * FROM "leads" WHERE "id" = $1`, id);

@@ -357,6 +357,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     date: getTodayDateStr(),
     status: 'Hot',
     remarks: '',
+    expectedDateOfCloser: '',
   });
   const [savingFollowUp, setSavingFollowUp] = useState(false);
 
@@ -481,12 +482,17 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       toast.warning('Follow-up date cannot be in the past. Please select today or a future date.', 'Past Date Not Allowed');
       return;
     }
+    if (followUpForm.expectedDateOfCloser && followUpForm.expectedDateOfCloser < currentToday) {
+      toast.warning('Expected Date of Closer (EDC) cannot be in the past. Please select today or an upcoming date.', 'Past Date Not Allowed');
+      return;
+    }
     try {
       setSavingFollowUp(true);
       await api.post(`/leads/${followUpModalLead.id}/follow-up`, {
         date: followUpForm.date,
         status: followUpForm.status,
         remarks: followUpForm.remarks,
+        expectedDateOfCloser: followUpForm.expectedDateOfCloser || null,
       });
       toast.success(`Follow-up on ${followUpForm.date} with status "${followUpForm.status}" recorded for ${followUpModalLead.companyName}.`, 'Follow-up Saved');
       setFollowUpModalLead(null);
@@ -494,6 +500,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         date: getTodayDateStr(),
         status: 'Hot',
         remarks: '',
+        expectedDateOfCloser: '',
       });
       fetchLeads();
     } catch (err) {
@@ -3842,7 +3849,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                             )}
                             {lead.meetingDate && lead.expectedDateOfCloser && <span className="text-slate-300">•</span>}
                             {lead.expectedDateOfCloser && (
-                              <span className="text-indigo-600 font-semibold cursor-pointer" onClick={() => toggleLeadExpand(lead.id)} title={`EDC Target: ${new Date(lead.expectedDateOfCloser).toLocaleDateString('en-IN')}. Click to edit.`}>
+                              <span className="text-indigo-600 font-semibold cursor-pointer" onClick={() => toggleLeadExpand(lead.id)} title={`EDC Target: ${new Date(lead.expectedDateOfCloser).toLocaleDateString('en-IN')}. Updated via Follow-up.`}>
                                 🎯 EDC: {new Date(lead.expectedDateOfCloser).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
                               </span>
                             )}
@@ -4083,7 +4090,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                                   </div>
                                 </div>
 
-                                {/* 6. Expected Date of Closer (EDC) - Editable */}
+                                {/* 6. Expected Date of Closer (EDC) - Label (Updated via Follow-up Modal) */}
                                 <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/70">
                                   <div className="flex items-center justify-between">
                                     <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
@@ -4095,23 +4102,13 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                                       </span>
                                     )}
                                   </div>
-                                  <div className="mt-1">
-                                    <input
-                                      type="date"
-                                      min={getTodayDateStr()}
-                                      value={lead.expectedDateOfCloser ? new Date(lead.expectedDateOfCloser).toISOString().split('T')[0] : ''}
-                                      onChange={(e) => {
-                                        const val = e.target.value;
-                                        const currentToday = getTodayDateStr();
-                                        if (val && val < currentToday) {
-                                          toast.warning('Expected Date of Closer (EDC) cannot be in the past. Please select today or an upcoming date.');
-                                          return;
-                                        }
-                                        handleQuickUpdateLead(lead.id, { expectedDateOfCloser: val || null });
-                                      }}
-                                      className="bg-white border border-slate-200 rounded px-2 py-1 text-xs font-semibold text-slate-800 focus:outline-none focus:border-indigo-400 cursor-pointer w-full shadow-2xs font-mono"
-                                      title="Click to set or change Expected Date of Closer (EDC)"
-                                    />
+                                  <div className="mt-1 flex items-center justify-between bg-white border border-slate-200 rounded px-2.5 py-1.5 shadow-2xs">
+                                    <span className="text-xs font-semibold text-slate-800 font-mono">
+                                      {lead.expectedDateOfCloser ? new Date(lead.expectedDateOfCloser).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Not Set'}
+                                    </span>
+                                    <span className="text-[10px] text-slate-400 italic">
+                                      Set via Follow-up
+                                    </span>
                                   </div>
                                 </div>
                               </div>
@@ -4130,6 +4127,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                                         date: getTodayDateStr(),
                                         status: 'Hot',
                                         remarks: '',
+                                        expectedDateOfCloser: lead.expectedDateOfCloser ? new Date(lead.expectedDateOfCloser).toISOString().split('T')[0] : '',
                                       });
                                     }}
                                     className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 bg-white hover:bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded transition shadow-2xs flex items-center gap-1 cursor-pointer"
@@ -4415,6 +4413,39 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                     );
                   })}
                 </div>
+              </div>
+
+              {/* Expected Date of Closer (EDC) Target */}
+              <div>
+                <label className="text-xs font-bold text-slate-800 block mb-1 flex items-center justify-between">
+                  <span>Expected Date of Closer (EDC) <span className="text-slate-400 font-normal">(Target Closer Date)</span></span>
+                  {followUpForm.expectedDateOfCloser && (
+                    <span className="text-[10px] text-indigo-600 font-semibold font-mono">
+                      Target: {new Date(followUpForm.expectedDateOfCloser).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </span>
+                  )}
+                </label>
+                <div className="relative">
+                  <Calendar className="w-4 h-4 text-indigo-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="date"
+                    min={getTodayDateStr()}
+                    value={followUpForm.expectedDateOfCloser}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const currentToday = getTodayDateStr();
+                      if (val && val < currentToday) {
+                        toast.warning('Expected Date of Closer (EDC) cannot be in the past. Please select today or an upcoming date.');
+                        return;
+                      }
+                      setFollowUpForm({ ...followUpForm, expectedDateOfCloser: val });
+                    }}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-900 font-semibold focus:bg-white focus:border-slate-900 focus:outline-none cursor-pointer font-mono"
+                  />
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Updates the lead's Expected Date of Closer displayed on the lead details card.
+                </p>
               </div>
 
               {/* Remarks / Discussion notes */}
