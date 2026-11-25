@@ -41,6 +41,76 @@ const DEFAULT_RENEWAL_TEMPLATES = [
   { name: 'Trademark 10-Year Renewal', dueMonths: 120, desc: 'Statutory trademark renewal at 10-year expiry' },
 ];
 
+const getServiceStatusConfig = (status) => {
+  const norm = (status || 'PENDING').toUpperCase();
+  switch (norm) {
+    case 'COMPLETED':
+      return {
+        label: 'Completed',
+        leftBadgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+        rightBadgeClass: 'bg-emerald-600 text-white shadow-xs',
+        icon: Check,
+        iconClass: 'w-3.5 h-3.5 text-white',
+      };
+    case 'APPROVED':
+      return {
+        label: 'Approved by Authority',
+        leftBadgeClass: 'bg-teal-100 text-teal-800 border-teal-300',
+        rightBadgeClass: 'bg-white text-teal-800 border border-teal-300 shadow-xs',
+        icon: Clock,
+        iconClass: 'w-3.5 h-3.5 text-teal-600',
+      };
+    case 'IN_PROGRESS':
+      return {
+        label: 'In Progress',
+        leftBadgeClass: 'bg-sky-100 text-sky-800 border-sky-300',
+        rightBadgeClass: 'bg-white text-sky-800 border border-sky-300 shadow-xs',
+        icon: Clock,
+        iconClass: 'w-3.5 h-3.5 text-sky-600',
+      };
+    case 'PENDING':
+      return {
+        label: 'Pending',
+        leftBadgeClass: 'bg-amber-100 text-amber-800 border-amber-300',
+        rightBadgeClass: 'bg-white text-amber-800 border border-amber-300 shadow-xs',
+        icon: Clock,
+        iconClass: 'w-3.5 h-3.5 text-amber-600',
+      };
+    case 'ASSIGNED':
+      return {
+        label: 'Assigned',
+        leftBadgeClass: 'bg-indigo-100 text-indigo-800 border-indigo-300',
+        rightBadgeClass: 'bg-white text-indigo-800 border border-indigo-300 shadow-xs',
+        icon: Clock,
+        iconClass: 'w-3.5 h-3.5 text-indigo-600',
+      };
+    case 'GOVT_SUBMITTED':
+      return {
+        label: 'Govt Submitted',
+        leftBadgeClass: 'bg-blue-100 text-blue-800 border-blue-300',
+        rightBadgeClass: 'bg-white text-blue-800 border border-blue-300 shadow-xs',
+        icon: Clock,
+        iconClass: 'w-3.5 h-3.5 text-blue-600',
+      };
+    case 'QUERY_RAISED':
+      return {
+        label: 'Query Raised',
+        leftBadgeClass: 'bg-rose-100 text-rose-800 border-rose-300',
+        rightBadgeClass: 'bg-white text-rose-800 border border-rose-300 shadow-xs',
+        icon: AlertCircle,
+        iconClass: 'w-3.5 h-3.5 text-rose-600',
+      };
+    default:
+      return {
+        label: norm.replace(/_/g, ' '),
+        leftBadgeClass: 'bg-slate-100 text-slate-800 border-slate-300',
+        rightBadgeClass: 'bg-white text-slate-700 border border-slate-300 shadow-xs',
+        icon: Clock,
+        iconClass: 'w-3.5 h-3.5 text-slate-600',
+      };
+  }
+};
+
 const STAGE_LABELS = {
   STAGE_01_PROSPECT: { label: 'Prospect / Draft', color: 'bg-slate-100 text-slate-700 border-slate-200' },
   STAGE_02_ENGAGEMENT_LETTER: { label: 'Engagement Letter', color: 'bg-blue-50 text-blue-700 border-blue-200' },
@@ -770,6 +840,8 @@ export default function RmWorkbench({ currentUser, onRefreshParent, onOpenDossie
                 <div className="space-y-3">
                   {selectedDeal.services?.map((svc) => {
                     const isCompleted = svc.status === 'COMPLETED';
+                    const statusCfg = getServiceStatusConfig(svc.status);
+                    const StatusIcon = statusCfg.icon;
 
                     return (
                       <div
@@ -785,11 +857,7 @@ export default function RmWorkbench({ currentUser, onRefreshParent, onOpenDossie
                             <div className="flex items-center gap-2">
                               <h5 className="text-sm font-bold text-slate-900">{svc.serviceName}</h5>
                               <span
-                                className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-                                  isCompleted
-                                    ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                                    : 'bg-white text-slate-700 border-slate-300'
-                                }`}
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded border ${statusCfg.leftBadgeClass}`}
                               >
                                 {svc.status}
                               </span>
@@ -852,15 +920,9 @@ export default function RmWorkbench({ currentUser, onRefreshParent, onOpenDossie
                           </div>
 
                           <div className="self-start sm:self-auto">
-                            {isCompleted ? (
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-600 text-white rounded-md text-xs font-semibold shadow-xs">
-                                <Check className="w-3.5 h-3.5" /> Completed
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white text-sky-800 border border-sky-300 rounded-md text-xs font-semibold shadow-xs">
-                                <Clock className="w-3.5 h-3.5 text-sky-600" /> In Progress
-                              </span>
-                            )}
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold ${statusCfg.rightBadgeClass}`}>
+                              <StatusIcon className={statusCfg.iconClass} /> {statusCfg.label}
+                            </span>
                           </div>
                         </div>
                       </div>

@@ -921,8 +921,13 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
                     return (
                       <div
                         key={p.id}
-                        className={`p-4 rounded-lg border text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3.5 ${isPending ? 'bg-amber-50/80 border-amber-300' : 'bg-slate-50 border-slate-200'
-                          }`}
+                        className={`p-4 rounded-lg border text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3.5 transition ${
+                          p.status === 'VERIFIED'
+                            ? 'bg-emerald-50/80 border-emerald-300'
+                            : p.status === 'REJECTED'
+                            ? 'bg-rose-50/80 border-rose-300'
+                            : 'bg-amber-50/80 border-amber-300'
+                        }`}
                       >
                         <div>
                           <div className="flex items-center gap-2.5">
@@ -933,14 +938,15 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
                               {p.paymentMode}
                             </span>
                             <span
-                              className={`px-2.5 py-0.5 rounded text-xs font-semibold border ${p.status === 'VERIFIED'
-                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                : p.status === 'REJECTED'
-                                  ? 'bg-rose-50 text-rose-800 border-rose-200'
+                              className={`px-2.5 py-0.5 rounded text-xs font-bold border shadow-xs ${
+                                p.status === 'VERIFIED'
+                                  ? 'bg-emerald-700 text-white border-emerald-800'
+                                  : p.status === 'REJECTED'
+                                  ? 'bg-rose-700 text-white border-rose-800'
                                   : 'bg-amber-100 text-amber-900 border-amber-300'
-                                }`}
+                              }`}
                             >
-                              {p.status.replace('_', ' ')}
+                              {p.status === 'VERIFIED' ? '✓ VERIFIED' : p.status.replace('_', ' ')}
                             </span>
                           </div>
                           <div className="text-xs text-slate-600 font-mono mt-1 space-y-0.5">

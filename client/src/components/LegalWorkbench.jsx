@@ -588,12 +588,12 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
                       return (
                         <div
                           key={p.id}
-                          className={`p-3.5 bg-white border rounded-lg shadow-xs text-xs space-y-2 ${
-                            isPending
-                              ? 'border-amber-300 bg-amber-50/20'
+                          className={`p-3.5 border rounded-lg shadow-xs text-xs space-y-2 transition ${
+                            isVerified
+                              ? 'bg-emerald-50/80 border-emerald-300'
                               : isRejected
                               ? 'border-rose-300 bg-rose-50/20'
-                              : 'border-slate-200'
+                              : 'border-amber-300 bg-amber-50/20'
                           }`}
                         >
                           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -606,11 +606,11 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
                                 {p.paymentMode}
                               </span>
                               <span
-                                className={`text-[10px] px-2 py-0.5 rounded font-semibold border ${
+                                className={`text-[10px] px-2.5 py-0.5 rounded font-bold border shadow-xs ${
                                   isVerified
-                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                    ? 'bg-emerald-700 text-white border-emerald-800'
                                     : isRejected
-                                    ? 'bg-rose-50 text-rose-800 border-rose-200'
+                                    ? 'bg-rose-700 text-white border-rose-800'
                                     : 'bg-amber-100 text-amber-900 border-amber-300'
                                 }`}
                               >

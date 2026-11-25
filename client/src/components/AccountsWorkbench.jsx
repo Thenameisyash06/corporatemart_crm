@@ -412,12 +412,13 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
                     return (
                       <div
                         key={p.id}
-                        className={`p-3 rounded-lg border text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 ${isTranchePending
-                            ? 'bg-amber-50/80 border-amber-300'
-                            : 'bg-white border-slate-200'
-                          ? 'bg-amber-50/80 border-amber-300'
-                          : 'bg-white border-slate-200'
-                          }`}
+                        className={`p-3 rounded-lg border text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 transition ${
+                          p.status === 'VERIFIED'
+                            ? 'bg-emerald-50/80 border-emerald-300'
+                            : p.status === 'REJECTED'
+                            ? 'bg-rose-50/80 border-rose-300'
+                            : 'bg-amber-50/80 border-amber-300'
+                        }`}
                       >
                         <div>
                           <div className="flex items-center gap-2">
@@ -428,18 +429,15 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
                               {p.paymentMode}
                             </span>
                             <span
-                              className={`text-xs px-2 py-0.5 rounded font-semibold border ${p.status === 'VERIFIED'
-                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                              className={`text-xs px-2.5 py-0.5 rounded font-bold border shadow-xs ${
+                                p.status === 'VERIFIED'
+                                  ? 'bg-emerald-700 text-white border-emerald-800'
                                   : p.status === 'REJECTED'
-                                    ? 'bg-rose-50 text-rose-800 border-rose-200'
-                                    : 'bg-amber-100 text-amber-900 border-amber-300'
-                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                : p.status === 'REJECTED'
-                                  ? 'bg-rose-50 text-rose-800 border-rose-200'
+                                  ? 'bg-rose-700 text-white border-rose-800'
                                   : 'bg-amber-100 text-amber-900 border-amber-300'
-                                }`}
+                              }`}
                             >
-                              {p.status.replace('_', ' ')}
+                              {p.status === 'VERIFIED' ? '✓ VERIFIED' : p.status.replace('_', ' ')}
                             </span>
                           </div>
                           <div className="text-xs text-slate-600 font-mono mt-1 space-y-0.5">
