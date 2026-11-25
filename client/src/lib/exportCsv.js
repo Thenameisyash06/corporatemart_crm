@@ -367,7 +367,10 @@ export function exportLeadsToCsv(leads, filename = 'CorporateMart_LMS_Leads.csv'
     bdmName1: l.bdmName1 || 'N/A',
     bdmName2: l.bdmName2 || 'None',
     closerStatus: l.closerStatus || 'N/A',
-    clientStatus: l.clientStatus || 'Warm',
+    clientStatus: l.clientStatus ? (
+      l.clientStatus.trim().toLowerCase() === 'hot' ? 'Hot' :
+      l.clientStatus.trim().toLowerCase() === 'lost' ? 'Lost' : 'Warm'
+    ) : 'Warm',
     followUpHistory: (() => {
       let fus = [];
       if (l.followUps) {

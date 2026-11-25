@@ -166,6 +166,14 @@ export const LMS_CLIENT_STATUSES = [
   },
 ];
 
+export const normalizeClientStatus = (status) => {
+  if (!status) return 'Warm';
+  const s = String(status).trim().toLowerCase();
+  if (s === 'hot') return 'Hot';
+  if (s === 'lost') return 'Lost';
+  return 'Warm';
+};
+
 export const LMS_SOURCING_STATUSES = [
   'Dialer',
   'Mail',
@@ -1790,12 +1798,21 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         toast.warning('Expected Date of Closer (EDC) cannot be in the past. Please select today or an upcoming date.');
         return;
       }
-      await api.patch(`/leads/${leadId}`, updates);
+      const formattedUpdates = { ...updates };
+      if (formattedUpdates.clientStatus) {
+        formattedUpdates.clientStatus = normalizeClientStatus(formattedUpdates.clientStatus);
+      }
+      // Optimistically update local state for immediate responsive UI
+      setLeads((prev) =>
+        prev.map((l) => (l.id === leadId ? { ...l, ...formattedUpdates } : l))
+      );
+      await api.patch(`/leads/${leadId}`, formattedUpdates);
       toast.success('Lead updated successfully.');
       fetchLeads();
       window.dispatchEvent(new Event('lms_leads_changed'));
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to update lead.');
+      fetchLeads();
     }
   };
 
@@ -2842,7 +2859,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 </label>
                 <div className="grid grid-cols-3 gap-1.5 bg-slate-50 p-1 rounded-xl border border-slate-300">
                   {LMS_CLIENT_STATUSES.map((cs) => {
-                    const active = (form.clientStatus || 'Warm') === cs.id;
+                    const active = normalizeClientStatus(form.clientStatus) === cs.id;
                     return (
                       <button
                         key={cs.id}
@@ -3682,7 +3699,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 displayedLeads.map((lead) => {
                   const isExpanded = expandedLeadIds.has(lead.id);
                   const isPdf = lead.quotationFileName?.toLowerCase().endsWith('.pdf');
-                  const currentClientStatus = lead.clientStatus || 'Warm';
+                  const currentClientStatus = normalizeClientStatus(lead.clientStatus);
                   const leadMonthBadge = getLeadMonthBadge(lead);
                   const isOverdue = isLeadFollowUpExceeded(lead);
                   const edcBadge = getEdcBadge(lead.expectedDateOfCloser, lead.leadStatus);
@@ -3871,7 +3888,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                                     clientName: lead.directorName || lead.companyName,
                                     clientPhone: lead.mobileNo,
                                     clientEmail: lead.emailId || '',
-                                    remarks: `Converted from LMS (Client Status: ${lead.clientStatus || 'Warm'}, Funnel Value: ₹${lead.dealValue || 0}, Leader: ${lead.leaderName}, Source: ${lead.sourcingStatus}). Quotation: ${lead.quotationFileName || 'None'}. ${lead.remarks || ''}`,
+                                    remarks: `Converted from LMS (Client Status: ${normalizeClientStatus(lead.clientStatus)}, Funnel Value: ₹${lead.dealValue || 0}, Leader: ${lead.leaderName}, Source: ${lead.sourcingStatus}). Quotation: ${lead.quotationFileName || 'None'}. ${lead.remarks || ''}`,
                                   });
                                 }
                               }}
@@ -4663,7 +4680,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                                   <span
                                     className="text-[10px] px-2 py-0.5 rounded font-semibold bg-slate-100 text-slate-700 border border-slate-200"
                                   >
-                                    {l.clientStatus || 'Warm'}
+                                    {normalizeClientStatus(l.clientStatus)}
                                   </span>
                                   {l.leadStatus === 'CLOSED_WON' && (
                                     <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-900 text-white font-semibold">

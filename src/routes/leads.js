@@ -281,6 +281,11 @@ async function ensureLeadsTable() {
         BEGIN
           ALTER TABLE "leads" ADD COLUMN "reassignmentHistory" JSONB DEFAULT '[]'::jsonb;
         EXCEPTION WHEN duplicate_column THEN END;
+        BEGIN
+          UPDATE "leads" SET "clientStatus" = 'Hot' WHERE UPPER("clientStatus") = 'HOT';
+          UPDATE "leads" SET "clientStatus" = 'Warm' WHERE UPPER("clientStatus") = 'WARM';
+          UPDATE "leads" SET "clientStatus" = 'Lost' WHERE UPPER("clientStatus") = 'LOST';
+        EXCEPTION WHEN OTHERS THEN END;
       END $$;
     `);
 
@@ -895,10 +900,17 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       const pageIds = pageSlice.map((r) => r.id);
       if (pageIds.length > 0) {
         const placeholders = pageIds.map((_, i) => `$${i + 1}`).join(', ');
-        leads = await prisma.$queryRawUnsafe(
+        const rawLeads = await prisma.$queryRawUnsafe(
           `SELECT * FROM "leads" WHERE "id" IN (${placeholders}) ORDER BY "createdAt" DESC`,
           ...pageIds
         );
+        leads = rawLeads.map((l) => ({
+          ...l,
+          clientStatus: l.clientStatus ? (
+            l.clientStatus.trim().toLowerCase() === 'hot' ? 'Hot' :
+            l.clientStatus.trim().toLowerCase() === 'lost' ? 'Lost' : 'Warm'
+          ) : 'Warm',
+        }));
       }
     }
     const totalPages = isAll ? 1 : Math.max(1, Math.ceil(total / limit));
@@ -1444,7 +1456,7 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
       sourcingStatus ? sourcingStatus.trim().toUpperCase() : sourcingStatus,
       meetingStatus ? meetingStatus.trim().toUpperCase() : meetingStatus,
       parsedMeetingDate,
-      finalClientStatus ? finalClientStatus.trim().toUpperCase() : 'WARM',
+      finalClientStatus || 'Warm',
       edc,
       finalStage ? finalStage.trim().toUpperCase() : 'OPEN',
       finalValue,
@@ -1644,11 +1656,11 @@ router.patch('/:id', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req
       params.push(closerStatus ? closerStatus.trim().toUpperCase() : closerStatus);
     }
     if (clientStatus !== undefined) {
-      const raw = (clientStatus || 'WARM').trim().toUpperCase();
-      let norm = 'WARM';
-      if (raw === 'HOT') norm = 'HOT';
-      else if (raw === 'LOST') norm = 'LOST';
-      else if (raw === 'WARM') norm = 'WARM';
+      const raw = (clientStatus || 'Warm').trim().toLowerCase();
+      let norm = 'Warm';
+      if (raw === 'hot') norm = 'Hot';
+      else if (raw === 'lost') norm = 'Lost';
+      else if (raw === 'warm') norm = 'Warm';
       updates.push(`"clientStatus" = $${pIdx++}`);
       params.push(norm);
     }
@@ -1762,11 +1774,14 @@ router.post('/:id/follow-up', authenticateToken, requireRoles('BDM', 'ADMIN'), a
     };
 
     // Synchronize clientStatus and leadStatus accordingly
-    let finalClientStatus = (lead.clientStatus || 'WARM').toUpperCase();
+    let finalClientStatus = lead.clientStatus ? (
+      lead.clientStatus.trim().toLowerCase() === 'hot' ? 'Hot' :
+      lead.clientStatus.trim().toLowerCase() === 'lost' ? 'Lost' : 'Warm'
+    ) : 'Warm';
     let finalLeadStatus = (lead.leadStatus || 'OPEN').toUpperCase();
 
-    if (['HOT', 'WARM', 'LOST'].includes(matchedStatus.toUpperCase())) {
-      finalClientStatus = matchedStatus.toUpperCase();
+    if (['hot', 'warm', 'lost'].includes(matchedStatus.toLowerCase())) {
+      finalClientStatus = matchedStatus.charAt(0).toUpperCase() + matchedStatus.slice(1).toLowerCase();
     } else if (matchedStatus.toUpperCase() === 'CLOSED') {
       finalLeadStatus = 'CLOSED_WON';
     }

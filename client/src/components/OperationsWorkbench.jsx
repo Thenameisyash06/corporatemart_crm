@@ -39,8 +39,11 @@ import {
   ChevronUp,
   FolderOpen,
   File,
+  CreditCard,
+  IndianRupee,
 } from 'lucide-react';
 import api from '../lib/api';
+import { toast } from '../context/ToastContext';
 import {
   exportOpsServicesToCsv,
   exportOpsTeamWorkloadToCsv,
@@ -50,7 +53,6 @@ import {
 // DOCUMENT CATEGORIES FOR OPERATIONS
 // -----------------------------------------------------------------------------
 export const OPS_DOCUMENT_TYPES = [
-  { value: 'FINAL_DELIVERABLE_CERTIFICATE', label: 'Final Deliverable Certificate (COI / License / Approval PDF)' },
   { value: 'INCORPORATION_FORM', label: 'Govt / MCA Filing Form / Challan Receipt' },
   { value: 'LEGAL_AGREEMENT', label: 'Service / Legal Agreement' },
   { value: 'OTHER', label: 'Working Paper / Objection Reply / Other Document' },
@@ -163,6 +165,343 @@ const MOCK_TEAM_SPECIALISTS = [
   },
 ];
 
+// -----------------------------------------------------------------------------
+// CATEGORIZED DOSSIER & PAYMENT TRANCHES VIEW COMPONENT
+// -----------------------------------------------------------------------------
+function DealDossierDocumentsView({ deal, isManager, onPreview, onDelete }) {
+  if (!deal) return null;
+
+  const totalAmount = Number(deal.totalAmount || 0);
+  const amountReceived = Number(deal.amountReceived || 0);
+  const pendingAmount = Math.max(0, totalAmount - amountReceived);
+
+  const docs = deal.documents || [];
+  const payments = deal.payments || [];
+
+  // Group documents by category
+  const paymentDocs = docs.filter((d) => d.documentType === 'PAYMENT_PROOF');
+  const kycDocs = docs.filter(
+    (d) =>
+      d.documentType?.startsWith('KYC_') ||
+      d.documentType === 'INCORPORATION_FORM' ||
+      d.documentType === 'DIRECTOR_ID'
+  );
+  const legalDocs = docs.filter(
+    (d) => d.documentType === 'LEGAL_AGREEMENT' || d.documentType === 'SERVICE_AGREEMENT'
+  );
+  const deliverableDocs = docs.filter(
+    (d) =>
+      d.documentType === 'FINAL_DELIVERABLE_CERTIFICATE' ||
+      d.documentType === 'DELIVERABLE_CERTIFICATE' ||
+      d.documentType === 'GOVT_FILING_CHALLAN' ||
+      d.documentType === 'MCA_FORM'
+  );
+  const otherDocs = docs.filter(
+    (d) =>
+      d.documentType !== 'PAYMENT_PROOF' &&
+      !d.documentType?.startsWith('KYC_') &&
+      d.documentType !== 'INCORPORATION_FORM' &&
+      d.documentType !== 'DIRECTOR_ID' &&
+      d.documentType !== 'LEGAL_AGREEMENT' &&
+      d.documentType !== 'SERVICE_AGREEMENT' &&
+      d.documentType !== 'FINAL_DELIVERABLE_CERTIFICATE' &&
+      d.documentType !== 'DELIVERABLE_CERTIFICATE' &&
+      d.documentType !== 'GOVT_FILING_CHALLAN' &&
+      d.documentType !== 'MCA_FORM'
+  );
+
+  const renderDocCard = (doc) => {
+    const isPaymentProofVerified = (() => {
+      if (doc.documentType !== 'PAYMENT_PROOF') return false;
+      const verifiedPayments = payments.filter((p) => p.status === 'VERIFIED');
+      if (verifiedPayments.length === 0) return false;
+      if (payments.length > 0 && payments.every((p) => p.status === 'VERIFIED')) return true;
+      const paymentProofDocs = docs.filter((d) => d.documentType === 'PAYMENT_PROOF');
+      const docIdx = paymentProofDocs.findIndex((d) => d.id === doc.id);
+      if (docIdx !== -1 && docIdx < verifiedPayments.length) return true;
+      return verifiedPayments.some((p) => {
+        if (p.paymentProofUrl && p.paymentProofUrl === doc.fileUrl) return true;
+        if (p.transactionReference && doc.title && doc.title.toLowerCase().includes(p.transactionReference.toLowerCase())) return true;
+        if (!doc.title) return false;
+        const tLower = doc.title.toLowerCase();
+        const trNum = String(p.trancheNumber || '');
+        return (
+          (trNum && (
+            tLower.includes('tranche #' + trNum) ||
+            tLower.includes('tranche ' + trNum) ||
+            tLower.includes('tranche-' + trNum) ||
+            tLower.includes('tranche_' + trNum) ||
+            tLower.includes('tranche' + trNum) ||
+            tLower.includes('#' + trNum)
+          )) ||
+          (p.trancheNumber === 1 && !tLower.includes('tranche'))
+        );
+      });
+    })();
+    const isDocVerified = Boolean(doc.isVerified || isPaymentProofVerified);
+
+    return (
+      <div
+        key={doc.id}
+        className="p-3 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs transition shadow-2xs"
+      >
+        <div className="flex items-center space-x-2.5 truncate mr-2">
+          <div className="p-2 bg-slate-50 border border-slate-200 text-slate-700 rounded-lg shadow-2xs flex-shrink-0">
+            <FileText className="w-4 h-4 text-indigo-600" />
+          </div>
+          <div className="truncate">
+            <div className="font-semibold text-slate-900 truncate" title={doc.title}>
+              {doc.title}
+            </div>
+            <div className="text-[10px] text-slate-500 font-mono mt-0.5 truncate flex items-center gap-1.5 flex-wrap">
+              <span className="px-1.5 py-0.2 rounded font-sans font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                {doc.documentType}
+              </span>
+              {doc.fileSize && <span>{(doc.fileSize / 1024).toFixed(0)} KB</span>}
+              {isDocVerified && (
+                <span className="text-emerald-700 font-bold font-sans whitespace-nowrap flex items-center gap-0.5">
+                  <Check className="w-3 h-3 text-emerald-600" /> Verified
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-1.5 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => onPreview(doc.id)}
+            className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 rounded-md border border-slate-300 text-xs font-semibold flex items-center gap-1 transition shadow-xs cursor-pointer"
+            title="Preview Document"
+          >
+            <Eye className="w-3.5 h-3.5" /> Preview
+          </button>
+          {!isManager && (
+            <button
+              type="button"
+              onClick={() => onDelete(doc.id, doc.title)}
+              className="p-1 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded transition cursor-pointer"
+              title="Delete Document"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* 1. PAYMENT TRANCHES & FINANCIAL SETTLEMENT */}
+      <div className="p-4 bg-slate-50/90 border border-slate-200 rounded-xl space-y-3.5">
+        {/* Financial Summary Strip */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-200 gap-2">
+          <div className="flex items-center gap-2">
+            <CreditCard className="w-4 h-4 text-emerald-600" />
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-800">
+              Payment Tranches & Settlement
+            </span>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap text-xs">
+            <span className="px-2.5 py-1 rounded-md bg-white border border-slate-200 font-medium text-slate-700 shadow-2xs">
+              Total Deal: <strong className="text-slate-900 font-bold">₹{totalAmount.toLocaleString('en-IN')}</strong>
+            </span>
+            <span className="px-2.5 py-1 rounded-md bg-emerald-50 border border-emerald-200 font-medium text-emerald-800 shadow-2xs">
+              Received: <strong className="font-bold">₹{amountReceived.toLocaleString('en-IN')}</strong>
+            </span>
+            <span
+              className={`px-2.5 py-1 rounded-md border font-medium shadow-2xs ${
+                pendingAmount > 0
+                  ? 'bg-amber-50 border-amber-300 text-amber-900 font-bold'
+                  : 'bg-slate-100 border-slate-200 text-slate-600'
+              }`}
+            >
+              Pending: <strong className={pendingAmount > 0 ? 'text-amber-700' : 'text-slate-700'}>
+                ₹{pendingAmount.toLocaleString('en-IN')}
+              </strong>
+            </span>
+          </div>
+        </div>
+
+        {/* Tranche Cards */}
+        <div className="space-y-2.5">
+          {payments.length === 0 ? (
+            <div className="p-4 bg-white border border-slate-200 rounded-lg text-center text-xs text-slate-500">
+              No payment tranches recorded yet.
+            </div>
+          ) : (
+            payments
+              .slice()
+              .sort((a, b) => (a.trancheNumber || 1) - (b.trancheNumber || 1))
+              .map((p) => {
+                const isVerified = p.status === 'VERIFIED';
+                const isRejected = p.status === 'REJECTED';
+                const matchingDoc = docs.find(
+                  (d) =>
+                    d.documentType === 'PAYMENT_PROOF' &&
+                    ((p.paymentProofUrl && d.fileUrl === p.paymentProofUrl) ||
+                      (p.transactionReference && d.title?.toLowerCase().includes(p.transactionReference.toLowerCase())) ||
+                      (p.trancheNumber && d.title?.toLowerCase().includes('tranche #' + p.trancheNumber)) ||
+                      (p.trancheNumber === 1 && !d.title?.toLowerCase().includes('tranche')))
+                );
+
+                return (
+                  <div
+                    key={p.id}
+                    className={`p-3.5 rounded-xl border transition ${
+                      isVerified
+                        ? 'bg-emerald-50/80 border-emerald-300 shadow-2xs'
+                        : isRejected
+                        ? 'bg-rose-50/60 border-rose-200'
+                        : 'bg-amber-50/60 border-amber-200'
+                    }`}
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-slate-900 text-sm">
+                            Tranche #{p.trancheNumber}: ₹{Number(p.amount || 0).toLocaleString('en-IN')}
+                          </span>
+                          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                            {p.paymentMode}
+                          </span>
+                          <span
+                            className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border shadow-xs ${
+                              isVerified
+                                ? 'bg-emerald-700 text-white border-emerald-800'
+                                : isRejected
+                                ? 'bg-rose-700 text-white border-rose-800'
+                                : 'bg-amber-100 text-amber-900 border-amber-300'
+                            }`}
+                          >
+                            {isVerified ? '✓ VERIFIED' : p.status ? p.status.replace(/_/g, ' ') : 'PENDING'}
+                          </span>
+                        </div>
+
+                        <div className="text-xs text-slate-500 font-mono mt-1 space-y-0.5">
+                          <div>
+                            {p.transactionReference && (
+                              <span>Ref / UTR: <strong className="text-slate-800">{p.transactionReference}</strong> • </span>
+                            )}
+                            <span>Date: {p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('en-IN') : 'N/A'}</span>
+                            {p.accountName && (
+                              <span className="ml-2 font-sans font-semibold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded text-[11px] border border-slate-200">
+                                Bank: {p.accountName}
+                              </span>
+                            )}
+                            {p.paymentMode === 'CASH' && p.cashCollectorName && (
+                              <span className="ml-2 font-sans font-semibold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded text-[11px] border border-amber-200">
+                                Cash Collected By: {p.cashCollectorName}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-shrink-0 self-start sm:self-auto">
+                        {matchingDoc ? (
+                          <button
+                            type="button"
+                            onClick={() => onPreview(matchingDoc.id)}
+                            className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 rounded-md border border-slate-300 text-xs font-semibold flex items-center gap-1 transition shadow-xs cursor-pointer"
+                            title="Preview Proof Slip"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>View Proof Slip</span>
+                          </button>
+                        ) : p.paymentProofUrl ? (
+                          <span className="text-[11px] text-slate-400 italic">Proof on File</span>
+                        ) : (
+                          <span className="text-[11px] text-slate-400 italic">No slip attached</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+          )}
+
+          {/* Pending Balance Tranche Notice */}
+          {pendingAmount > 0 ? (
+            <div className="p-3 bg-amber-50/90 border border-amber-300 rounded-xl flex items-center justify-between text-xs text-amber-900">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                <div>
+                  <span className="font-bold">Pending Balance Tranche: ₹{pendingAmount.toLocaleString('en-IN')}</span>
+                  <p className="text-[11px] text-amber-700 mt-0.5">
+                    Remaining balance to be collected and verified before final stage closure.
+                  </p>
+                </div>
+              </div>
+              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-white text-amber-800 border border-amber-300">
+                Pending
+              </span>
+            </div>
+          ) : (
+            <div className="p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-xl flex items-center gap-2 text-xs text-emerald-800">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+              <span className="font-semibold">All payment tranches verified — Deal balance is fully cleared (₹0 pending).</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 2. KYC & CLIENT IDENTIFICATION */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
+          <h5 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+            <UserCheck className="w-3.5 h-3.5 text-indigo-600" /> KYC & Identification Documents ({kycDocs.length})
+          </h5>
+          <span className="text-[10px] text-slate-500 font-medium">PAN, Aadhaar, DIN & Forms</span>
+        </div>
+        {kycDocs.length === 0 ? (
+          <div className="p-4 bg-slate-50 border border-dashed border-slate-200 rounded-lg text-center text-xs text-slate-400">
+            No KYC documents attached.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {kycDocs.map(renderDocCard)}
+          </div>
+        )}
+      </div>
+
+      {/* 3. LEGAL AGREEMENTS & MANDATES */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
+          <h5 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+            <Scale className="w-3.5 h-3.5 text-sky-600" /> Legal Agreements & Mandates ({legalDocs.length})
+          </h5>
+          <span className="text-[10px] text-slate-500 font-medium">Service Agreements & POA</span>
+        </div>
+        {legalDocs.length === 0 ? (
+          <div className="p-4 bg-slate-50 border border-dashed border-slate-200 rounded-lg text-center text-xs text-slate-400">
+            No legal agreements attached.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {legalDocs.map(renderDocCard)}
+          </div>
+        )}
+      </div>
+
+      {/* 5. ADDITIONAL ATTACHMENTS (IF ANY) */}
+      {otherDocs.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
+            <h5 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+              <Paperclip className="w-3.5 h-3.5 text-slate-500" /> Additional Attachments ({otherDocs.length})
+            </h5>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {otherDocs.map(renderDocCard)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function OperationsWorkbench({ currentUser, onRefreshParent, onOpenDossier }) {
   // Role Detection: Manager (Vikram Singh / Admin) vs Execution Specialist (Priya, Amit, Rahul, etc.)
   const isManager = Boolean(
@@ -196,17 +535,22 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
   const [selectedTaskId, setSelectedTaskId] = useState(null);
   const [viewMode, setViewMode] = useState('workspace'); // 'workspace' | 'table'
   const [expandedTaskId, setExpandedTaskId] = useState(null);
-  const [uploadDocType, setUploadDocType] = useState('FINAL_DELIVERABLE_CERTIFICATE');
+  const [uploadDocType, setUploadDocType] = useState('INCORPORATION_FORM');
   const [uploadDocTitle, setUploadDocTitle] = useState('');
   const [uploadDocFile, setUploadDocFile] = useState(null);
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
   const [previewDoc, setPreviewDoc] = useState(null);
   const [isEmailingCerts, setIsEmailingCerts] = useState(false);
 
+  // Dynamic Deliverable Input Slots (default: 1 slot)
+  const [deliverableSlots, setDeliverableSlots] = useState([
+    { id: 1, file: null, title: '' },
+  ]);
+
   // Filters for Specialist & Manager
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSectorFilter, setSelectedSectorFilter] = useState('ALL');
-  const [selectedStatusFilter, setSelectedStatusFilter] = useState(isManager ? 'ALL' : 'ACTIVE');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState('ACTIVE');
   const [selectedAssigneeFilter, setSelectedAssigneeFilter] = useState('ALL');
   const [selectedUrgencyFilter, setSelectedUrgencyFilter] = useState('ALL'); // 'ALL' | 'OVERDUE' | 'DUE_48H' | 'THIS_WEEK'
 
@@ -360,10 +704,17 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
   // Filtered Services for Specialist Personal View
   const filteredMyServices = useMemo(() => {
     return myServices.filter((s) => {
-      // By default ACTIVE hides completed / approved services so they are removed from active workspace
+      const statusUpper = (s.status || '').toUpperCase();
+
+      // Only status === 'COMPLETED' is completed and cleared.
+      // APPROVED is authority approved but not completed, so it remains active.
       if (selectedStatusFilter === 'ACTIVE') {
-        if (s.status === 'COMPLETED' || s.status === 'APPROVED') return false;
-      } else if (selectedStatusFilter !== 'ALL' && s.status !== selectedStatusFilter) {
+        if (statusUpper === 'COMPLETED') return false;
+      } else if (selectedStatusFilter === 'COMPLETED') {
+        if (statusUpper !== 'COMPLETED') return false;
+      } else if (selectedStatusFilter === 'NOT_STARTED') {
+        if (statusUpper !== 'PENDING' && statusUpper !== 'ASSIGNED' && statusUpper !== 'NOT_STARTED') return false;
+      } else if (selectedStatusFilter !== 'ALL' && statusUpper !== selectedStatusFilter.toUpperCase()) {
         return false;
       }
 
@@ -411,7 +762,18 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
   const filteredServices = useMemo(() => {
     return allServices.filter((s) => {
       if (selectedSectorFilter !== 'ALL' && s.sectorId !== selectedSectorFilter) return false;
-      if (selectedStatusFilter !== 'ALL' && s.status !== selectedStatusFilter) return false;
+
+      // Status Filter: ACTIVE by default removes completed services from active allocation table
+      const statusUpper = (s.status || '').toUpperCase();
+      if (selectedStatusFilter === 'ACTIVE') {
+        if (statusUpper === 'COMPLETED') return false;
+      } else if (selectedStatusFilter === 'COMPLETED') {
+        if (statusUpper !== 'COMPLETED') return false;
+      } else if (selectedStatusFilter === 'NOT_STARTED') {
+        if (statusUpper !== 'PENDING' && statusUpper !== 'ASSIGNED' && statusUpper !== 'NOT_STARTED') return false;
+      } else if (selectedStatusFilter !== 'ALL' && statusUpper !== selectedStatusFilter.toUpperCase()) {
+        return false;
+      }
       
       // Assignee Filter
       if (selectedAssigneeFilter === 'UNASSIGNED') {
@@ -456,8 +818,8 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
       const assigned = allServices.filter(
         (s) => s.assignedOpsUserId === member.id || (member.email && s.assignedOpsUser?.email === member.email)
       );
-      const inProgress = assigned.filter((s) => ['IN_PROGRESS', 'GOVT_SUBMITTED', 'QUERY_RAISED'].includes(s.status));
-      const completed = assigned.filter((s) => s.status === 'COMPLETED' || s.status === 'APPROVED');
+      const inProgress = assigned.filter((s) => ['IN_PROGRESS', 'GOVT_SUBMITTED', 'QUERY_RAISED', 'APPROVED'].includes(s.status));
+      const completed = assigned.filter((s) => s.status === 'COMPLETED');
       const overdue = assigned.filter((s) => s.isOverdue);
       const completionRate = assigned.length > 0 ? Math.round((completed.length / assigned.length) * 100) : 0;
 
@@ -618,6 +980,116 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
       setFeedback({ type: 'error', message: err.response?.data?.error || 'Delivery dispatch failed.' });
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // DELIVERABLE SLOTS & MULTI-DELIVERABLE HANDLERS
+  // ---------------------------------------------------------------------------
+  const handleAddDeliverableSlot = () => {
+    if (activeTask?.status !== 'COMPLETED') {
+      toast.warning('Milestone status must be set to COMPLETED before adding deliverables.', 'Filing Incomplete');
+      return;
+    }
+    setDeliverableSlots((prev) => [
+      ...prev,
+      { id: Date.now() + Math.random(), file: null, title: '' },
+    ]);
+  };
+
+  const handleRemoveDeliverableSlot = (id) => {
+    setDeliverableSlots((prev) => {
+      if (prev.length <= 1) return prev;
+      return prev.filter((slot) => slot.id !== id);
+    });
+  };
+
+  const handleUpdateDeliverableSlot = (id, field, value) => {
+    setDeliverableSlots((prev) =>
+      prev.map((slot) => (slot.id === id ? { ...slot, [field]: value } : slot))
+    );
+  };
+
+  const handleSubmitAllDeliverables = async (dealId, serviceStatus) => {
+    if (!dealId) return;
+    if (serviceStatus !== 'COMPLETED') {
+      toast.warning(
+        'Milestone status must be set to COMPLETED before submitting deliverables.',
+        'Milestone Incomplete'
+      );
+      setFeedback({
+        type: 'error',
+        message: 'Milestone status must be set to COMPLETED before deliverables can be submitted.',
+      });
+      return;
+    }
+
+    const filesToUpload = deliverableSlots.filter((slot) => Boolean(slot.file));
+    if (filesToUpload.length === 0) {
+      toast.warning('Please select at least one deliverable file to submit.', 'No Files Selected');
+      setFeedback({
+        type: 'error',
+        message: 'Please choose at least one deliverable file before submitting.',
+      });
+      return;
+    }
+
+    try {
+      setIsUploadingDoc(true);
+      setFeedback(null);
+
+      for (const slot of filesToUpload) {
+        const formData = new FormData();
+        formData.append('dealId', dealId);
+        formData.append('documentType', 'FINAL_DELIVERABLE_CERTIFICATE');
+        formData.append(
+          'title',
+          slot.title?.trim() || `Deliverable Certificate - ${slot.file.name}`
+        );
+        formData.append('file', slot.file);
+
+        await api.post('/documents/upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      }
+
+      toast.success(
+        `Successfully submitted ${filesToUpload.length} deliverable certificate(s)!`,
+        'Deliverables Uploaded'
+      );
+      setFeedback({
+        type: 'success',
+        message: `Successfully uploaded and attached ${filesToUpload.length} deliverable certificate(s)!`,
+      });
+
+      // Automatically dispatch deliverable certificate email to client
+      try {
+        const clientEmail = activeDeal?.client?.email;
+        if (clientEmail) {
+          await api.post(`/deals/${dealId}/send-email-update`, {
+            subject: `Official Service Deliverable Certificate(s) - Deal #${activeDeal?.dealCode} | Corporate Mart`,
+            message: `We are pleased to inform you that your filing for "${activeTask?.serviceName || 'Service'}" has been completed, and the official deliverable certificate(s) have been generated. Please find the official deliverable document(s) attached to this email.`,
+            attachCertificates: true,
+          });
+          toast.success(`Deliverable document(s) sent via email to ${clientEmail}!`, 'Email Sent');
+        }
+      } catch (emailErr) {
+        console.warn('Auto deliverable email send error:', emailErr);
+      }
+
+      // Reset to 1 default empty deliverable slot
+      setDeliverableSlots([{ id: Date.now(), file: null, title: '' }]);
+
+      await fetchOpsData();
+      if (onRefreshParent) onRefreshParent();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to submit deliverables.', 'Upload Error');
+      setFeedback({
+        type: 'error',
+        message: err.response?.data?.error || 'Failed to submit deliverables.',
+      });
+    } finally {
+      setIsUploadingDoc(false);
     }
   };
 
@@ -815,7 +1287,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                 <Briefcase className="w-3.5 h-3.5 text-emerald-600" />
                 <span>My Assigned Tasks & Deal Dossier</span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-emerald-50 text-emerald-700">
-                  {myServices.filter((s) => s.status !== 'COMPLETED' && s.status !== 'APPROVED').length}
+                  {myServices.filter((s) => s.status !== 'COMPLETED').length}
                 </span>
               </button>
 
@@ -872,11 +1344,11 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                 My Active Filings
               </span>
               <div className="text-xl font-extrabold text-slate-900 mt-0.5">
-                {myServices.filter((s) => s.status !== 'COMPLETED' && s.status !== 'APPROVED').length}{' '}
+                {myServices.filter((s) => s.status !== 'COMPLETED').length}{' '}
                 <span className="text-xs font-normal text-slate-500">pending tasks</span>
               </div>
               <div className="text-[11px] text-slate-500 mt-1">
-                Value: ₹{myServices.filter((s) => s.status !== 'COMPLETED' && s.status !== 'APPROVED').reduce((sum, s) => sum + Number(s.serviceFee || 0), 0).toLocaleString('en-IN')}
+                Value: ₹{myServices.filter((s) => s.status !== 'COMPLETED').reduce((sum, s) => sum + Number(s.serviceFee || 0), 0).toLocaleString('en-IN')}
               </div>
             </div>
 
@@ -892,7 +1364,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                 In Progress / Submitted
               </span>
               <div className="text-xl font-extrabold text-blue-600 mt-0.5">
-                {myServices.filter((s) => ['IN_PROGRESS', 'GOVT_SUBMITTED', 'QUERY_RAISED'].includes(s.status)).length}
+                {myServices.filter((s) => ['IN_PROGRESS', 'GOVT_SUBMITTED', 'QUERY_RAISED', 'APPROVED'].includes(s.status)).length}
               </div>
               <div className="text-[11px] text-blue-700/80 mt-1">
                 Under active compliance
@@ -911,7 +1383,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                 Overdue / Urgent
               </span>
               <div className="text-xl font-extrabold text-rose-600 mt-0.5">
-                {myServices.filter((s) => s.isOverdue && s.status !== 'COMPLETED' && s.status !== 'APPROVED').length}
+                {myServices.filter((s) => s.isOverdue && s.status !== 'COMPLETED').length}
               </div>
               <div className="text-[11px] text-rose-700/80 mt-1">
                 Immediate Action Required
@@ -919,7 +1391,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
             </div>
 
             <div
-              onClick={() => setSelectedStatusFilter('COMPLETED')}
+              onClick={() => setSelectedStatusFilter(selectedStatusFilter === 'COMPLETED' ? 'ACTIVE' : 'COMPLETED')}
               className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${
                 selectedStatusFilter === 'COMPLETED'
                   ? 'bg-emerald-50/50 border-emerald-500 ring-1 ring-emerald-500'
@@ -930,7 +1402,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                 Completed & Cleared
               </span>
               <div className="text-xl font-extrabold text-emerald-600 mt-0.5">
-                {myServices.filter((s) => s.status === 'COMPLETED' || s.status === 'APPROVED').length}
+                {myServices.filter((s) => s.status === 'COMPLETED').length}
               </div>
               <div className="text-[11px] text-emerald-700/80 mt-1">
                 Removed from workspace
@@ -1158,23 +1630,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                         </div>
 
                         <div className="flex items-center gap-2">
-                          {activeTask.status === 'COMPLETED' ? (
+                          {activeTask.status === 'COMPLETED' && (
                             <span className="inline-flex items-center gap-1 text-xs text-emerald-700 font-bold bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
                               <CheckCircle2 className="w-3.5 h-3.5" /> Completed
                             </span>
-                          ) : (
-                            <button
-                              onClick={() =>
-                                handleUpdateService(activeTask.dealId, activeTask.id, {
-                                  status: 'COMPLETED',
-                                  completedAt: new Date().toISOString(),
-                                })
-                              }
-                              disabled={actionLoading}
-                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition shadow-xs flex items-center gap-1"
-                            >
-                              <Check className="w-3.5 h-3.5" /> Mark Completed
-                            </button>
                           )}
                         </div>
                       </div>
@@ -1194,8 +1653,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                             }
                             disabled={actionLoading}
                             className={`w-full text-xs font-bold rounded-lg px-2.5 py-1.5 border focus:outline-none ${
-                              activeTask.status === 'COMPLETED' || activeTask.status === 'APPROVED'
+                              activeTask.status === 'COMPLETED'
                                 ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                : activeTask.status === 'APPROVED'
+                                ? 'bg-teal-50 text-teal-800 border-teal-300'
                                 : activeTask.status === 'GOVT_SUBMITTED'
                                 ? 'bg-blue-50 text-blue-800 border-blue-300'
                                 : activeTask.status === 'QUERY_RAISED'
@@ -1235,22 +1696,33 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
                         <div>
                           <label className="text-xs text-slate-700 font-semibold block mb-1">
-                            Target Completion Date
+                            Target Deadline <span className="text-[10px] text-slate-400 font-normal">(Set by Manager)</span>
                           </label>
-                          <input
-                            type="date"
-                            defaultValue={
-                              activeTask.targetCompletionDate
-                                ? new Date(activeTask.targetCompletionDate).toISOString().split('T')[0]
-                                : ''
-                            }
-                            onChange={(e) => {
-                              handleUpdateService(activeTask.dealId, activeTask.id, {
-                                targetCompletionDate: e.target.value || null,
-                              });
-                            }}
-                            className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-slate-800"
-                          />
+                          <div className="w-full bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-700 flex items-center justify-between">
+                            <span className="flex items-center gap-1.5">
+                              <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                              {activeTask.targetCompletionDate
+                                ? new Date(activeTask.targetCompletionDate).toLocaleDateString('en-IN', {
+                                    day: '2-digit',
+                                    month: 'short',
+                                    year: 'numeric',
+                                  })
+                                : 'Pending Manager Allocation'}
+                            </span>
+                            {activeTask.targetCompletionDate && (
+                              <span
+                                className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                                  new Date(activeTask.targetCompletionDate) < new Date()
+                                    ? 'bg-rose-100 text-rose-700'
+                                    : 'bg-amber-100 text-amber-800'
+                                }`}
+                              >
+                                {new Date(activeTask.targetCompletionDate) < new Date()
+                                  ? 'Overdue'
+                                  : `${Math.ceil((new Date(activeTask.targetCompletionDate) - new Date()) / (1000 * 60 * 60 * 24))}d left`}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1335,174 +1807,221 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                       )}
                     </div>
 
-                    {/* 3. DEAL DOSSIER & ATTACHED FILES (VIEW & PREVIEW) */}
-                    <div className="bg-white border border-slate-200 rounded-xl p-4.5 space-y-3.5 shadow-xs">
-                      <div className="flex items-center justify-between">
+                    {/* 3. DEAL DOSSIER & ATTACHED FILES (CATEGORIZED & TRANCHE-WISE) */}
+                    <div className="bg-white border border-slate-200 rounded-xl p-4.5 space-y-4 shadow-xs">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-200">
                         <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
                           <FolderOpen className="w-4 h-4 text-cyan-600" /> Deal Dossier & Attached Files ({activeDeal.documents?.length || 0})
                         </h4>
-                        <span className="text-[11px] text-slate-500">
-                          KYC, MOA/AOA, Filing Proofs, Challans, & Deliverables
+                        <span className="text-[11px] text-slate-500 font-medium">
+                          Categorized Dossier & Payment Tranches
                         </span>
                       </div>
 
-                      <div className="space-y-2">
-                        {!activeDeal.documents || activeDeal.documents.length === 0 ? (
-                          <div className="p-6 text-center text-slate-400 text-xs border border-dashed border-slate-200 rounded-lg">
-                            <Paperclip className="w-5 h-5 mx-auto mb-1 text-slate-300" />
-                            No files attached to this deal yet. Attach files using the form below.
-                          </div>
-                        ) : (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                            {activeDeal.documents.map((doc) => {
-                              const isPaymentProofVerified = (() => {
-                                if (doc.documentType !== 'PAYMENT_PROOF') return false;
-                                const verifiedPayments = (activeDeal.payments || []).filter((p) => p.status === 'VERIFIED');
-                                if (verifiedPayments.length === 0) return false;
-                                if ((activeDeal.payments || []).length > 0 && (activeDeal.payments || []).every((p) => p.status === 'VERIFIED')) return true;
-                                const paymentProofDocs = (activeDeal.documents || []).filter((d) => d.documentType === 'PAYMENT_PROOF');
-                                const docIdx = paymentProofDocs.findIndex((d) => d.id === doc.id);
-                                if (docIdx !== -1 && docIdx < verifiedPayments.length) return true;
-                                return verifiedPayments.some((p) => {
-                                  if (p.paymentProofUrl && p.paymentProofUrl === doc.fileUrl) return true;
-                                  if (p.transactionReference && doc.title && doc.title.toLowerCase().includes(p.transactionReference.toLowerCase())) return true;
-                                  if (!doc.title) return false;
-                                  const tLower = doc.title.toLowerCase();
-                                  const trNum = String(p.trancheNumber || '');
-                                  return (
-                                    (trNum && (
-                                      tLower.includes('tranche #' + trNum) ||
-                                      tLower.includes('tranche ' + trNum) ||
-                                      tLower.includes('tranche-' + trNum) ||
-                                      tLower.includes('tranche_' + trNum) ||
-                                      tLower.includes('tranche' + trNum) ||
-                                      tLower.includes('#' + trNum)
-                                    )) ||
-                                    (p.trancheNumber === 1 && !tLower.includes('tranche'))
-                                  );
-                                });
-                              })();
-                              const isDocVerified = Boolean(doc.isVerified || isPaymentProofVerified);
-
-                              return (
-                              <div
-                                key={doc.id}
-                                className="p-3 bg-slate-50/80 hover:bg-slate-100/70 border border-slate-200 rounded-xl flex items-center justify-between text-xs transition"
-                              >
-                                <div className="flex items-center space-x-2.5 truncate mr-2">
-                                  <div className="p-2 bg-white border border-slate-200 text-slate-700 rounded-lg shadow-xs flex-shrink-0">
-                                    <FileText className="w-4 h-4 text-indigo-600" />
-                                  </div>
-                                  <div className="truncate">
-                                    <div className="font-semibold text-slate-900 truncate" title={doc.title}>
-                                      {doc.title}
-                                    </div>
-                                    <div className="text-[10px] text-slate-500 font-mono mt-0.5 truncate flex items-center gap-1.5">
-                                      <span className="px-1.5 py-0.2 rounded font-sans font-bold bg-white text-slate-700 border border-slate-200">
-                                        {doc.documentType}
-                                      </span>
-                                      {doc.fileSize && <span>{(doc.fileSize / 1024).toFixed(0)} KB</span>}
-                                      {isDocVerified && (
-                                        <span className="text-emerald-700 font-bold font-sans">✓ Verified</span>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-
-                                <div className="flex items-center space-x-1.5 flex-shrink-0">
-                                  <button
-                                    type="button"
-                                    onClick={() => handlePreviewDocument(doc.id)}
-                                    className="px-2.5 py-1 bg-white hover:bg-slate-200/80 text-slate-700 rounded-md border border-slate-300 text-xs font-semibold flex items-center gap-1 transition shadow-xs"
-                                    title="Preview Document"
-                                  >
-                                    <Eye className="w-3.5 h-3.5" /> Preview
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteDocument(doc.id, doc.title)}
-                                    className="p-1 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded transition"
-                                    title="Delete Document"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                            })}
-                          </div>
-                        )}
-                      </div>
+                      <DealDossierDocumentsView
+                        deal={activeDeal}
+                        isManager={isManager}
+                        onPreview={handlePreviewDocument}
+                        onDelete={handleDeleteDocument}
+                      />
                     </div>
 
-                    {/* 4. ATTACH NEW DOCUMENT / FILING PROOF / DELIVERABLE */}
+                    {/* 4. FILING DELIVERABLE(S) SUBMISSION GATE */}
                     <div className="bg-white border border-slate-200 rounded-xl p-4.5 space-y-3.5 shadow-xs">
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                        <UploadCloud className="w-4 h-4 text-emerald-600" /> Attach Document or Deliverable to Deal Dossier
-                      </h4>
-
-                      <div className="p-3.5 bg-slate-50/70 border border-slate-200 rounded-lg space-y-3 text-xs">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div>
-                            <label className="text-xs font-semibold text-slate-700 block mb-1">
-                              Document Category
-                            </label>
-                            <select
-                              value={uploadDocType}
-                              onChange={(e) => setUploadDocType(e.target.value)}
-                              className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-slate-800"
-                            >
-                              {OPS_DOCUMENT_TYPES.map((dt) => (
-                                <option key={dt.value} value={dt.value}>
-                                  {dt.label}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="text-xs font-semibold text-slate-700 block mb-1">
-                              Document Title / Note (Optional)
-                            </label>
-                            <input
-                              type="text"
-                              value={uploadDocTitle}
-                              onChange={(e) => setUploadDocTitle(e.target.value)}
-                              placeholder="e.g. SPICe+ Part B Filing Acknowledgment"
-                              className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-slate-800"
-                            />
-                          </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                            <FileCheck className="w-4 h-4 text-emerald-600" /> Filing Deliverable(s) & Certificates
+                          </h4>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            Upload final certificates (COI, licenses, registration certificates) to conclude this filing.
+                          </p>
                         </div>
 
-                        <div>
-                          <label className="text-xs font-semibold text-slate-700 block mb-1">
-                            Select File (PDF, DOCX, Images up to 50MB)
-                          </label>
-                          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
-                            <input
-                              id="ops-doc-file-input"
-                              type="file"
-                              accept="application/pdf,image/*,.doc,.docx,.xls,.xlsx"
-                              onChange={(e) => setUploadDocFile(e.target.files?.[0] || null)}
-                              className="text-xs text-slate-700 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-slate-900 file:text-white hover:file:bg-slate-800"
-                            />
+                        {/* Add Deliverable Button */}
+                        <button
+                          type="button"
+                          onClick={handleAddDeliverableSlot}
+                          disabled={activeTask.status !== 'COMPLETED'}
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition flex-shrink-0 ${
+                            activeTask.status === 'COMPLETED'
+                              ? 'bg-slate-900 hover:bg-slate-800 text-white cursor-pointer'
+                              : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                          }`}
+                          title={
+                            activeTask.status === 'COMPLETED'
+                              ? 'Add another deliverable file field'
+                              : 'Milestone must be set to COMPLETED before deliverables are allowed'
+                          }
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Add Deliverable</span>
+                        </button>
+                      </div>
+
+                      {/* Warning when milestone is NOT COMPLETED */}
+                      {activeTask.status !== 'COMPLETED' && (
+                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-start gap-2.5">
+                          <Lock className="w-4 h-4 text-amber-700 mt-0.5 flex-shrink-0" />
+                          <div className="leading-relaxed">
+                            <strong>Filing Incomplete — Deliverables Not Allowed:</strong> Milestone status is currently{' '}
+                            <span className="font-bold underline uppercase">{activeTask.status?.replace(/_/g, ' ') || 'PENDING'}</span>.
+                            Filing Deliverables and Certificates are strictly not allowed until the milestone status above is set to <strong>COMPLETED</strong>.
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Display Existing Uploaded Deliverables */}
+                      {(() => {
+                        const dealDeliverables = (activeDeal.documents || []).filter(
+                          (d) =>
+                            d.documentType === 'FINAL_DELIVERABLE_CERTIFICATE' ||
+                            d.documentType === 'DELIVERABLE_CERTIFICATE'
+                        );
+                        if (dealDeliverables.length === 0) return null;
+
+                        return (
+                          <div className="space-y-2 p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                            <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
+                              Attached Deliverable Certificate(s) ({dealDeliverables.length})
+                            </span>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {dealDeliverables.map((doc) => (
+                                <div
+                                  key={doc.id}
+                                  className="p-2.5 bg-white border border-emerald-200 rounded-lg flex items-center justify-between gap-2 shadow-2xs"
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <FileCheck className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-bold text-slate-900 truncate" title={doc.title}>
+                                        {doc.title}
+                                      </p>
+                                      <span className="text-[10px] text-emerald-700 font-semibold flex items-center gap-1">
+                                        <Check className="w-3 h-3 text-emerald-600" /> Ready for Client Handover
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handlePreviewDocument(doc)}
+                                    className="px-2 py-1 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded text-[11px] font-semibold flex items-center gap-1 cursor-pointer flex-shrink-0"
+                                  >
+                                    <Eye className="w-3 h-3" /> Preview
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Deliverable Upload Fields (Default: 1 field) */}
+                      <div className="space-y-3">
+                        {deliverableSlots.map((slot, idx) => (
+                          <div
+                            key={slot.id}
+                            className={`p-3 rounded-lg space-y-2 text-xs border ${
+                              activeTask.status === 'COMPLETED'
+                                ? 'bg-slate-50/70 border-slate-200'
+                                : 'bg-slate-100/60 border-slate-200/80 opacity-60'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-slate-700 uppercase text-[10px] tracking-wider">
+                                Deliverable Field #{idx + 1}
+                              </span>
+                              {deliverableSlots.length > 1 && activeTask.status === 'COMPLETED' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveDeliverableSlot(slot.id)}
+                                  className="text-slate-400 hover:text-rose-600 text-xs flex items-center gap-1 cursor-pointer"
+                                  title="Remove this deliverable field"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" /> Remove
+                                </button>
+                              )}
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                              <div>
+                                <label className="text-xs font-semibold text-slate-700 block mb-1">
+                                  Deliverable Title / Note
+                                </label>
+                                <input
+                                  type="text"
+                                  value={slot.title}
+                                  onChange={(e) => handleUpdateDeliverableSlot(slot.id, 'title', e.target.value)}
+                                  disabled={activeTask.status !== 'COMPLETED'}
+                                  placeholder={
+                                    activeTask.status === 'COMPLETED'
+                                      ? 'e.g. Certificate of Incorporation / License PDF'
+                                      : 'Locked: Milestone must be COMPLETED first'
+                                  }
+                                  className={`w-full rounded-lg px-2.5 py-1.5 text-xs focus:outline-none ${
+                                    activeTask.status === 'COMPLETED'
+                                      ? 'bg-white border border-slate-300 text-slate-800 focus:border-slate-800'
+                                      : 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
+                                  }`}
+                                />
+                              </div>
+
+                              <div>
+                                <label className="text-xs font-semibold text-slate-700 block mb-1">
+                                  Select Deliverable File
+                                </label>
+                                <input
+                                  type="file"
+                                  accept="application/pdf,image/*,.doc,.docx"
+                                  onChange={(e) => handleUpdateDeliverableSlot(slot.id, 'file', e.target.files?.[0] || null)}
+                                  disabled={activeTask.status !== 'COMPLETED'}
+                                  className={`w-full text-xs text-slate-700 file:mr-2.5 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-semibold ${
+                                    activeTask.status === 'COMPLETED'
+                                      ? 'file:bg-slate-900 file:text-white hover:file:bg-slate-800 cursor-pointer'
+                                      : 'file:bg-slate-200 file:text-slate-400 cursor-not-allowed'
+                                  }`}
+                                />
+                              </div>
+                            </div>
+
+                            {slot.file && (
+                              <div className="text-[11px] text-emerald-700 font-medium flex items-center gap-1.5 pt-1">
+                                <Check className="w-3 h-3 text-emerald-600" /> Selected: {slot.file.name} ({(slot.file.size / 1024).toFixed(0)} KB)
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Unified Submit Bar (Locked until milestone is COMPLETED) */}
+                      <div className="pt-2 border-t border-slate-200">
+                        {activeTask.status !== 'COMPLETED' ? (
+                          <button
+                            type="button"
+                            disabled={true}
+                            className="w-full sm:w-auto px-5 py-2.5 bg-slate-200 text-slate-400 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 cursor-not-allowed shadow-none"
+                            title="Set milestone status to COMPLETED to enable submission"
+                          >
+                            <Lock className="w-3.5 h-3.5" />
+                            <span>Deliverables Not Allowed (Milestone Not Completed)</span>
+                          </button>
+                        ) : (
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                            <span className="text-xs text-emerald-700 font-medium flex items-center gap-1">
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600" /> Milestone completed! Attach deliverable file(s) and submit.
+                            </span>
 
                             <button
                               type="button"
-                              onClick={() => handleUploadDocument(activeDeal.id)}
-                              disabled={!uploadDocFile || isUploadingDoc}
-                              className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition disabled:opacity-40 whitespace-nowrap self-stretch sm:self-auto justify-center"
+                              onClick={() => handleSubmitAllDeliverables(activeDeal.id, activeTask.status)}
+                              disabled={isUploadingDoc || !deliverableSlots.some((s) => Boolean(s.file))}
+                              className="w-full sm:w-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center justify-center gap-2 transition disabled:opacity-40 cursor-pointer"
                             >
                               <UploadCloud className="w-4 h-4" />
-                              <span>{isUploadingDoc ? 'Uploading...' : 'Attach & Upload'}</span>
+                              <span>{isUploadingDoc ? 'Submitting Deliverables...' : 'Submit Deliverable(s)'}</span>
                             </button>
                           </div>
-                          {uploadDocFile && (
-                            <div className="text-xs text-emerald-700 font-medium flex items-center gap-1.5 mt-2">
-                              <Check className="w-3.5 h-3.5" /> Selected: {uploadDocFile.name} ({(uploadDocFile.size / 1024).toFixed(0)} KB)
-                            </div>
-                          )}
-                        </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1540,7 +2059,11 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                     {filteredMyServices.length === 0 ? (
                       <tr>
                         <td colSpan={6} className="py-12 text-center text-slate-400 text-xs">
-                          No service filings currently assigned to you. Click "General Task Pool" above to pick up unassigned tasks!
+                          {selectedStatusFilter === 'COMPLETED'
+                            ? 'No completed filings found in your history.'
+                            : selectedStatusFilter === 'ACTIVE'
+                            ? 'All your assigned service filings are completed! Pick up new tasks from the General Task Pool.'
+                            : 'No service filings matching the selected filter.'}
                         </td>
                       </tr>
                     ) : (
@@ -1593,8 +2116,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                     })
                                   }
                                   className={`w-full text-xs font-bold rounded-lg px-2.5 py-1.5 border focus:outline-none ${
-                                    svc.status === 'COMPLETED' || svc.status === 'APPROVED'
+                                    svc.status === 'COMPLETED'
                                       ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                      : svc.status === 'APPROVED'
+                                      ? 'bg-teal-50 text-teal-800 border-teal-300'
                                       : svc.status === 'GOVT_SUBMITTED'
                                       ? 'bg-blue-50 text-blue-800 border-blue-300'
                                       : svc.status === 'QUERY_RAISED'
@@ -1608,7 +2133,8 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                   <option value="IN_PROGRESS">In Progress (Drafting)</option>
                                   <option value="GOVT_SUBMITTED">Govt / MCA Submitted</option>
                                   <option value="QUERY_RAISED">Query / Resubmission</option>
-                                  <option value="COMPLETED">Completed / Approved</option>
+                                  <option value="APPROVED">APPROVED (Authority Cleared)</option>
+                                  <option value="COMPLETED">COMPLETED (Filing Finished)</option>
                                 </select>
                               </td>
 
@@ -1705,7 +2231,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                       </button>
                                     </div>
 
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                                       {/* Col 1: Dossier Details */}
                                       <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2.5">
                                         <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider block">
@@ -1776,53 +2302,6 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                               </div>
                                             ))
                                           )}
-                                        </div>
-                                      </div>
-
-                                      {/* Col 3: Upload Document Form */}
-                                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2.5">
-                                        <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider block">
-                                          Attach Document to Deal
-                                        </span>
-                                        <div className="space-y-2">
-                                          <select
-                                            value={uploadDocType}
-                                            onChange={(e) => setUploadDocType(e.target.value)}
-                                            className="w-full bg-white border border-slate-300 rounded px-2 py-1 text-xs text-slate-800"
-                                          >
-                                            {OPS_DOCUMENT_TYPES.map((dt) => (
-                                              <option key={dt.value} value={dt.value}>
-                                                {dt.label}
-                                              </option>
-                                            ))}
-                                          </select>
-
-                                          <input
-                                            type="text"
-                                            value={uploadDocTitle}
-                                            onChange={(e) => setUploadDocTitle(e.target.value)}
-                                            placeholder="Document Title (optional)"
-                                            className="w-full bg-white border border-slate-300 rounded px-2 py-1 text-xs text-slate-800"
-                                          />
-
-                                          <div className="flex items-center gap-1.5">
-                                            <input
-                                              type="file"
-                                              accept="application/pdf,image/*,.doc,.docx,.xls,.xlsx"
-                                              onChange={(e) => setUploadDocFile(e.target.files?.[0] || null)}
-                                              className="text-xs text-slate-700 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[11px] file:font-semibold file:bg-slate-900 file:text-white"
-                                            />
-                                          </div>
-
-                                          <button
-                                            type="button"
-                                            onClick={() => handleUploadDocument(svcDeal.id)}
-                                            disabled={!uploadDocFile || isUploadingDoc}
-                                            className="w-full py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded text-xs font-semibold flex items-center justify-center gap-1 transition disabled:opacity-40"
-                                          >
-                                            <UploadCloud className="w-3.5 h-3.5" />
-                                            <span>{isUploadingDoc ? 'Uploading...' : 'Upload & Attach'}</span>
-                                          </button>
                                         </div>
                                       </div>
                                     </div>
@@ -1946,19 +2425,41 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
         <div className="space-y-4">
           {/* Top Operational Metrics */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
-            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+            <div
+              onClick={() => {
+                setSelectedStatusFilter('ACTIVE');
+                setSelectedUrgencyFilter('ALL');
+                setSelectedAssigneeFilter('ALL');
+              }}
+              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${
+                selectedStatusFilter === 'ACTIVE' && selectedAssigneeFilter === 'ALL' && selectedUrgencyFilter === 'ALL'
+                  ? 'bg-slate-50 border-slate-900 ring-1 ring-slate-900'
+                  : 'bg-white border-slate-200 hover:border-slate-300'
+              }`}
+            >
               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-                Total Services in Filing
+                Active Services in Filing
               </span>
               <div className="text-xl font-extrabold text-slate-900 mt-0.5">
-                {allServices.length} <span className="text-xs font-normal text-slate-500">across {deals.length} deals</span>
+                {allServices.filter((s) => s.status !== 'COMPLETED').length}{' '}
+                <span className="text-xs font-normal text-slate-500">active filings</span>
               </div>
               <div className="text-[11px] text-slate-500 mt-1">
-                Value: ₹{allServices.reduce((sum, s) => sum + Number(s.serviceFee || 0), 0).toLocaleString('en-IN')}
+                Value: ₹{allServices.filter((s) => s.status !== 'COMPLETED').reduce((sum, s) => sum + Number(s.serviceFee || 0), 0).toLocaleString('en-IN')}
               </div>
             </div>
 
-            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+            <div
+              onClick={() => {
+                setSelectedAssigneeFilter(selectedAssigneeFilter === 'UNASSIGNED' ? 'ALL' : 'UNASSIGNED');
+                setSelectedStatusFilter('ACTIVE');
+              }}
+              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${
+                selectedAssigneeFilter === 'UNASSIGNED'
+                  ? 'bg-amber-50/50 border-amber-500 ring-1 ring-amber-500'
+                  : 'bg-white border-slate-200 hover:border-slate-300'
+              }`}
+            >
               <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider block">
                 Unassigned Tasks
               </span>
@@ -1970,7 +2471,16 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
               </div>
             </div>
 
-            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+            <div
+              onClick={() => {
+                setSelectedUrgencyFilter(selectedUrgencyFilter === 'OVERDUE' ? 'ALL' : 'OVERDUE');
+              }}
+              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${
+                selectedUrgencyFilter === 'OVERDUE'
+                  ? 'bg-rose-50/50 border-rose-500 ring-1 ring-rose-500'
+                  : 'bg-white border-slate-200 hover:border-slate-300'
+              }`}
+            >
               <span className="text-[10px] font-bold text-rose-700 uppercase tracking-wider block">
                 Overdue / Urgent Tasks
               </span>
@@ -1982,20 +2492,31 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
               </div>
             </div>
 
-            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+            <div
+              onClick={() => {
+                setSelectedStatusFilter(selectedStatusFilter === 'COMPLETED' ? 'ACTIVE' : 'COMPLETED');
+                setSelectedUrgencyFilter('ALL');
+                setSelectedAssigneeFilter('ALL');
+              }}
+              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${
+                selectedStatusFilter === 'COMPLETED'
+                  ? 'bg-emerald-50/50 border-emerald-500 ring-1 ring-emerald-500'
+                  : 'bg-white border-slate-200 hover:border-slate-300'
+              }`}
+            >
               <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">
                 Completed & Cleared
               </span>
               <div className="text-xl font-extrabold text-emerald-600 mt-0.5">
-                {allServices.filter((s) => s.status === 'COMPLETED' || s.status === 'APPROVED').length}
+                {allServices.filter((s) => s.status === 'COMPLETED').length}
               </div>
               <div className="text-[11px] text-emerald-700/80 mt-1">
-                Ready for Deliverable Release
+                Cleared from active queue
               </div>
             </div>
           </div>
 
-          {/* Controls Bar: Search, Sector Filter, Status Filter, Urgency Filter, Export */}
+          {/* Controls Bar: Search, Sector Filter, Status Filter, Urgency Filter, Assignee Filter, Export */}
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col lg:flex-row items-center justify-between gap-3">
             <div className="flex flex-1 flex-wrap items-center gap-2.5 w-full">
               {/* Search */}
@@ -2009,6 +2530,21 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-800"
                 />
               </div>
+
+              {/* Status Filter */}
+              <select
+                value={selectedStatusFilter}
+                onChange={(e) => setSelectedStatusFilter(e.target.value)}
+                className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 font-medium focus:outline-none focus:border-slate-800"
+              >
+                <option value="ACTIVE">Active Filings (Hide Completed)</option>
+                <option value="ALL">All Statuses (Include Completed)</option>
+                <option value="PENDING">Pending Allocation</option>
+                <option value="IN_PROGRESS">In Progress</option>
+                <option value="GOVT_SUBMITTED">Govt Submitted</option>
+                <option value="QUERY_RAISED">Query Raised</option>
+                <option value="COMPLETED">Completed History</option>
+              </select>
 
               {/* Sector Filter */}
               <select
@@ -2074,7 +2610,9 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                     <th className="py-3 px-4">Deal / Client</th>
                     <th className="py-3 px-4">Service Task & Sector</th>
                     <th className="py-3 px-4">Assigned Specialist</th>
-                    <th className="py-3 px-4">Target Deadline</th>
+                    <th className="py-3 px-4">
+                      Target Deadline <span className="text-rose-500 font-extrabold">*</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
@@ -2128,11 +2666,28 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                           <td className="py-3.5 px-4 min-w-[200px]">
                             <select
                               value={svc.assignedOpsUserId || ''}
-                              onChange={(e) =>
+                              onChange={(e) => {
+                                const newSpecialistId = e.target.value || null;
+                                if (newSpecialistId && !svc.targetCompletionDate) {
+                                  toast.warning(
+                                    'Target Deadline is mandatory. Please select a deadline date before or when assigning a specialist.',
+                                    'Target Deadline Mandatory'
+                                  );
+                                  setFeedback({
+                                    type: 'error',
+                                    message: 'Target Deadline is mandatory for this service. Please set a target deadline date.',
+                                  });
+                                  const dateInput = document.getElementById(`deadline-${svc.id}`);
+                                  if (dateInput) {
+                                    dateInput.focus();
+                                    dateInput.showPicker?.();
+                                  }
+                                  return;
+                                }
                                 handleUpdateService(svc.dealId, svc.id, {
-                                  assignedOpsUserId: e.target.value || null,
-                                })
-                              }
+                                  assignedOpsUserId: newSpecialistId,
+                                });
+                              }}
                               disabled={actionLoading}
                               className={`w-full text-xs font-semibold rounded-lg px-2.5 py-1.5 border focus:outline-none ${
                                 svc.assignedOpsUserId
@@ -2175,20 +2730,35 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                           {/* Target Deadline */}
                           <td className="py-3.5 px-4 min-w-[150px]">
                             <input
+                              id={`deadline-${svc.id}`}
                               type="date"
+                              required
                               defaultValue={
                                 svc.targetCompletionDate
                                   ? new Date(svc.targetCompletionDate).toISOString().split('T')[0]
                                   : ''
                               }
-                              onChange={(e) =>
+                              onChange={(e) => {
+                                const newDate = e.target.value;
+                                if (!newDate) {
+                                  toast.warning('Target Deadline is mandatory and cannot be cleared.', 'Target Deadline Required');
+                                  return;
+                                }
                                 handleUpdateService(svc.dealId, svc.id, {
-                                  targetCompletionDate: e.target.value || null,
-                                })
-                              }
-                              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-800 focus:bg-white focus:border-slate-800 focus:outline-none"
+                                  targetCompletionDate: newDate,
+                                });
+                              }}
+                              className={`w-full rounded-lg px-2 py-1 text-xs focus:outline-none ${
+                                !svc.targetCompletionDate
+                                  ? 'bg-rose-50 border-2 border-rose-300 text-rose-900 font-bold focus:border-rose-500'
+                                  : 'bg-slate-50 border border-slate-200 text-slate-800 focus:bg-white focus:border-slate-800'
+                              }`}
                             />
-                            {svc.targetCompletionDate && (
+                            {!svc.targetCompletionDate ? (
+                              <div className="text-[10px] text-rose-600 font-bold mt-1 flex items-center gap-1">
+                                <AlertCircle className="w-3 h-3 text-rose-500" /> Deadline Mandatory *
+                              </div>
+                            ) : (
                               <div className="mt-1">
                                 <span
                                   className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
@@ -2542,188 +3112,23 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                   );
                 })()}
 
-                {/* DEAL DOSSIER: ATTACHED DOCUMENTS & VAULT */}
-                <div className="bg-white border border-slate-200 rounded-xl p-4.5 space-y-3.5 shadow-xs">
-                  <div className="flex items-center justify-between">
+                {/* DEAL DOSSIER: ATTACHED DOCUMENTS & VAULT (CATEGORIZED & TRANCHE-WISE) */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4.5 space-y-4 shadow-xs">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-200">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
                       <FolderOpen className="w-4 h-4 text-cyan-600" /> Deal Dossier Documents ({activeDossierDeal.documents?.length || 0})
                     </h4>
-                    <div className="flex items-center gap-2.5">
-                      <span className="hidden sm:inline text-[11px] text-slate-500">
-                        KYC, Forms, Agreements, & Deliverables
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const fileInput = document.getElementById('ops-doc-file-input');
-                          if (fileInput) fileInput.click();
-                        }}
-                        className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-md text-xs font-semibold flex items-center gap-1 transition shadow-xs cursor-pointer"
-                        title="Attach Document to Dossier"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>Add Document</span>
-                      </button>
-                    </div>
+                    <span className="text-[11px] text-slate-500 font-medium">
+                      Categorized Dossier & Payment Tranches
+                    </span>
                   </div>
 
-                  <div className="space-y-2">
-                    {!activeDossierDeal.documents || activeDossierDeal.documents.length === 0 ? (
-                      <div className="p-6 text-center text-slate-400 text-xs border border-dashed border-slate-200 rounded-lg">
-                        <Paperclip className="w-5 h-5 mx-auto mb-1 text-slate-300" />
-                        No files currently attached to this deal.
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        {activeDossierDeal.documents.map((doc) => {
-                          const isPaymentProofVerified = (() => {
-                            if (doc.documentType !== 'PAYMENT_PROOF') return false;
-                            const verifiedPayments = (activeDossierDeal.payments || []).filter((p) => p.status === 'VERIFIED');
-                            if (verifiedPayments.length === 0) return false;
-                            if ((activeDossierDeal.payments || []).length > 0 && (activeDossierDeal.payments || []).every((p) => p.status === 'VERIFIED')) return true;
-                            const paymentProofDocs = (activeDossierDeal.documents || []).filter((d) => d.documentType === 'PAYMENT_PROOF');
-                            const docIdx = paymentProofDocs.findIndex((d) => d.id === doc.id);
-                            if (docIdx !== -1 && docIdx < verifiedPayments.length) return true;
-                            return verifiedPayments.some((p) => {
-                              if (p.paymentProofUrl && p.paymentProofUrl === doc.fileUrl) return true;
-                              if (p.transactionReference && doc.title && doc.title.toLowerCase().includes(p.transactionReference.toLowerCase())) return true;
-                              if (!doc.title) return false;
-                              const tLower = doc.title.toLowerCase();
-                              const trNum = String(p.trancheNumber || '');
-                              return (
-                                (trNum && (
-                                  tLower.includes('tranche #' + trNum) ||
-                                  tLower.includes('tranche ' + trNum) ||
-                                  tLower.includes('tranche-' + trNum) ||
-                                  tLower.includes('tranche_' + trNum) ||
-                                  tLower.includes('tranche' + trNum) ||
-                                  tLower.includes('#' + trNum)
-                                )) ||
-                                (p.trancheNumber === 1 && !tLower.includes('tranche'))
-                              );
-                            });
-                          })();
-                          const isDocVerified = Boolean(doc.isVerified || isPaymentProofVerified);
-
-                          return (
-                          <div
-                            key={doc.id}
-                            className="p-3 bg-slate-50/80 hover:bg-slate-100/70 border border-slate-200 rounded-xl flex items-center justify-between text-xs transition"
-                          >
-                            <div className="flex items-center space-x-2.5 truncate mr-2">
-                              <div className="p-2 bg-white border border-slate-200 text-slate-700 rounded-lg shadow-xs flex-shrink-0">
-                                <FileText className="w-4 h-4 text-indigo-600" />
-                              </div>
-                              <div className="truncate">
-                                <div className="font-semibold text-slate-900 truncate" title={doc.title}>
-                                  {doc.title}
-                                </div>
-                                <div className="text-[10px] text-slate-500 font-mono mt-0.5 truncate flex items-center gap-1.5 flex-wrap">
-                                  <span className="px-1.5 py-0.2 rounded font-sans font-bold bg-white text-slate-700 border border-slate-200">
-                                    {doc.documentType}
-                                  </span>
-                                  {doc.fileSize && <span>{(doc.fileSize / 1024).toFixed(0)} KB</span>}
-                                  {isDocVerified && (
-                                    <span className="text-emerald-700 font-bold font-sans whitespace-nowrap">✓ Verified</span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center space-x-1.5 flex-shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => handlePreviewDocument(doc.id)}
-                                className="px-2.5 py-1 bg-white hover:bg-slate-200/80 text-slate-700 rounded-md border border-slate-300 text-xs font-semibold flex items-center gap-1 transition shadow-xs"
-                                title="Preview Document"
-                              >
-                                <Eye className="w-3.5 h-3.5" /> Preview
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteDocument(doc.id, doc.title)}
-                                className="p-1 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded transition"
-                                title="Delete Document"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* ATTACH NEW DOCUMENT TO DEAL */}
-                <div className="bg-white border border-slate-200 rounded-xl p-4.5 space-y-3.5 shadow-xs">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                    <UploadCloud className="w-4 h-4 text-emerald-600" /> Attach Document to Dossier
-                  </h4>
-
-                  <div className="p-3.5 bg-slate-50/70 border border-slate-200 rounded-lg space-y-3 text-xs">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-xs font-semibold text-slate-700 block mb-1">
-                          Document Category
-                        </label>
-                        <select
-                          value={uploadDocType}
-                          onChange={(e) => setUploadDocType(e.target.value)}
-                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-slate-800"
-                        >
-                          {OPS_DOCUMENT_TYPES.map((dt) => (
-                            <option key={dt.value} value={dt.value}>
-                              {dt.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="text-xs font-semibold text-slate-700 block mb-1">
-                          Document Title / Note (Optional)
-                        </label>
-                        <input
-                          type="text"
-                          value={uploadDocTitle}
-                          onChange={(e) => setUploadDocTitle(e.target.value)}
-                          placeholder="e.g. SPICe+ Part B Filing Acknowledgment"
-                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-slate-800"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-semibold text-slate-700 block mb-1">
-                        Select File (PDF, DOCX, Images up to 50MB)
-                      </label>
-                      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
-                        <input
-                          type="file"
-                          accept="application/pdf,image/*,.doc,.docx,.xls,.xlsx"
-                          onChange={(e) => setUploadDocFile(e.target.files?.[0] || null)}
-                          className="text-xs text-slate-700 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-slate-900 file:text-white hover:file:bg-slate-800"
-                        />
-
-                        <button
-                          type="button"
-                          onClick={() => handleUploadDocument(activeDossierDeal.id)}
-                          disabled={!uploadDocFile || isUploadingDoc}
-                          className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition disabled:opacity-40 whitespace-nowrap self-stretch sm:self-auto justify-center"
-                        >
-                          <UploadCloud className="w-4 h-4" />
-                          <span>{isUploadingDoc ? 'Uploading...' : 'Attach & Upload'}</span>
-                        </button>
-                      </div>
-                      {uploadDocFile && (
-                        <div className="text-xs text-emerald-700 font-medium flex items-center gap-1.5 mt-2">
-                          <Check className="w-3.5 h-3.5" /> Selected: {uploadDocFile.name} ({(uploadDocFile.size / 1024).toFixed(0)} KB)
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                  <DealDossierDocumentsView
+                    deal={activeDossierDeal}
+                    isManager={isManager}
+                    onPreview={handlePreviewDocument}
+                    onDelete={handleDeleteDocument}
+                  />
                 </div>
 
                 {/* DELIVERABLE CERTIFICATE UPLOAD & STAGE ACTIONS */}
@@ -2732,54 +3137,60 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                     <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
                       <FileCheck className="w-4 h-4 text-emerald-600" /> Deliverable Certificate & Completion Gate
                     </h4>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const fileInput = document.getElementById('deliverable-file-input');
-                        if (fileInput) fileInput.click();
-                      }}
-                      className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 transition shadow-xs cursor-pointer flex-shrink-0"
-                      title="Upload & Attach Final Deliverable Certificate"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Add Documents</span>
-                    </button>
                   </div>
 
-                  <div className="p-3.5 bg-slate-50/70 border border-slate-200 rounded-lg space-y-2">
-                    <label className="text-xs font-semibold text-slate-800 block">
-                      Upload Final Deliverable (Certificate of Incorporation, License, Registration PDF):
-                    </label>
-                    <input
-                      id="deliverable-file-input"
-                      type="file"
-                      accept="application/pdf,image/*,.doc,.docx"
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          setDeliverableFile(file);
-                          await handleDirectDeliverableUpload(activeDossierDeal.id, file);
-                        }
-                      }}
-                      className="text-xs text-slate-700 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-slate-900 file:text-white hover:file:bg-slate-800"
-                    />
-                    {deliverableFile && (
-                      <div className="text-xs text-emerald-700 font-medium flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mt-2 p-2 bg-emerald-50 rounded-md border border-emerald-200">
-                        <div className="flex items-center gap-1.5">
-                          <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                          <span>Selected: {deliverableFile.name} ({(deliverableFile.size / 1024).toFixed(0)} KB)</span>
+                  <div className="p-3.5 bg-slate-50/70 border border-slate-200 rounded-lg space-y-3">
+                    {/* List of Attached Deliverable Certificates */}
+                    {(() => {
+                      const dossierDeliverables = (activeDossierDeal.documents || []).filter(
+                        (d) =>
+                          d.documentType === 'FINAL_DELIVERABLE_CERTIFICATE' ||
+                          d.documentType === 'DELIVERABLE_CERTIFICATE'
+                      );
+                      if (dossierDeliverables.length === 0) {
+                        return (
+                          <div className="p-3 bg-white border border-dashed border-slate-200 rounded-lg text-center text-xs text-slate-400">
+                            No deliverable certificates submitted by operations team yet.
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="space-y-2">
+                          <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
+                            Submitted Deliverable Certificates ({dossierDeliverables.length})
+                          </span>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {dossierDeliverables.map((doc) => (
+                              <div
+                                key={doc.id}
+                                className="p-2.5 bg-white border border-emerald-200 rounded-lg flex items-center justify-between gap-2 shadow-2xs"
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <FileCheck className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-bold text-slate-900 truncate" title={doc.title}>
+                                      {doc.title}
+                                    </p>
+                                    <span className="text-[10px] text-emerald-700 font-semibold flex items-center gap-1">
+                                      <Check className="w-3 h-3 text-emerald-600" /> Deliverable on Record
+                                    </span>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handlePreviewDocument(doc)}
+                                  className="px-2 py-1 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded text-[11px] font-semibold flex items-center gap-1 cursor-pointer flex-shrink-0"
+                                >
+                                  <Eye className="w-3 h-3" /> Preview
+                                </button>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleDirectDeliverableUpload(activeDossierDeal.id)}
-                          disabled={isUploadingDoc}
-                          className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded text-xs font-semibold flex items-center gap-1 shadow-xs transition disabled:opacity-50"
-                        >
-                          <UploadCloud className="w-3.5 h-3.5" />
-                          <span>{isUploadingDoc ? 'Uploading...' : 'Upload Certificate'}</span>
-                        </button>
-                      </div>
-                    )}
+                      );
+                    })()}
+
                     {hasDeliverable && (
                       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pt-2 border-t border-slate-200">
                         <div className="text-xs text-emerald-800 font-semibold flex items-center gap-1.5">

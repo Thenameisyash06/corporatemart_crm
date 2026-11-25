@@ -428,7 +428,8 @@ export default function AdminDashboard({
       const clientsData = clientsResult.status === 'fulfilled' ? clientsResult.value.data?.clients || [] : [];
       
       if (leadsResult.status === 'fulfilled' && leadsResult.value.data) {
-        setLmsCount((leadsResult.value.data.leads || []).length);
+        const totalLeads = leadsResult.value.data.pagination?.total ?? leadsResult.value.data.analytics?.totalLeads ?? (leadsResult.value.data.leads || []).length;
+        setLmsCount(totalLeads);
         setLmsAnalytics(leadsResult.value.data.analytics || null);
       }
 
@@ -510,6 +511,21 @@ export default function AdminDashboard({
 
   useEffect(() => {
     fetchAdminData();
+
+    const handleLmsChanged = () => {
+      api.get('/leads').then((res) => {
+        if (res.data) {
+          const totalLeads = res.data.pagination?.total ?? res.data.analytics?.totalLeads ?? (res.data.leads || []).length;
+          setLmsCount(totalLeads);
+          setLmsAnalytics(res.data.analytics || null);
+        }
+      }).catch(() => {});
+    };
+
+    window.addEventListener('lms_leads_changed', handleLmsChanged);
+    return () => {
+      window.removeEventListener('lms_leads_changed', handleLmsChanged);
+    };
   }, []);
 
   // If parent deals update, keep fallback in sync

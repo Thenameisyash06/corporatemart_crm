@@ -1684,7 +1684,20 @@ router.patch('/:id/services/:serviceId', authenticateToken, requireRoles('OPERAT
 
     const updateData = {};
     if (assignedOpsUserId !== undefined) {
-      updateData.assignedOpsUserId = await resolveOpsUserId(assignedOpsUserId);
+      const resolvedUserId = await resolveOpsUserId(assignedOpsUserId);
+      if (resolvedUserId) {
+        const effectiveDate = targetCompletionDate !== undefined ? targetCompletionDate : null;
+        if (!effectiveDate) {
+          const currentSvc = await prisma.dealService.findUnique({
+            where: { id: req.params.serviceId },
+            select: { targetCompletionDate: true },
+          });
+          if (!currentSvc?.targetCompletionDate) {
+            return res.status(400).json({ error: 'Target Deadline is mandatory when assigning a specialist.' });
+          }
+        }
+      }
+      updateData.assignedOpsUserId = resolvedUserId;
     }
     if (status !== undefined) {
       updateData.status = status;
@@ -1696,6 +1709,19 @@ router.patch('/:id/services/:serviceId', authenticateToken, requireRoles('OPERAT
       updateData.notes = notes;
     }
     if (targetCompletionDate !== undefined) {
+      const isOpsManager = req.user.role === 'ADMIN' || req.user.email === 'ops@corporatemart.com' || (req.user.fullName || '').toLowerCase().includes('manager');
+      if (req.user.role === 'OPERATIONS' && !isOpsManager) {
+        return res.status(403).json({ error: 'Target completion deadline can only be set or modified by the Operations Manager.' });
+      }
+      if (!targetCompletionDate) {
+        const currentSvc = await prisma.dealService.findUnique({
+          where: { id: req.params.serviceId },
+          select: { assignedOpsUserId: true },
+        });
+        if (currentSvc?.assignedOpsUserId && updateData.assignedOpsUserId !== null) {
+          return res.status(400).json({ error: 'Target Deadline is mandatory and cannot be cleared for an assigned service.' });
+        }
+      }
       updateData.targetCompletionDate = targetCompletionDate ? new Date(targetCompletionDate) : null;
     }
     if (completedAt !== undefined) {
@@ -1747,6 +1773,7 @@ router.patch('/:id/services/:serviceId', authenticateToken, requireRoles('OPERAT
         event: 'INDIVIDUAL_SERVICE_COMPLETED',
         serviceName: updatedService.serviceName,
         notes: notes || undefined,
+        attachCertificates: true,
       }).catch((e) => console.error('[EmailService] Service milestone email error:', e));
     }
 
