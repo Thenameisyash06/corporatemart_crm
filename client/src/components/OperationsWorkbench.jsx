@@ -311,11 +311,10 @@ function DealDossierDocumentsView({ deal, isManager, onPreview, onDelete }) {
               Received: <strong className="font-bold">₹{amountReceived.toLocaleString('en-IN')}</strong>
             </span>
             <span
-              className={`px-2.5 py-1 rounded-md border font-medium shadow-2xs ${
-                pendingAmount > 0
+              className={`px-2.5 py-1 rounded-md border font-medium shadow-2xs ${pendingAmount > 0
                   ? 'bg-amber-50 border-amber-300 text-amber-900 font-bold'
                   : 'bg-slate-100 border-slate-200 text-slate-600'
-              }`}
+                }`}
             >
               Pending: <strong className={pendingAmount > 0 ? 'text-amber-700' : 'text-slate-700'}>
                 ₹{pendingAmount.toLocaleString('en-IN')}
@@ -349,13 +348,12 @@ function DealDossierDocumentsView({ deal, isManager, onPreview, onDelete }) {
                 return (
                   <div
                     key={p.id}
-                    className={`p-3.5 rounded-xl border transition ${
-                      isVerified
+                    className={`p-3.5 rounded-xl border transition ${isVerified
                         ? 'bg-emerald-50/80 border-emerald-300 shadow-2xs'
                         : isRejected
-                        ? 'bg-rose-50/60 border-rose-200'
-                        : 'bg-amber-50/60 border-amber-200'
-                    }`}
+                          ? 'bg-rose-50/60 border-rose-200'
+                          : 'bg-amber-50/60 border-amber-200'
+                      }`}
                   >
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                       <div>
@@ -367,13 +365,12 @@ function DealDossierDocumentsView({ deal, isManager, onPreview, onDelete }) {
                             {p.paymentMode}
                           </span>
                           <span
-                            className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border shadow-xs ${
-                              isVerified
+                            className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border shadow-xs ${isVerified
                                 ? 'bg-emerald-700 text-white border-emerald-800'
                                 : isRejected
-                                ? 'bg-rose-700 text-white border-rose-800'
-                                : 'bg-amber-100 text-amber-900 border-amber-300'
-                            }`}
+                                  ? 'bg-rose-700 text-white border-rose-800'
+                                  : 'bg-amber-100 text-amber-900 border-amber-300'
+                              }`}
                           >
                             {isVerified ? '✓ VERIFIED' : p.status ? p.status.replace(/_/g, ' ') : 'PENDING'}
                           </span>
@@ -782,7 +779,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
       } else if (selectedStatusFilter !== 'ALL' && statusUpper !== selectedStatusFilter.toUpperCase()) {
         return false;
       }
-      
+
       // Assignee Filter
       if (selectedAssigneeFilter === 'UNASSIGNED') {
         if (s.assignedOpsUserId) return false;
@@ -1165,20 +1162,6 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
       setIsUploadingDoc(false);
     }
   };
-      setDeliverableSlots([{ id: Date.now(), file: null, title: '' }]);
-
-      await fetchOpsData();
-      if (onRefreshParent) onRefreshParent();
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to submit deliverables.', 'Upload Error');
-      setFeedback({
-        type: 'error',
-        message: err.response?.data?.error || 'Failed to submit deliverables.',
-      });
-    } finally {
-      setIsUploadingDoc(false);
-    }
-  };
 
   // ---------------------------------------------------------------------------
   // DOCUMENT VAULT & FILE ATTACHMENT HANDLERS
@@ -1294,11 +1277,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                   {isManager ? 'Operations Command & Allocation Suite' : `Specialist Execution Desk — ${currentUser?.fullName || 'Filing Portal'}`}
                 </h2>
                 <span
-                  className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border ${
-                    isManager
+                  className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border ${isManager
                       ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
                       : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                  }`}
+                    }`}
                 >
                   {isManager ? 'Manager Portal' : specialistSector?.name || 'Specialist Desk'}
                 </span>
@@ -1318,11 +1300,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
             <>
               <button
                 onClick={() => setActiveTab('allocation')}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
-                  activeTab === 'allocation'
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${activeTab === 'allocation'
                     ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
                     : 'text-slate-600 hover:text-slate-900'
-                }`}
+                  }`}
               >
                 <Briefcase className="w-3.5 h-3.5 text-indigo-600" />
                 <span>Service Allocation Hub</span>
@@ -1333,11 +1314,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
               <button
                 onClick={() => setActiveTab('team')}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
-                  activeTab === 'team'
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${activeTab === 'team'
                     ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
                     : 'text-slate-600 hover:text-slate-900'
-                }`}
+                  }`}
               >
                 <Users className="w-3.5 h-3.5 text-emerald-600" />
                 <span>Team & Expertise Capacity</span>
@@ -1348,11 +1328,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
               <button
                 onClick={() => setActiveTab('dossier')}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
-                  activeTab === 'dossier'
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${activeTab === 'dossier'
                     ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
                     : 'text-slate-600 hover:text-slate-900'
-                }`}
+                  }`}
               >
                 <FileCheck className="w-3.5 h-3.5 text-cyan-600" />
                 <span>Deal Dossier & Dispatch</span>
@@ -1365,11 +1344,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
             <>
               <button
                 onClick={() => setActiveTab('my_tasks')}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
-                  activeTab === 'my_tasks'
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${activeTab === 'my_tasks'
                     ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
                     : 'text-slate-600 hover:text-slate-900'
-                }`}
+                  }`}
               >
                 <Briefcase className="w-3.5 h-3.5 text-emerald-600" />
                 <span>My Assigned Tasks & Deal Dossier</span>
@@ -1380,11 +1358,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
               <button
                 onClick={() => setActiveTab('pool')}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
-                  activeTab === 'pool'
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${activeTab === 'pool'
                     ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
                     : 'text-slate-600 hover:text-slate-900'
-                }`}
+                  }`}
               >
                 <Layers className="w-3.5 h-3.5 text-amber-600" />
                 <span>General Task Pool</span>
@@ -1399,11 +1376,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
       {feedback && (
         <div
-          className={`p-3 rounded-lg text-xs flex items-center justify-between border ${
-            feedback.type === 'success'
+          className={`p-3 rounded-lg text-xs flex items-center justify-between border ${feedback.type === 'success'
               ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
               : 'bg-rose-50 border-rose-200 text-rose-800'
-          }`}
+            }`}
         >
           <span>{feedback.message}</span>
           <button onClick={() => setFeedback(null)} className="font-bold ml-2">✕</button>
@@ -1411,7 +1387,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
       )}
 
       {/* ----------------------------------------------------------------------- */}
-      
+
       {/* ----------------------------------------------------------------------- */}
       {/* TAB: SPECIALIST MY ASSIGNED TASKS */}
       {/* ----------------------------------------------------------------------- */}
@@ -1421,11 +1397,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
             <div
               onClick={() => setSelectedStatusFilter('ACTIVE')}
-              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${
-                selectedStatusFilter === 'ACTIVE'
+              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${selectedStatusFilter === 'ACTIVE'
                   ? 'bg-slate-50 border-slate-900 ring-1 ring-slate-900'
                   : 'bg-white border-slate-200 hover:border-slate-300'
-              }`}
+                }`}
             >
               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
                 My Active Filings
@@ -1441,11 +1416,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
             <div
               onClick={() => setSelectedStatusFilter('IN_PROGRESS')}
-              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${
-                selectedStatusFilter === 'IN_PROGRESS'
+              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${selectedStatusFilter === 'IN_PROGRESS'
                   ? 'bg-blue-50/50 border-blue-500 ring-1 ring-blue-500'
                   : 'bg-white border-slate-200 hover:border-slate-300'
-              }`}
+                }`}
             >
               <span className="text-[10px] font-bold text-blue-700 uppercase tracking-wider block">
                 In Progress / Submitted
@@ -1460,11 +1434,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
             <div
               onClick={() => setSelectedUrgencyFilter(selectedUrgencyFilter === 'OVERDUE' ? 'ALL' : 'OVERDUE')}
-              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${
-                selectedUrgencyFilter === 'OVERDUE'
+              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${selectedUrgencyFilter === 'OVERDUE'
                   ? 'bg-rose-50/50 border-rose-500 ring-1 ring-rose-500'
                   : 'bg-white border-slate-200 hover:border-slate-300'
-              }`}
+                }`}
             >
               <span className="text-[10px] font-bold text-rose-700 uppercase tracking-wider block">
                 Overdue / Urgent
@@ -1479,11 +1452,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
             <div
               onClick={() => setSelectedStatusFilter(selectedStatusFilter === 'COMPLETED' ? 'ACTIVE' : 'COMPLETED')}
-              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${
-                selectedStatusFilter === 'COMPLETED'
+              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${selectedStatusFilter === 'COMPLETED'
                   ? 'bg-emerald-50/50 border-emerald-500 ring-1 ring-emerald-500'
                   : 'bg-white border-slate-200 hover:border-slate-300'
-              }`}
+                }`}
             >
               <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">
                 Completed & Cleared
@@ -1541,11 +1513,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                 <button
                   type="button"
                   onClick={() => setViewMode('workspace')}
-                  className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${
-                    viewMode === 'workspace'
+                  className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${viewMode === 'workspace'
                       ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
                       : 'text-slate-600 hover:text-slate-900'
-                  }`}
+                    }`}
                   title="Workspace View"
                 >
                   <LayoutGrid className="w-3.5 h-3.5 text-indigo-600" />
@@ -1554,11 +1525,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                 <button
                   type="button"
                   onClick={() => setViewMode('table')}
-                  className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${
-                    viewMode === 'table'
+                  className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${viewMode === 'table'
                       ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
                       : 'text-slate-600 hover:text-slate-900'
-                  }`}
+                    }`}
                   title="Table View"
                 >
                   <List className="w-3.5 h-3.5 text-emerald-600" />
@@ -1607,28 +1577,26 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                         <div
                           key={svc.id}
                           onClick={() => setSelectedTaskId(svc.id)}
-                          className={`p-3 rounded-xl cursor-pointer transition border text-left ${
-                            isSelected
+                          className={`p-3 rounded-xl cursor-pointer transition border text-left ${isSelected
                               ? 'bg-slate-50 border-slate-900 shadow-xs ring-1 ring-slate-900/20'
                               : 'bg-white border-slate-200/70 hover:bg-slate-50 hover:border-slate-300'
-                          }`}
+                            }`}
                         >
                           <div className="flex items-center justify-between gap-1.5">
                             <span className="font-mono text-[11px] font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
                               {svc.dealCode}
                             </span>
                             <span
-                              className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
-                                svc.status === 'COMPLETED' || svc.status === 'APPROVED'
+                              className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${svc.status === 'COMPLETED' || svc.status === 'APPROVED'
                                   ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                                   : svc.status === 'GOVT_SUBMITTED'
-                                  ? 'bg-blue-50 text-blue-800 border-blue-200'
-                                  : svc.status === 'QUERY_RAISED'
-                                  ? 'bg-rose-50 text-rose-800 border-rose-200'
-                                  : svc.status === 'IN_PROGRESS'
-                                  ? 'bg-amber-50 text-amber-800 border-amber-200'
-                                  : 'bg-slate-100 text-slate-700 border-slate-200'
-                              }`}
+                                    ? 'bg-blue-50 text-blue-800 border-blue-200'
+                                    : svc.status === 'QUERY_RAISED'
+                                      ? 'bg-rose-50 text-rose-800 border-rose-200'
+                                      : svc.status === 'IN_PROGRESS'
+                                        ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                        : 'bg-slate-100 text-slate-700 border-slate-200'
+                                }`}
                             >
                               {svc.status?.replace(/_/g, ' ')}
                             </span>
@@ -1646,13 +1614,12 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                               {svc.serviceName}
                             </span>
                             <span
-                              className={`px-1.5 py-0.5 rounded font-bold text-[10px] border ${
-                                svc.isOverdue
+                              className={`px-1.5 py-0.5 rounded font-bold text-[10px] border ${svc.isOverdue
                                   ? 'bg-rose-50 text-rose-700 border-rose-200'
                                   : svc.daysLeft !== null && svc.daysLeft <= 2
-                                  ? 'bg-amber-50 text-amber-800 border-amber-200'
-                                  : 'bg-slate-50 text-slate-600 border-slate-200'
-                              }`}
+                                    ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                    : 'bg-slate-50 text-slate-600 border-slate-200'
+                                }`}
                             >
                               {svc.deadlineStatus}
                             </span>
@@ -1739,19 +1706,18 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                               })
                             }
                             disabled={actionLoading}
-                            className={`w-full text-xs font-bold rounded-lg px-2.5 py-1.5 border focus:outline-none ${
-                              activeTask.status === 'COMPLETED'
+                            className={`w-full text-xs font-bold rounded-lg px-2.5 py-1.5 border focus:outline-none ${activeTask.status === 'COMPLETED'
                                 ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
                                 : activeTask.status === 'APPROVED'
-                                ? 'bg-teal-50 text-teal-800 border-teal-300'
-                                : activeTask.status === 'GOVT_SUBMITTED'
-                                ? 'bg-blue-50 text-blue-800 border-blue-300'
-                                : activeTask.status === 'QUERY_RAISED'
-                                ? 'bg-rose-50 text-rose-800 border-rose-300'
-                                : activeTask.status === 'IN_PROGRESS'
-                                ? 'bg-amber-50 text-amber-800 border-amber-300'
-                                : 'bg-white text-slate-700 border-slate-300'
-                            }`}
+                                  ? 'bg-teal-50 text-teal-800 border-teal-300'
+                                  : activeTask.status === 'GOVT_SUBMITTED'
+                                    ? 'bg-blue-50 text-blue-800 border-blue-300'
+                                    : activeTask.status === 'QUERY_RAISED'
+                                      ? 'bg-rose-50 text-rose-800 border-rose-300'
+                                      : activeTask.status === 'IN_PROGRESS'
+                                        ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                        : 'bg-white text-slate-700 border-slate-300'
+                              }`}
                           >
                             <option value="PENDING">PENDING (Not Started)</option>
                             <option value="IN_PROGRESS">IN_PROGRESS (Drafting)</option>
@@ -1790,19 +1756,18 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                               <Calendar className="w-3.5 h-3.5 text-slate-500" />
                               {activeTask.targetCompletionDate
                                 ? new Date(activeTask.targetCompletionDate).toLocaleDateString('en-IN', {
-                                    day: '2-digit',
-                                    month: 'short',
-                                    year: 'numeric',
-                                  })
+                                  day: '2-digit',
+                                  month: 'short',
+                                  year: 'numeric',
+                                })
                                 : 'Pending Manager Allocation'}
                             </span>
                             {activeTask.targetCompletionDate && (
                               <span
-                                className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                                  new Date(activeTask.targetCompletionDate) < new Date()
+                                className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${new Date(activeTask.targetCompletionDate) < new Date()
                                     ? 'bg-rose-100 text-rose-700'
                                     : 'bg-amber-100 text-amber-800'
-                                }`}
+                                  }`}
                               >
                                 {new Date(activeTask.targetCompletionDate) < new Date()
                                   ? 'Overdue'
@@ -1930,11 +1895,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                           type="button"
                           onClick={handleAddDeliverableSlot}
                           disabled={activeTask.status !== 'COMPLETED'}
-                          className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition flex-shrink-0 ${
-                            activeTask.status === 'COMPLETED'
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition flex-shrink-0 ${activeTask.status === 'COMPLETED'
                               ? 'bg-slate-900 hover:bg-slate-800 text-white cursor-pointer'
                               : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                          }`}
+                            }`}
                           title={
                             activeTask.status === 'COMPLETED'
                               ? 'Add another deliverable file field'
@@ -2008,11 +1972,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                         {deliverableSlots.map((slot, idx) => (
                           <div
                             key={slot.id}
-                            className={`p-3 rounded-lg space-y-2 text-xs border ${
-                              activeTask.status === 'COMPLETED'
+                            className={`p-3 rounded-lg space-y-2 text-xs border ${activeTask.status === 'COMPLETED'
                                 ? 'bg-slate-50/70 border-slate-200'
                                 : 'bg-slate-100/60 border-slate-200/80 opacity-60'
-                            }`}
+                              }`}
                           >
                             <div className="flex items-center justify-between">
                               <span className="font-bold text-slate-700 uppercase text-[10px] tracking-wider">
@@ -2045,11 +2008,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                       ? 'e.g. Certificate of Incorporation / License PDF'
                                       : 'Locked: Milestone must be COMPLETED first'
                                   }
-                                  className={`w-full rounded-lg px-2.5 py-1.5 text-xs focus:outline-none ${
-                                    activeTask.status === 'COMPLETED'
+                                  className={`w-full rounded-lg px-2.5 py-1.5 text-xs focus:outline-none ${activeTask.status === 'COMPLETED'
                                       ? 'bg-white border border-slate-300 text-slate-800 focus:border-slate-800'
                                       : 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
-                                  }`}
+                                    }`}
                                 />
                               </div>
 
@@ -2062,11 +2024,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                   accept="application/pdf,image/*,.doc,.docx"
                                   onChange={(e) => handleUpdateDeliverableSlot(slot.id, 'file', e.target.files?.[0] || null)}
                                   disabled={activeTask.status !== 'COMPLETED'}
-                                  className={`w-full text-xs text-slate-700 file:mr-2.5 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-semibold ${
-                                    activeTask.status === 'COMPLETED'
+                                  className={`w-full text-xs text-slate-700 file:mr-2.5 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-semibold ${activeTask.status === 'COMPLETED'
                                       ? 'file:bg-slate-900 file:text-white hover:file:bg-slate-800 cursor-pointer'
                                       : 'file:bg-slate-200 file:text-slate-400 cursor-not-allowed'
-                                  }`}
+                                    }`}
                                 />
                               </div>
                             </div>
@@ -2149,8 +2110,8 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                           {selectedStatusFilter === 'COMPLETED'
                             ? 'No completed filings found in your history.'
                             : selectedStatusFilter === 'ACTIVE'
-                            ? 'All your assigned service filings are completed! Pick up new tasks from the General Task Pool.'
-                            : 'No service filings matching the selected filter.'}
+                              ? 'All your assigned service filings are completed! Pick up new tasks from the General Task Pool.'
+                              : 'No service filings matching the selected filter.'}
                         </td>
                       </tr>
                     ) : (
@@ -2202,19 +2163,18 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                       completedAt: e.target.value === 'COMPLETED' ? new Date().toISOString() : undefined,
                                     })
                                   }
-                                  className={`w-full text-xs font-bold rounded-lg px-2.5 py-1.5 border focus:outline-none ${
-                                    svc.status === 'COMPLETED'
+                                  className={`w-full text-xs font-bold rounded-lg px-2.5 py-1.5 border focus:outline-none ${svc.status === 'COMPLETED'
                                       ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
                                       : svc.status === 'APPROVED'
-                                      ? 'bg-teal-50 text-teal-800 border-teal-300'
-                                      : svc.status === 'GOVT_SUBMITTED'
-                                      ? 'bg-blue-50 text-blue-800 border-blue-300'
-                                      : svc.status === 'QUERY_RAISED'
-                                      ? 'bg-rose-50 text-rose-800 border-rose-300'
-                                      : svc.status === 'IN_PROGRESS'
-                                      ? 'bg-amber-50 text-amber-800 border-amber-300'
-                                      : 'bg-slate-50 text-slate-700 border-slate-300'
-                                  }`}
+                                        ? 'bg-teal-50 text-teal-800 border-teal-300'
+                                        : svc.status === 'GOVT_SUBMITTED'
+                                          ? 'bg-blue-50 text-blue-800 border-blue-300'
+                                          : svc.status === 'QUERY_RAISED'
+                                            ? 'bg-rose-50 text-rose-800 border-rose-300'
+                                            : svc.status === 'IN_PROGRESS'
+                                              ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                              : 'bg-slate-50 text-slate-700 border-slate-300'
+                                    }`}
                                 >
                                   <option value="NOT_STARTED">Not Started</option>
                                   <option value="IN_PROGRESS">In Progress (Drafting)</option>
@@ -2243,13 +2203,12 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
                               <td className="py-3 px-4">
                                 <span
-                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold border ${
-                                    svc.isOverdue
+                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold border ${svc.isOverdue
                                       ? 'bg-rose-50 text-rose-700 border-rose-200'
                                       : svc.daysLeft !== null && svc.daysLeft <= 2
-                                      ? 'bg-amber-50 text-amber-800 border-amber-200'
-                                      : 'bg-slate-50 text-slate-600 border-slate-200'
-                                  }`}
+                                        ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                        : 'bg-slate-50 text-slate-600 border-slate-200'
+                                    }`}
                                 >
                                   <Clock className="w-3 h-3" />
                                   {svc.deadlineStatus}
@@ -2261,11 +2220,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                   <button
                                     type="button"
                                     onClick={() => setExpandedTaskId(isExpanded ? null : svc.id)}
-                                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition border ${
-                                      isExpanded
+                                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition border ${isExpanded
                                         ? 'bg-indigo-600 text-white border-indigo-600'
                                         : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
-                                    }`}
+                                      }`}
                                     title="View Dossier & Files"
                                   >
                                     <Paperclip className="w-3.5 h-3.5" />
@@ -2518,11 +2476,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                 setSelectedUrgencyFilter('ALL');
                 setSelectedAssigneeFilter('ALL');
               }}
-              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${
-                selectedStatusFilter === 'ACTIVE' && selectedAssigneeFilter === 'ALL' && selectedUrgencyFilter === 'ALL'
+              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${selectedStatusFilter === 'ACTIVE' && selectedAssigneeFilter === 'ALL' && selectedUrgencyFilter === 'ALL'
                   ? 'bg-slate-50 border-slate-900 ring-1 ring-slate-900'
                   : 'bg-white border-slate-200 hover:border-slate-300'
-              }`}
+                }`}
             >
               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
                 Active Services in Filing
@@ -2541,11 +2498,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                 setSelectedAssigneeFilter(selectedAssigneeFilter === 'UNASSIGNED' ? 'ALL' : 'UNASSIGNED');
                 setSelectedStatusFilter('ACTIVE');
               }}
-              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${
-                selectedAssigneeFilter === 'UNASSIGNED'
+              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${selectedAssigneeFilter === 'UNASSIGNED'
                   ? 'bg-amber-50/50 border-amber-500 ring-1 ring-amber-500'
                   : 'bg-white border-slate-200 hover:border-slate-300'
-              }`}
+                }`}
             >
               <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider block">
                 Unassigned Tasks
@@ -2562,11 +2518,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
               onClick={() => {
                 setSelectedUrgencyFilter(selectedUrgencyFilter === 'OVERDUE' ? 'ALL' : 'OVERDUE');
               }}
-              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${
-                selectedUrgencyFilter === 'OVERDUE'
+              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${selectedUrgencyFilter === 'OVERDUE'
                   ? 'bg-rose-50/50 border-rose-500 ring-1 ring-rose-500'
                   : 'bg-white border-slate-200 hover:border-slate-300'
-              }`}
+                }`}
             >
               <span className="text-[10px] font-bold text-rose-700 uppercase tracking-wider block">
                 Overdue / Urgent Tasks
@@ -2585,11 +2540,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                 setSelectedUrgencyFilter('ALL');
                 setSelectedAssigneeFilter('ALL');
               }}
-              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${
-                selectedStatusFilter === 'COMPLETED'
+              className={`p-3.5 rounded-xl border shadow-xs cursor-pointer transition ${selectedStatusFilter === 'COMPLETED'
                   ? 'bg-emerald-50/50 border-emerald-500 ring-1 ring-emerald-500'
                   : 'bg-white border-slate-200 hover:border-slate-300'
-              }`}
+                }`}
             >
               <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">
                 Completed & Cleared
@@ -2776,11 +2730,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                 });
                               }}
                               disabled={actionLoading}
-                              className={`w-full text-xs font-semibold rounded-lg px-2.5 py-1.5 border focus:outline-none ${
-                                svc.assignedOpsUserId
+                              className={`w-full text-xs font-semibold rounded-lg px-2.5 py-1.5 border focus:outline-none ${svc.assignedOpsUserId
                                   ? 'bg-white border-slate-300 text-slate-900'
                                   : 'bg-amber-50/70 border-amber-300 text-amber-800'
-                              }`}
+                                }`}
                             >
                               <option value="">-- Unassigned (Open in Pool) --</option>
                               <optgroup label="Sector Recommended Specialists">
@@ -2835,11 +2788,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                   targetCompletionDate: newDate,
                                 });
                               }}
-                              className={`w-full rounded-lg px-2 py-1 text-xs focus:outline-none ${
-                                !svc.targetCompletionDate
+                              className={`w-full rounded-lg px-2 py-1 text-xs focus:outline-none ${!svc.targetCompletionDate
                                   ? 'bg-rose-50 border-2 border-rose-300 text-rose-900 font-bold focus:border-rose-500'
                                   : 'bg-slate-50 border border-slate-200 text-slate-800 focus:bg-white focus:border-slate-800'
-                              }`}
+                                }`}
                             />
                             {!svc.targetCompletionDate ? (
                               <div className="text-[10px] text-rose-600 font-bold mt-1 flex items-center gap-1">
@@ -2848,13 +2800,12 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                             ) : (
                               <div className="mt-1">
                                 <span
-                                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                                    svc.isOverdue
+                                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${svc.isOverdue
                                       ? 'bg-rose-100 text-rose-800'
                                       : svc.daysLeft <= 2
-                                      ? 'bg-amber-100 text-amber-800'
-                                      : 'bg-emerald-100 text-emerald-800'
-                                  }`}
+                                        ? 'bg-amber-100 text-amber-800'
+                                        : 'bg-emerald-100 text-emerald-800'
+                                    }`}
                                 >
                                   {svc.deadlineStatus}
                                 </span>
@@ -3007,22 +2958,20 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                     <div
                       key={d.id}
                       onClick={() => setSelectedDeal(d)}
-                      className={`p-3.5 rounded-lg cursor-pointer transition border text-left ${
-                        isSelected
+                      className={`p-3.5 rounded-lg cursor-pointer transition border text-left ${isSelected
                           ? 'bg-slate-50 border-slate-800 shadow-xs ring-1 ring-slate-800/20'
                           : 'bg-white border-slate-200/70 hover:bg-slate-50 hover:border-slate-300'
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-mono text-xs font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
                           {d.dealCode}
                         </span>
                         <span
-                          className={`text-xs font-medium px-2 py-0.5 rounded border ${
-                            isReadyDelivery
+                          className={`text-xs font-medium px-2 py-0.5 rounded border ${isReadyDelivery
                               ? 'bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold'
                               : 'bg-sky-50 text-sky-700 border-sky-200 font-semibold'
-                          }`}
+                            }`}
                         >
                           {isReadyDelivery ? 'Ready to Deliver' : 'Filing Active'}
                         </span>
