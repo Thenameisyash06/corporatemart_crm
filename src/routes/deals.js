@@ -130,12 +130,12 @@ async function recordAuditLog({ dealId, userId, action, fromStage, toStage, rema
     });
 
     // Automated Customer Email Notifications for each stage start & completion
+    // Note: 'LEGAL_APPROVED' notification is handled explicitly in /:id/legal-verify to attach the official legal agreement document
     const NOTIFIABLE_ACTIONS = [
       'DEAL_CREATED',
       'ACCOUNTS_APPROVED',
       'ACCOUNTS_REJECTED',
       'RESUBMIT_TO_ACCOUNTS',
-      'LEGAL_APPROVED',
       'LEGAL_REJECTED',
       'SERVICE_COMPLETED',
       'FINAL_DOCS_DELIVERED',
