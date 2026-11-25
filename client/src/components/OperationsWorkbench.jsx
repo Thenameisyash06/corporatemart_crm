@@ -855,12 +855,72 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
   // ---------------------------------------------------------------------------
   const handleUpdateService = async (dealId, serviceId, updates) => {
     try {
+      const svc = allServices.find((s) => s.id === serviceId);
+
+      // Requirement 3: Once a service is completed, it cannot be changed or edited again
+      if (svc?.status === 'COMPLETED') {
+        toast.warning(
+          'This service has already been completed and is permanently locked. It cannot be edited or modified again.',
+          'Service Locked'
+        );
+        setFeedback({
+          type: 'warning',
+          message: 'This service has already been completed and is locked. Completed services cannot be edited.',
+        });
+        return;
+      }
+
+      // Requirements 1 & 2: When marking a service as COMPLETED
+      if (updates.status === 'COMPLETED') {
+        const deal = activeDeal || selectedDeal || (deals || []).find((d) => d.id === dealId);
+        const total = Math.round(Number(deal?.totalAmount || 0));
+        const received = Math.round(Number(deal?.amountReceived || 0));
+        const pending = Math.max(0, Math.round(Number(deal?.pendingAmount || (total - received))));
+        const hasUnverified = (deal?.payments || []).some((p) => p.status !== 'VERIFIED');
+
+        // Requirement 1: If payment is pending, service cannot complete
+        if (pending > 0 || hasUnverified || (deal && !deal.isAccountsVerified)) {
+          toast.error(
+            `Service cannot be completed because payment is pending (Pending Balance: ₹${pending.toLocaleString('en-IN')}). All payment tranches must be verified and cleared first.`,
+            'Payment Pending'
+          );
+          setFeedback({
+            type: 'error',
+            message: `Service cannot be completed because payment is pending (Pending Balance: ₹${pending.toLocaleString('en-IN')}). All payment tranches must be verified and cleared first.`,
+          });
+          return;
+        }
+
+        // Requirement 2: If deliverable not submitted, service cannot complete
+        const docs = deal?.documents || [];
+        const hasDeliverable = docs.some(
+          (d) =>
+            d.documentType === 'FINAL_DELIVERABLE_CERTIFICATE' ||
+            d.documentType === 'DELIVERABLE_CERTIFICATE' ||
+            d.title?.toLowerCase().includes('deliverable') ||
+            d.title?.toLowerCase().includes('certificate')
+        );
+
+        if (!hasDeliverable) {
+          toast.error(
+            'Service cannot be completed because no deliverable certificate has been submitted yet. Please upload and submit the deliverable certificate first.',
+            'Deliverable Required'
+          );
+          setFeedback({
+            type: 'error',
+            message: 'Service cannot be completed because no deliverable certificate has been submitted yet. Please upload and submit the filing deliverable certificate first.',
+          });
+          return;
+        }
+      }
+
       setActionLoading(true);
       await api.patch(`/deals/${dealId}/services/${serviceId}`, updates);
       if (updates.status === 'COMPLETED') {
+        toast.success('Service marked as COMPLETED and locked! All filings and deliverables finalized.', 'Service Completed');
         setFeedback({
           type: 'success',
-          message: 'Service marked as COMPLETED and removed from your active workspace!',
+          message: 'Service marked as COMPLETED and locked! All filings and deliverables are finalized.',
         });
       } else {
         setFeedback({ type: 'success', message: 'Service task updated successfully.' });
@@ -868,7 +928,9 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
       await fetchOpsData();
       if (onRefreshParent) onRefreshParent();
     } catch (err) {
-      setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to update service.' });
+      const errMsg = err.response?.data?.error || 'Failed to update service.';
+      toast.error(errMsg, 'Update Failed');
+      setFeedback({ type: 'error', message: errMsg });
     } finally {
       setActionLoading(false);
     }
@@ -996,8 +1058,8 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
   // DELIVERABLE SLOTS & MULTI-DELIVERABLE HANDLERS
   // ---------------------------------------------------------------------------
   const handleAddDeliverableSlot = () => {
-    if (activeTask?.status !== 'COMPLETED') {
-      toast.warning('Milestone status must be set to COMPLETED before adding deliverables.', 'Filing Incomplete');
+    if (activeTask?.status === 'COMPLETED') {
+      toast.warning('This service has already been completed and is locked. No further deliverables can be added.', 'Service Locked');
       return;
     }
     setDeliverableSlots((prev) => [
@@ -1021,14 +1083,16 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
   const handleSubmitAllDeliverables = async (dealId, serviceStatus) => {
     if (!dealId) return;
-    if (serviceStatus !== 'COMPLETED') {
+
+    // Requirement 3: Once a service is completed, it cannot be changed or edited
+    if (serviceStatus === 'COMPLETED') {
       toast.warning(
-        'Milestone status must be set to COMPLETED before submitting deliverables.',
-        'Milestone Incomplete'
+        'This service has already been completed and is locked. Deliverables cannot be modified or re-submitted.',
+        'Service Locked'
       );
       setFeedback({
         type: 'error',
-        message: 'Milestone status must be set to COMPLETED before deliverables can be submitted.',
+        message: 'This service has already been completed and is locked. Deliverables cannot be modified.',
       });
       return;
     }
@@ -1068,7 +1132,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
       );
       setFeedback({
         type: 'success',
-        message: `Successfully uploaded and attached ${filesToUpload.length} deliverable certificate(s)!`,
+        message: `Successfully uploaded and attached ${filesToUpload.length} deliverable certificate(s)! Deliverables are now ready for milestone completion.`,
       });
 
       // Automatically dispatch deliverable certificate email to client
@@ -1087,6 +1151,20 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
       }
 
       // Reset to 1 default empty deliverable slot
+      setDeliverableSlots([{ id: Date.now(), file: null, title: '' }]);
+      await fetchOpsData();
+      if (onRefreshParent) onRefreshParent();
+    } catch (err) {
+      console.error('Submit deliverables error:', err);
+      toast.error(err.response?.data?.error || 'Failed to submit deliverables.', 'Upload Error');
+      setFeedback({
+        type: 'error',
+        message: err.response?.data?.error || 'Failed to submit deliverables.',
+      });
+    } finally {
+      setIsUploadingDoc(false);
+    }
+  };
       setDeliverableSlots([{ id: Date.now(), file: null, title: '' }]);
 
       await fetchOpsData();
