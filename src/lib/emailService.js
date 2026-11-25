@@ -254,25 +254,6 @@ function buildStageEmailHtml({
                 </tr>
               </table>
 
-              <!-- Attached Official Documents & Certificates Section -->
-              ${(attachedDocsSummary && attachedDocsSummary.length > 0) ? `
-              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f9f9f9; border: 2.5px solid #000000; border-radius: 6px; padding: 20px; margin-bottom: 26px;">
-                <tr>
-                  <td style="padding: 2px;">
-                    <div style="font-size: 20px; font-weight: 900; color: #000000; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; border-bottom: 2.5px solid #000000; padding-bottom: 8px;">
-                      📎 Attached Official Documents (${attachedDocsSummary.length})
-                    </div>
-                    <ul style="margin: 0; padding-left: 24px;">
-                      ${attachedDocsSummary.map((d) => `<li style="margin-bottom: 8px; color: #000000; font-size: 18px; line-height: 1.5; font-weight: 700;">${d}</li>`).join('')}
-                    </ul>
-                    <div style="margin-top: 12px; font-size: 16px; font-weight: 600; color: #222222;">
-                      The official documents listed above are attached directly to this email for your compliance and legal records.
-                    </div>
-                  </td>
-                </tr>
-              </table>
-              ` : ''}
-
               <!-- Representative & Support Contact Box -->
               <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top: 2.5px solid #000000; padding-top: 20px;">
                 <tr>
@@ -435,20 +416,24 @@ async function notifyCustomerStageChange({
         break;
 
       // 7. SERVICE COMPLETED -> STAGE_07_SERVICE_COMPLETED
-      case 'SERVICE_COMPLETED':
-        subject = `Operations Completed & Deliverables Prepared - Deal #${dealCode} | Corporate Mart`;
+      case 'SERVICE_COMPLETED': {
+        const primaryServiceName = serviceName || (services.length > 0 ? services.join(', ') : 'Service');
+        subject = `${primaryServiceName} deliverables`;
         stepCompleted = 'Step 3: Operations Processing & Government Filings Completed';
         stepStarted = 'Step 4: Deliverables & Certificate Finalization Started';
         description = `All filings and operational processing for your services have been successfully completed. Our team is now preparing the official deliverables, certificates, and government approval documents for release.`;
         break;
+      }
 
       // 8. FINAL DOCS DELIVERED -> STAGE_08_FINAL_DOCS_DELIVERED
-      case 'FINAL_DOCS_DELIVERED':
-        subject = `Official Certificates & Deliverables Delivered - Deal #${dealCode} | Corporate Mart`;
+      case 'FINAL_DOCS_DELIVERED': {
+        const primaryServiceName = serviceName || (services.length > 0 ? services.join(', ') : 'Service');
+        subject = `${primaryServiceName} deliverables`;
         stepCompleted = 'Step 4: Deliverables & Certificate Release Completed';
         stepStarted = 'Step 5: Relationship Management & Handover Started';
         description = `Your official certificates and final deliverables have been released and delivered. Your dossier is now moving to our dedicated Relationship Management team for post-service handover.`;
         break;
+      }
 
       // 9. RM HANDOVER -> CLOSED
       case 'WORKFLOW_CLOSED':

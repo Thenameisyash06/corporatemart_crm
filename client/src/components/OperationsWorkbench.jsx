@@ -954,8 +954,9 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
     try {
       setIsEmailingCerts(true);
       setFeedback(null);
+      const svcNames = (target.services || []).map((s) => s.serviceName).filter(Boolean).join(', ') || 'Service';
       await api.post(`/deals/${target.id}/send-email-update`, {
-        subject: `Official Service Deliverable Certificates - Deal #${target.dealCode} | Corporate Mart`,
+        subject: `${svcNames} deliverables`,
         message: `We are pleased to deliver your official service certificate(s) and completion documents for ${target.client?.companyName || 'your company'}. Please find the official files attached to this notification for your compliance and regulatory records.`,
         attachCertificates: true,
       });
