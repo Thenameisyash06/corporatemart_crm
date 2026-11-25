@@ -797,6 +797,17 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     selectedMonthFilter,
   ]);
 
+  // Listen for global app refresh button click
+  useEffect(() => {
+    const handleGlobalRefresh = () => {
+      fetchLeads();
+    };
+    window.addEventListener('app_refresh_all', handleGlobalRefresh);
+    return () => {
+      window.removeEventListener('app_refresh_all', handleGlobalRefresh);
+    };
+  }, [page, limit, selectedMonthFilter]);
+
   // Handle Search on Enter
   const handleSearchSubmit = (e) => {
     e.preventDefault();

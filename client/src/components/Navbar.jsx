@@ -18,6 +18,7 @@ export default function Navbar({
   currentUser,
   onUserChange,
   onRefresh,
+  isRefreshing = false,
   todayMeetings = [],
   onNavigateToLms,
 }) {
@@ -114,10 +115,11 @@ export default function Navbar({
 
           <button
             onClick={onRefresh}
-            title="Refresh Data"
-            className="w-9 h-9 flex items-center justify-center text-slate-600 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors"
+            disabled={isRefreshing}
+            title="Refresh All System & Workspace Data"
+            className="w-9 h-9 flex items-center justify-center text-slate-600 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-all cursor-pointer disabled:opacity-50"
           >
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-indigo-600' : ''}`} />
           </button>
 
           {currentUser ? (

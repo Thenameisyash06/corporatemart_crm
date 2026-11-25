@@ -90,6 +90,14 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
 
   useEffect(() => {
     fetchLegalQueue();
+
+    const handleGlobalRefresh = () => {
+      fetchLegalQueue();
+    };
+    window.addEventListener('app_refresh_all', handleGlobalRefresh);
+    return () => {
+      window.removeEventListener('app_refresh_all', handleGlobalRefresh);
+    };
   }, []);
 
   const handleSelectDeal = async (dealSummary) => {

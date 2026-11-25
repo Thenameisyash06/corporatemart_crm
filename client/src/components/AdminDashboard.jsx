@@ -522,9 +522,15 @@ export default function AdminDashboard({
       }).catch(() => {});
     };
 
+    const handleGlobalRefresh = () => {
+      fetchAdminData();
+    };
+
     window.addEventListener('lms_leads_changed', handleLmsChanged);
+    window.addEventListener('app_refresh_all', handleGlobalRefresh);
     return () => {
       window.removeEventListener('lms_leads_changed', handleLmsChanged);
+      window.removeEventListener('app_refresh_all', handleGlobalRefresh);
     };
   }, []);
 

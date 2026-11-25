@@ -235,6 +235,14 @@ export default function RmWorkbench({ currentUser, onRefreshParent, onOpenDossie
 
   useEffect(() => {
     fetchRmQueue();
+
+    const handleGlobalRefresh = () => {
+      fetchRmQueue();
+    };
+    window.addEventListener('app_refresh_all', handleGlobalRefresh);
+    return () => {
+      window.removeEventListener('app_refresh_all', handleGlobalRefresh);
+    };
   }, []);
 
   const handleAddRenewal = (template) => {

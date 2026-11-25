@@ -15,6 +15,7 @@ import MeetingTodayPopup from './components/MeetingTodayPopup';
 import LeadAlertPopup from './components/LeadAlertPopup';
 import { filterTodayMeetings } from './lib/meetingUtils';
 import api from './lib/api';
+import { toast } from './context/ToastContext';
 import {
   Plus,
   UserPlus,
@@ -211,6 +212,27 @@ export default function App() {
     }
   };
 
+  // Global app refresh handler - broadcasts refresh to all workbenches & modals
+  const [isRefreshingAll, setIsRefreshingAll] = useState(false);
+
+  const handleRefreshAll = async () => {
+    try {
+      setIsRefreshingAll(true);
+      await Promise.allSettled([
+        fetchData(),
+        fetchTodayMeetings(),
+      ]);
+      // Broadcast to all mounted workbenches, dashboards, and modals
+      window.dispatchEvent(new CustomEvent('app_refresh_all'));
+      window.dispatchEvent(new Event('lms_leads_changed'));
+      toast.success('All workspace and dashboard data refreshed!', 'System Refreshed');
+    } catch (err) {
+      console.error('Refresh all error:', err);
+    } finally {
+      setTimeout(() => setIsRefreshingAll(false), 500);
+    }
+  };
+
   useEffect(() => {
     if (currentUser) {
       fetchData(dealsPage, dealsLimit);
@@ -377,10 +399,8 @@ export default function App() {
       <Navbar
         currentUser={currentUser}
         onUserChange={handleUserChange}
-        onRefresh={() => {
-          fetchData();
-          fetchTodayMeetings();
-        }}
+        onRefresh={handleRefreshAll}
+        isRefreshing={isRefreshingAll}
         todayMeetings={todayMeetings}
         onNavigateToLms={handleNavigateToLms}
       />
