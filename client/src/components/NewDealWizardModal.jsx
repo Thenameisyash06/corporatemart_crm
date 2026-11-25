@@ -37,7 +37,8 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const [serviceSearchQuery, setServiceSearchQuery] = useState('');
+  const [openServiceDropdownIndex, setOpenServiceDropdownIndex] = useState(null);
+  const [rowServiceQueries, setRowServiceQueries] = useState({});
   const isEditMode = Boolean(dealToEdit);
   const [existingDocs, setExistingDocs] = useState([]);
   const [deletedDocIds, setDeletedDocIds] = useState([]);
@@ -332,16 +333,28 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
     });
   };
 
+  const clampAmountReceived = (currentAmount, newTotalStr) => {
+    const newTotNum = parseFloat(newTotalStr) || 0;
+    const curNum = parseFloat(currentAmount);
+    if (!isNaN(curNum) && curNum > newTotNum) {
+      return String(newTotNum);
+    }
+    return currentAmount;
+  };
+
   const removeService = (index) => {
     if (form.services.length <= 1) return;
     const updated = form.services.filter((_, i) => i !== index);
     const { std, tot } = calculateTotals(updated);
-    setForm({
-      ...form,
+    setOpenServiceDropdownIndex(null);
+    setRowServiceQueries({});
+    setForm((prev) => ({
+      ...prev,
       services: updated,
       standardAmount: std,
       totalAmount: tot,
-    });
+      amountReceived: clampAmountReceived(prev.amountReceived, tot),
+    }));
   };
 
   const handleServiceNameChange = (index, serviceName) => {
@@ -360,12 +373,13 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
       updated[index].gstAmount = Math.round(stdVal * 0.18);
     }
     const { std, tot } = calculateTotals(updated);
-    setForm({
-      ...form,
+    setForm((prev) => ({
+      ...prev,
       services: updated,
       standardAmount: std,
       totalAmount: tot,
-    });
+      amountReceived: clampAmountReceived(prev.amountReceived, tot),
+    }));
   };
 
   const handleDealAmountChange = (index, value) => {
@@ -388,12 +402,32 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
     updated[index].gstAmount = Math.round(dealVal * 0.18);
 
     const { std: newStd, tot: newTot } = calculateTotals(updated);
-    setForm({
-      ...form,
+    setForm((prev) => ({
+      ...prev,
       services: updated,
       standardAmount: newStd,
       totalAmount: newTot,
-    });
+      amountReceived: clampAmountReceived(prev.amountReceived, newTot),
+    }));
+  };
+
+  const handleAmountReceivedChange = (value) => {
+    if (value === '') {
+      setError(null);
+      setForm((prev) => ({ ...prev, amountReceived: '' }));
+      return;
+    }
+    let numVal = parseFloat(value);
+    if (isNaN(numVal) || numVal < 0) {
+      numVal = 0;
+    }
+    if (totalVal > 0 && numVal > totalVal) {
+      numVal = totalVal;
+      setError(`Amount received cannot exceed the deal amount of ₹${totalVal.toLocaleString('en-IN')}.`);
+    } else {
+      setError(null);
+    }
+    setForm((prev) => ({ ...prev, amountReceived: String(numVal) }));
   };
 
   const handleKycFileSelect = (e) => {
@@ -454,6 +488,12 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
       const msg = 'Advance amount received from client must be greater than ₹0.';
       setError(msg);
       toast.warning(msg, 'Advance Payment Required');
+      return false;
+    }
+    if (receivedVal > totalVal) {
+      const msg = `Amount received (₹${receivedVal.toLocaleString('en-IN')}) cannot exceed the deal amount (₹${totalVal.toLocaleString('en-IN')}).`;
+      setError(msg);
+      toast.warning(msg, 'Amount Limit Exceeded');
       return false;
     }
     for (const s of form.services) {
@@ -1136,145 +1176,102 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
                   </button>
                 </div>
 
-                {/* Quick Search & Add Service Bar */}
-                <div className="relative">
-                  <div className="flex items-center gap-2 p-2 bg-slate-50 border border-slate-300 rounded-lg focus-within:border-slate-800 focus-within:bg-white focus-within:ring-1 focus-within:ring-slate-800 transition">
-                    <Search className="w-4 h-4 text-slate-400 ml-1 flex-shrink-0" />
-                    <input
-                      type="text"
-                      value={serviceSearchQuery}
-                      onChange={(e) => setServiceSearchQuery(e.target.value)}
-                      placeholder="Search any service from catalog (e.g. Private Limited, GST, Trademark, ISO, FSSAI, MSME, Valuation)..."
-                      className="w-full bg-transparent text-xs text-slate-900 placeholder-slate-400 focus:outline-none"
-                    />
-                    {serviceSearchQuery && (
-                      <button
-                        type="button"
-                        onClick={() => setServiceSearchQuery('')}
-                        className="p-1 text-slate-400 hover:text-slate-600 rounded"
-                        title="Clear search"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Search Results Dropdown Menu */}
-                  {serviceSearchQuery.trim() && (
-                    <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-64 overflow-y-auto bg-white border border-slate-300 rounded-xl shadow-2xl divide-y divide-slate-100 text-xs">
-                      {CORPORATEMART_SERVICES_CATALOG
-                        .filter((item) =>
-                          item.name.toLowerCase().includes(serviceSearchQuery.toLowerCase()) ||
-                          item.category.toLowerCase().includes(serviceSearchQuery.toLowerCase())
-                        )
-                        .slice(0, 20)
-                        .map((item) => (
-                          <div
-                            key={item.name}
-                            onClick={() => {
-                              const newSvc = {
-                                serviceName: item.name,
-                                standardAmount: item.standardAmount,
-                                dealAmount: item.standardAmount,
-                                gstAmount: Math.round((parseFloat(item.standardAmount) || 0) * 0.18),
-                              };
-
-                              if (
-                                form.services.length === 1 &&
-                                (!form.services[0].serviceName || form.services[0].serviceName === DEFAULT_SERVICES[0].name)
-                              ) {
-                                setForm((prev) => {
-                                  const updatedServices = [newSvc];
-                                  const newStandard = parseFloat(item.standardAmount) || 0;
-                                  const newGst = Math.round(newStandard * 0.18);
-                                  return {
-                                    ...prev,
-                                    services: updatedServices,
-                                    standardAmount: String(newStandard),
-                                    totalAmount: String(newStandard + newGst),
-                                  };
-                                });
-                              } else {
-                                setForm((prev) => {
-                                  const updatedServices = [...prev.services, newSvc];
-                                  const newStandard = updatedServices.reduce(
-                                    (sum, s) => sum + (parseFloat(s.standardAmount) || 0),
-                                    0
-                                  );
-                                  const newTotal = updatedServices.reduce(
-                                    (sum, s) =>
-                                      sum +
-                                      (parseFloat(s.dealAmount !== undefined ? s.dealAmount : s.serviceFee) || 0) +
-                                      (parseFloat(s.gstAmount) || 0),
-                                    0
-                                  );
-                                  return {
-                                    ...prev,
-                                    services: updatedServices,
-                                    standardAmount: String(newStandard),
-                                    totalAmount: String(newTotal),
-                                  };
-                                });
-                              }
-                              setServiceSearchQuery('');
-                            }}
-                            className="p-2.5 hover:bg-slate-50 cursor-pointer flex items-center justify-between transition group"
-                          >
-                            <div className="pr-3">
-                              <div className="font-bold text-slate-900 group-hover:text-indigo-700">{item.name}</div>
-                              <div className="text-[10px] text-slate-500">{item.category}</div>
-                            </div>
-                            <div className="flex items-center gap-2.5 flex-shrink-0">
-                              <span className="font-mono font-bold text-slate-900">
-                                ₹{Number(item.standardAmount).toLocaleString('en-IN')}
-                              </span>
-                              <span className="px-2 py-1 bg-slate-900 text-white text-[10px] font-bold rounded group-hover:bg-indigo-600 transition">
-                                + Add
-                              </span>
-                            </div>
-                          </div>
-                        ))}
-                      {CORPORATEMART_SERVICES_CATALOG.filter((item) =>
-                        item.name.toLowerCase().includes(serviceSearchQuery.toLowerCase()) ||
-                        item.category.toLowerCase().includes(serviceSearchQuery.toLowerCase())
-                      ).length === 0 && (
-                        <div className="p-4 text-center text-slate-500">
-                          No services found matching "{serviceSearchQuery}"
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
                 <div className="space-y-3">
-                  {form.services.map((s, index) => (
+                  {form.services.map((s, index) => {
+                    const isDropdownOpen = openServiceDropdownIndex === index;
+                    const query = rowServiceQueries[index] !== undefined ? rowServiceQueries[index] : (s.serviceName || '');
+                    const filterText = (rowServiceQueries[index] || '').trim().toLowerCase();
+                    const filteredServices = CORPORATEMART_SERVICES_CATALOG.filter((item) =>
+                      !filterText ||
+                      item.name.toLowerCase().includes(filterText) ||
+                      item.category.toLowerCase().includes(filterText)
+                    ).slice(0, 30);
+
+                    return (
                     <div
                       key={index}
-                      className="p-3 bg-slate-50 border border-slate-200 rounded-lg grid grid-cols-1 md:grid-cols-12 gap-3 items-center text-xs"
+                      className="p-3 bg-slate-50 border border-slate-200 rounded-lg grid grid-cols-1 md:grid-cols-12 gap-3 items-center text-xs relative"
                     >
-                      <div className="md:col-span-5">
+                      <div className="md:col-span-5 relative">
                         <label className="text-[11px] text-slate-600 font-semibold block mb-1">
                           Service Line Item
                         </label>
-                        <select
-                          value={s.serviceName}
-                          onChange={(e) => handleServiceNameChange(index, e.target.value)}
-                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-slate-800 font-medium cursor-pointer"
-                        >
-                          <option value="">-- Select a Particular Service --</option>
-                          {s.serviceName && !DEFAULT_SERVICES.some((item) => item.name === s.serviceName) && (
-                            <option value={s.serviceName}>{s.serviceName}</option>
+                        <div className="relative flex items-center bg-white border border-slate-300 rounded-lg focus-within:border-slate-800 focus-within:ring-1 focus-within:ring-slate-800 transition">
+                          <Search className="w-3.5 h-3.5 text-slate-400 ml-2.5 flex-shrink-0" />
+                          <input
+                            type="text"
+                            value={query}
+                            onFocus={() => {
+                              setOpenServiceDropdownIndex(index);
+                              setRowServiceQueries((prev) => ({ ...prev, [index]: '' }));
+                            }}
+                            onBlur={() => {
+                              setOpenServiceDropdownIndex((prev) => (prev === index ? null : prev));
+                              setRowServiceQueries((prev) => {
+                                const next = { ...prev };
+                                delete next[index];
+                                return next;
+                              });
+                            }}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setOpenServiceDropdownIndex(index);
+                              setRowServiceQueries((prev) => ({ ...prev, [index]: val }));
+                            }}
+                            placeholder="Search service (e.g. Private Limited, GST, Trademark)..."
+                            className="w-full bg-transparent px-2 py-1.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none font-medium"
+                          />
+                          {(query || isDropdownOpen) && (
+                            <button
+                              type="button"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                setOpenServiceDropdownIndex(index);
+                                setRowServiceQueries((prev) => ({ ...prev, [index]: '' }));
+                              }}
+                              className="p-1 mr-1 text-slate-400 hover:text-slate-600 rounded"
+                              title="Clear search"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
                           )}
-                          {Object.entries(SERVICES_BY_CATEGORY).map(([categoryName, items]) => (
-                            <optgroup key={categoryName} label={categoryName}>
-                              {items.map((item) => (
-                                <option key={item.name} value={item.name}>
-                                  {item.name} — ₹{Number(item.standardAmount).toLocaleString('en-IN')}
-                                </option>
-                              ))}
-                            </optgroup>
-                          ))}
-                        </select>
+                        </div>
+
+                        {isDropdownOpen && (
+                          <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-60 overflow-y-auto bg-white border border-slate-300 rounded-xl shadow-2xl divide-y divide-slate-100 text-xs">
+                            {filteredServices.map((item) => (
+                              <div
+                                key={item.name}
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  handleServiceNameChange(index, item.name);
+                                  setOpenServiceDropdownIndex(null);
+                                  setRowServiceQueries((prev) => {
+                                    const next = { ...prev };
+                                    delete next[index];
+                                    return next;
+                                  });
+                                }}
+                                className={`p-2.5 hover:bg-slate-50 cursor-pointer flex items-center justify-between transition group ${
+                                  s.serviceName === item.name ? 'bg-indigo-50/70' : ''
+                                }`}
+                              >
+                                <div className="pr-3">
+                                  <div className="font-bold text-slate-900 group-hover:text-indigo-700">{item.name}</div>
+                                  <div className="text-[10px] text-slate-500">{item.category}</div>
+                                </div>
+                                <span className="font-mono font-bold text-slate-900 flex-shrink-0">
+                                  ₹{Number(item.standardAmount).toLocaleString('en-IN')}
+                                </span>
+                              </div>
+                            ))}
+                            {filteredServices.length === 0 && (
+                              <div className="p-3 text-center text-slate-500">
+                                No services found matching "{rowServiceQueries[index]}"
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       <div className="md:col-span-2">
@@ -1324,7 +1321,8 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
                         )}
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1355,13 +1353,15 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
                   <div>
                     <label className="text-xs text-slate-700 font-semibold block mb-1">
-                      Amount Received (₹) *
+                      Amount Received (₹) * <span className="text-[10px] text-slate-400 font-normal">(Max: ₹{totalVal.toLocaleString('en-IN')})</span>
                     </label>
                     <input
                       type="number"
+                      min={0}
+                      max={totalVal}
                       value={form.amountReceived}
-                      placeholder=""
-                      onChange={(e) => setForm({ ...form, amountReceived: e.target.value })}
+                      placeholder={`Max ₹${totalVal.toLocaleString('en-IN')}`}
+                      onChange={(e) => handleAmountReceivedChange(e.target.value)}
                       onWheel={(e) => e.target.blur()}
                       className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-emerald-700 font-bold font-mono focus:outline-none focus:border-slate-800"
                     />
