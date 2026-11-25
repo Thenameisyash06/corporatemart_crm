@@ -116,20 +116,20 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
 
 
 
-  const handleUploadAgreement = async (e) => {
-    if (e) e.preventDefault();
-    if (!agreementFile || !selectedDeal) return;
+  const handleUploadAgreement = async (fileParam = null) => {
+    const fileToUpload = (fileParam instanceof File) ? fileParam : agreementFile;
+    if (!fileToUpload || !selectedDeal) return;
     try {
       setUploadingAgreement(true);
       setFeedback(null);
       const formData = new FormData();
-      formData.append('file', agreementFile);
+      formData.append('file', fileToUpload);
       const res = await api.post(`/deals/${selectedDeal.id}/legal-agreement`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setFeedback({
         type: 'success',
-        message: `Legal Service Agreement uploaded to vault. Click "Clear Compliance & Forward to Operations" below to complete legal process and dispatch the agreement email to ${selectedDeal.client?.email || 'the client'}.`,
+        message: `Legal Service Agreement "${fileToUpload.name}" uploaded to vault successfully! Document will be automatically dispatched to client upon compliance approval below.`,
       });
       setAgreementFile(null);
       setIsReplacingAgreement(false);
@@ -174,17 +174,34 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
 
   const handleApprove = async () => {
     if (!selectedDeal) return;
-    const hasAgreement = Boolean(legalAgreementDoc || selectedDeal.legalAgreementUrl);
-    if (!hasAgreement) {
-      setFeedback({
-        type: 'error',
-        message: 'Please upload the finalized Legal Service Agreement before completing legal clearance and proceeding to Operations.',
-      });
-      return;
-    }
     try {
       setActionLoading(true);
       setFeedback(null);
+
+      // If an agreement file is currently selected but not yet uploaded, upload it first
+      if (agreementFile) {
+        const formData = new FormData();
+        formData.append('file', agreementFile);
+        const res = await api.post(`/deals/${selectedDeal.id}/legal-agreement`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        if (res.data?.deal) {
+          setSelectedDeal(res.data.deal);
+        }
+        setAgreementFile(null);
+        setIsReplacingAgreement(false);
+      }
+
+      const hasAgreement = Boolean(legalAgreementDoc || selectedDeal.legalAgreementUrl || agreementFile);
+      if (!hasAgreement) {
+        setFeedback({
+          type: 'error',
+          message: 'Please attach the finalized Legal Service Agreement before completing legal clearance and proceeding to Operations.',
+        });
+        setActionLoading(false);
+        return;
+      }
+
       await api.post(`/deals/${selectedDeal.id}/legal-verify`, {
         action: 'APPROVE',
         notes: 'Legal scrutiny passed. All KYC, statutory documents, and entity details verified.',
@@ -683,28 +700,16 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
                     </div>
                   )}
 
-                  {/* Narration & Clearance Notes from Accounts Desk (if recorded on deal level) */}
-                  {(selectedDeal.remarks || selectedDeal.accountsNotes) && (
+                  {/* Clearance Notes from Accounts Desk (if recorded on deal level) */}
+                  {selectedDeal.accountsNotes && (
                     <div className="p-3 bg-white border border-slate-200 rounded-lg shadow-xs text-xs space-y-2 mt-1.5">
-                      {selectedDeal.remarks && (
-                        <div className="text-slate-700 bg-slate-50 p-2 rounded border border-slate-200 flex items-start gap-1.5">
-                          <MessageSquare className="w-3.5 h-3.5 text-slate-500 mt-0.5 flex-shrink-0" />
-                          <div>
-                            <span className="font-semibold text-slate-900">Narration (Accounts Desk): </span>
-                            <span>{selectedDeal.remarks}</span>
-                          </div>
+                      <div className="text-emerald-800 bg-emerald-50/60 p-2 rounded border border-emerald-200 flex items-start gap-1.5">
+                        <Check className="w-3.5 h-3.5 text-emerald-600 mt-0.5 flex-shrink-0" />
+                        <div>
+                          <span className="font-semibold">Accounts Verification Clearance Note: </span>
+                          <span>{selectedDeal.accountsNotes}</span>
                         </div>
-                      )}
-
-                      {selectedDeal.accountsNotes && (
-                        <div className="text-emerald-800 bg-emerald-50/60 p-2 rounded border border-emerald-200 flex items-start gap-1.5">
-                          <Check className="w-3.5 h-3.5 text-emerald-600 mt-0.5 flex-shrink-0" />
-                          <div>
-                            <span className="font-semibold">Accounts Verification Clearance Note: </span>
-                            <span>{selectedDeal.accountsNotes}</span>
-                          </div>
-                        </div>
-                      )}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -919,25 +924,15 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
                           <button
                             type="button"
                             onClick={() => handlePreviewDoc(legalAgreementDoc.id)}
-                            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
+                            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 shadow-xs transition cursor-pointer"
                           >
                             <Eye className="w-3.5 h-3.5" /> Preview
                           </button>
                         )}
                         <button
                           type="button"
-                          onClick={handleEmailAgreementToClient}
-                          disabled={actionLoading || isEmailingAgreement}
-                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 transition shadow-xs disabled:opacity-50"
-                          title={`Email agreement to ${selectedDeal.client?.email || 'client'}`}
-                        >
-                          <Send className="w-3.5 h-3.5" />
-                          <span>{isEmailingAgreement ? 'Sending...' : 'Email Agreement'}</span>
-                        </button>
-                        <button
-                          type="button"
                           onClick={() => setIsReplacingAgreement(true)}
-                          className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 rounded-md text-xs font-semibold border border-slate-300 flex items-center gap-1.5 transition shadow-xs"
+                          className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 rounded-md text-xs font-semibold border border-slate-300 flex items-center gap-1.5 transition shadow-xs cursor-pointer"
                         >
                           <RotateCcw className="w-3.5 h-3.5" /> Re-upload
                         </button>
@@ -954,7 +949,7 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
                   </div>
                 ) : (
                   /* Upload form when not uploaded or when replacing */
-                  <form onSubmit={handleUploadAgreement} className="p-4 bg-white border border-slate-200 rounded-xl shadow-xs space-y-3">
+                  <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-xs space-y-3">
                     <div className="flex items-center justify-between">
                       <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                         <UploadCloud className="w-4 h-4 text-brand-600" />
@@ -967,7 +962,7 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
                             setIsReplacingAgreement(false);
                             setAgreementFile(null);
                           }}
-                          className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1"
+                          className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1 cursor-pointer"
                         >
                           <X className="w-3.5 h-3.5" /> Cancel Replace
                         </button>
@@ -979,33 +974,35 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
                         type="file"
                         id="legal-agreement-file-input"
                         accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*"
-                        onChange={(e) => setAgreementFile(e.target.files?.[0] || null)}
+                        disabled={uploadingAgreement}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleUploadAgreement(file);
+                        }}
                         className="hidden"
                       />
                       <label
                         htmlFor="legal-agreement-file-input"
-                        className={`border-2 border-dashed rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer transition text-center ${
-                          agreementFile
-                            ? 'border-brand-500 bg-brand-50/40 text-brand-900'
+                        className={`border-2 border-dashed rounded-xl p-5 flex flex-col items-center justify-center cursor-pointer transition text-center ${
+                          uploadingAgreement
+                            ? 'border-brand-500 bg-brand-50/40 text-brand-900 cursor-wait'
                             : 'border-slate-300 hover:border-slate-400 bg-slate-50/50 text-slate-600 hover:bg-slate-50'
                         }`}
                       >
-                        {agreementFile ? (
-                          <div className="space-y-1">
-                            <FileCheck2 className="w-7 h-7 text-emerald-600 mx-auto" />
-                            <div className="text-xs font-bold text-slate-900">{agreementFile.name}</div>
-                            <div className="text-[11px] text-slate-500">
-                              {(agreementFile.size / 1024).toFixed(0)} KB • Click to choose a different file
-                            </div>
+                        {uploadingAgreement ? (
+                          <div className="space-y-2 py-2">
+                            <UploadCloud className="w-8 h-8 text-brand-600 mx-auto animate-bounce" />
+                            <div className="text-xs font-bold text-brand-900">Uploading Legal Agreement to Storage Vault...</div>
+                            <div className="text-[11px] text-brand-600">Please wait while document is saved to deal record</div>
                           </div>
                         ) : (
-                          <div className="space-y-1">
-                            <UploadCloud className="w-7 h-7 text-slate-400 mx-auto" />
+                          <div className="space-y-1.5 py-1">
+                            <UploadCloud className="w-8 h-8 text-slate-400 mx-auto" />
                             <div className="text-xs font-bold text-slate-800">
-                              Click to browse or drag & drop client agreement
+                              Click to select or drag & drop client agreement
                             </div>
                             <div className="text-[11px] text-slate-400">
-                              Accepted: PDF, DOCX, DOC, Images (Max 50MB)
+                              Accepted: PDF, DOCX, DOC, Images (Max 50MB) • Uploads automatically upon selection
                             </div>
                           </div>
                         )}
@@ -1014,18 +1011,10 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
 
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 border-t border-slate-100">
                       <span className="text-[11px] text-slate-400">
-                        File will be safely saved to storage vault and attached to Deal #{selectedDeal.dealCode}
+                        Agreement will be saved to storage vault and automatically emailed to {selectedDeal.client?.email || 'the client'} upon compliance approval.
                       </span>
-                      <button
-                        type="submit"
-                        disabled={!agreementFile || uploadingAgreement}
-                        className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition disabled:opacity-40"
-                      >
-                        <UploadCloud className="w-4 h-4" />
-                        <span>{uploadingAgreement ? 'Uploading to Storage...' : 'Upload & Save Legal Agreement'}</span>
-                      </button>
                     </div>
-                  </form>
+                  </div>
                 )}
               </div>
 

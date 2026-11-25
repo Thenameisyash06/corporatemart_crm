@@ -6,6 +6,7 @@ import {
   RotateCcw,
   Check,
   Lock,
+  Unlock,
   Layers,
   Eye,
   Send,
@@ -544,6 +545,9 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
     { id: 1, file: null, title: '' },
   ]);
 
+  // Staged Milestone Status Map (tracks milestone set to COMPLETED before deliverable upload & submission)
+  const [milestoneStatusMap, setMilestoneStatusMap] = useState({});
+
   // Filters for Specialist & Manager
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSectorFilter, setSelectedSectorFilter] = useState('ALL');
@@ -762,6 +766,13 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
     }
     return selectedDeal || deals[0] || null;
   }, [activeTask, deals, selectedDeal]);
+
+  // Active Desk Service Milestone & Lock State
+  const isServiceLocked = activeTask?.status === 'COMPLETED';
+  const currentMilestone = activeTask
+    ? milestoneStatusMap[activeTask.id] || activeTask.status || 'PENDING'
+    : 'PENDING';
+  const isMilestoneSetToComplete = currentMilestone === 'COMPLETED';
 
   // Filtered Services for Manager View
   const filteredServices = useMemo(() => {
@@ -1054,6 +1065,61 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
   // ---------------------------------------------------------------------------
   // DELIVERABLE SLOTS & MULTI-DELIVERABLE HANDLERS
   // ---------------------------------------------------------------------------
+  const handleMilestoneStatusChange = async (dealId, serviceId, newStatus) => {
+    const svc = allServices.find((s) => s.id === serviceId);
+    if (svc?.status === 'COMPLETED') {
+      toast.warning(
+        'This service has already been completed and is permanently locked. It cannot be edited or modified again.',
+        'Service Locked'
+      );
+      setFeedback({
+        type: 'warning',
+        message: 'This service has already been completed and is locked. Completed services cannot be edited.',
+      });
+      return;
+    }
+
+    if (newStatus === 'COMPLETED') {
+      const deal = (deals || []).find((d) => d.id === dealId) || activeDeal;
+      const total = Math.round(Number(deal?.totalAmount || 0));
+      const received = Math.round(Number(deal?.amountReceived || 0));
+      const pending = Math.max(0, Math.round(Number(deal?.pendingAmount ?? (total - received))));
+      const hasUnverified = (deal?.payments || []).some((p) => p.status !== 'VERIFIED');
+
+      // Requirement 1: If payment is pending, service cannot complete
+      if (pending > 0 || hasUnverified || (deal && !deal.isAccountsVerified)) {
+        toast.error(
+          `Service cannot be marked as COMPLETED because payment is pending (Pending Balance: ₹${pending.toLocaleString('en-IN')}). All payment tranches must be verified and cleared by Accounts first.`,
+          'Payment Pending'
+        );
+        setFeedback({
+          type: 'error',
+          message: `Service milestone cannot be set to COMPLETED because payment is pending (Pending Balance: ₹${pending.toLocaleString('en-IN')}). Clear with Accounts first.`,
+        });
+        return;
+      }
+
+      // Unlock deliverable submission gate
+      setMilestoneStatusMap((prev) => ({ ...prev, [serviceId]: 'COMPLETED' }));
+      toast.info(
+        'Milestone status set to COMPLETED! Deliverable upload section is now unlocked below. Please attach the deliverable certificate(s) and click "Upload & Submit Deliverable(s)" to finalize.',
+        'Deliverables Unlocked'
+      );
+      setFeedback({
+        type: 'success',
+        message: 'Milestone set to COMPLETED. Deliverables upload is now open. Attach certificate(s) below and click "Upload & Submit Deliverable(s)" to finalize.',
+      });
+    } else {
+      // Revert or switch to another in-progress milestone
+      setMilestoneStatusMap((prev) => {
+        const next = { ...prev };
+        delete next[serviceId];
+        return next;
+      });
+      await handleUpdateService(dealId, serviceId, { status: newStatus });
+    }
+  };
+
   const handleAddDeliverableSlot = () => {
     if (activeTask?.status === 'COMPLETED') {
       toast.warning('This service has already been completed and is locked. No further deliverables can be added.', 'Service Locked');
@@ -1078,11 +1144,13 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
     );
   };
 
-  const handleSubmitAllDeliverables = async (dealId, serviceStatus) => {
-    if (!dealId) return;
+  const handleSubmitAllDeliverables = async (dealId, serviceId) => {
+    if (!dealId || !serviceId) return;
+
+    const svc = allServices.find((s) => s.id === serviceId);
 
     // Requirement 3: Once a service is completed, it cannot be changed or edited
-    if (serviceStatus === 'COMPLETED') {
+    if (svc?.status === 'COMPLETED') {
       toast.warning(
         'This service has already been completed and is locked. Deliverables cannot be modified or re-submitted.',
         'Service Locked'
@@ -1091,6 +1159,15 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
         type: 'error',
         message: 'This service has already been completed and is locked. Deliverables cannot be modified.',
       });
+      return;
+    }
+
+    const currentMilestone = milestoneStatusMap[serviceId] || svc?.status;
+    if (currentMilestone !== 'COMPLETED') {
+      toast.error(
+        'Milestone status must be set to COMPLETED before submitting deliverables.',
+        'Milestone Incomplete'
+      );
       return;
     }
 
@@ -1108,6 +1185,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
       setIsUploadingDoc(true);
       setFeedback(null);
 
+      // 1. Upload all deliverable files
       for (const slot of filesToUpload) {
         const formData = new FormData();
         formData.append('dealId', dealId);
@@ -1123,22 +1201,27 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
         });
       }
 
-      toast.success(
-        `Successfully submitted ${filesToUpload.length} deliverable certificate(s)!`,
-        'Deliverables Uploaded'
-      );
-      setFeedback({
-        type: 'success',
-        message: `Successfully uploaded and attached ${filesToUpload.length} deliverable certificate(s)! Deliverables are now ready for milestone completion.`,
+      // 2. Mark service as officially COMPLETED in the backend
+      await api.patch(`/deals/${dealId}/services/${serviceId}`, {
+        status: 'COMPLETED',
+        completedAt: new Date().toISOString(),
       });
 
-      // Automatically dispatch deliverable certificate email to client
+      // Clear staged milestone
+      setMilestoneStatusMap((prev) => {
+        const next = { ...prev };
+        delete next[serviceId];
+        return next;
+      });
+
+      // 3. Automatically dispatch deliverable certificate email to client
       try {
-        const clientEmail = activeDeal?.client?.email;
+        const targetDeal = (deals || []).find((d) => d.id === dealId) || activeDeal;
+        const clientEmail = targetDeal?.client?.email;
         if (clientEmail) {
           await api.post(`/deals/${dealId}/send-email-update`, {
-            subject: `Official Service Deliverable Certificate(s) - Deal #${activeDeal?.dealCode} | Corporate Mart`,
-            message: `We are pleased to inform you that your filing for "${activeTask?.serviceName || 'Service'}" has been completed, and the official deliverable certificate(s) have been generated. Please find the official deliverable document(s) attached to this email.`,
+            subject: `Official Service Deliverable Certificate(s) - Deal #${targetDeal?.dealCode} | Corporate Mart`,
+            message: `We are pleased to inform you that your filing for "${svc?.serviceName || 'Service'}" has been completed, and the official deliverable certificate(s) have been generated. Please find the official deliverable document(s) attached to this email.`,
             attachCertificates: true,
           });
           toast.success(`Deliverable document(s) sent via email to ${clientEmail}!`, 'Email Sent');
@@ -1147,10 +1230,23 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
         console.warn('Auto deliverable email send error:', emailErr);
       }
 
+      toast.success(
+        `Successfully submitted ${filesToUpload.length} deliverable certificate(s) and completed service! Moved to Complete section.`,
+        'Service Completed'
+      );
+      setFeedback({
+        type: 'success',
+        message: `Successfully uploaded ${filesToUpload.length} deliverable certificate(s) and marked service as COMPLETED! Moved to Complete section.`,
+      });
+
       // Reset to 1 default empty deliverable slot
       setDeliverableSlots([{ id: Date.now(), file: null, title: '' }]);
       await fetchOpsData();
       if (onRefreshParent) onRefreshParent();
+
+      // Automatically transition to the Complete section and select this completed filing
+      setSelectedStatusFilter('COMPLETED');
+      setSelectedTaskId(serviceId);
     } catch (err) {
       console.error('Submit deliverables error:', err);
       toast.error(err.response?.data?.error || 'Failed to submit deliverables.', 'Upload Error');
@@ -1692,60 +1788,120 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-slate-200 text-xs">
-                        <div>
-                          <label className="text-xs text-slate-700 font-semibold block mb-1">
-                            Update Milestone Status
-                          </label>
-                          <select
-                            value={activeTask.status || 'PENDING'}
-                            onChange={(e) =>
-                              handleUpdateService(activeTask.dealId, activeTask.id, {
-                                status: e.target.value,
-                                completedAt: e.target.value === 'COMPLETED' ? new Date().toISOString() : null,
-                              })
-                            }
-                            disabled={actionLoading}
-                            className={`w-full text-xs font-bold rounded-lg px-2.5 py-1.5 border focus:outline-none ${activeTask.status === 'COMPLETED'
-                                ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                                : activeTask.status === 'APPROVED'
-                                  ? 'bg-teal-50 text-teal-800 border-teal-300'
-                                  : activeTask.status === 'GOVT_SUBMITTED'
-                                    ? 'bg-blue-50 text-blue-800 border-blue-300'
-                                    : activeTask.status === 'QUERY_RAISED'
-                                      ? 'bg-rose-50 text-rose-800 border-rose-300'
-                                      : activeTask.status === 'IN_PROGRESS'
-                                        ? 'bg-amber-50 text-amber-800 border-amber-300'
-                                        : 'bg-white text-slate-700 border-slate-300'
-                              }`}
-                          >
-                            <option value="PENDING">PENDING (Not Started)</option>
-                            <option value="IN_PROGRESS">IN_PROGRESS (Drafting)</option>
-                            <option value="GOVT_SUBMITTED">GOVT_SUBMITTED (Filed)</option>
-                            <option value="QUERY_RAISED">QUERY_RAISED (Resubmission)</option>
-                            <option value="APPROVED">APPROVED (Authority Cleared)</option>
-                            <option value="COMPLETED">COMPLETED</option>
-                          </select>
-                        </div>
+                      {(() => {
+                        const totalDealAmt = Math.round(Number(activeDeal.totalAmount || 0));
+                        const receivedDealAmt = Math.round(Number(activeDeal.amountReceived || 0));
+                        const pendingDealAmt = Math.max(0, Math.round(Number(activeDeal.pendingAmount ?? (totalDealAmt - receivedDealAmt))));
+                        const hasUnverifiedPymts = (activeDeal.payments || []).some((p) => p.status !== 'VERIFIED');
+                        const isPaymentPending = pendingDealAmt > 0 || hasUnverifiedPymts || !activeDeal.isAccountsVerified;
+                        const activeDealDocs = activeDeal.documents || [];
+                        const hasDeliverableUploaded = activeDealDocs.some(
+                          (d) =>
+                            d.documentType === 'FINAL_DELIVERABLE_CERTIFICATE' ||
+                            d.documentType === 'DELIVERABLE_CERTIFICATE' ||
+                            (d.title && d.title.toLowerCase().includes('deliverable')) ||
+                            (d.title && d.title.toLowerCase().includes('certificate'))
+                        );
 
-                        <div>
-                          <label className="text-xs text-slate-700 font-semibold block mb-1">
-                            Govt Application / SRN Number
-                          </label>
-                          <input
-                            type="text"
-                            defaultValue={activeTask.govApplicationNumber || ''}
-                            placeholder="e.g. SRN29182371 / Ref"
-                            onBlur={(e) => {
-                              if (e.target.value !== (activeTask.govApplicationNumber || '')) {
-                                handleUpdateService(activeTask.dealId, activeTask.id, {
-                                  govApplicationNumber: e.target.value.trim() || null,
-                                });
-                              }
-                            }}
-                            className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-800 focus:outline-none focus:border-slate-800"
-                          />
-                        </div>
+                        return (
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-slate-200 text-xs">
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <label className="text-xs text-slate-700 font-semibold block">
+                                  Update Milestone Status
+                                </label>
+                                {isServiceLocked ? (
+                                  <span className="text-[10px] text-emerald-800 bg-emerald-100/80 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
+                                    <Lock className="w-2.5 h-2.5" /> Locked
+                                  </span>
+                                ) : isMilestoneSetToComplete ? (
+                                  <span className="text-[10px] text-emerald-800 bg-emerald-100/80 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
+                                    <Check className="w-2.5 h-2.5" /> Ready for Deliverables
+                                  </span>
+                                ) : null}
+                              </div>
+                              <select
+                                value={currentMilestone}
+                                onChange={(e) =>
+                                  handleMilestoneStatusChange(activeTask.dealId, activeTask.id, e.target.value)
+                                }
+                                disabled={actionLoading || isServiceLocked}
+                                className={`w-full text-xs font-bold rounded-lg px-2.5 py-1.5 border focus:outline-none ${isServiceLocked
+                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300 cursor-not-allowed opacity-90'
+                                    : currentMilestone === 'COMPLETED'
+                                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300 ring-2 ring-emerald-400'
+                                      : currentMilestone === 'APPROVED'
+                                        ? 'bg-teal-50 text-teal-800 border-teal-300'
+                                        : currentMilestone === 'GOVT_SUBMITTED'
+                                          ? 'bg-blue-50 text-blue-800 border-blue-300'
+                                          : currentMilestone === 'QUERY_RAISED'
+                                            ? 'bg-rose-50 text-rose-800 border-rose-300'
+                                            : currentMilestone === 'IN_PROGRESS'
+                                              ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                              : 'bg-white text-slate-700 border-slate-300'
+                                  }`}
+                              >
+                                <option value="PENDING">PENDING (Not Started)</option>
+                                <option value="IN_PROGRESS">IN_PROGRESS (Drafting)</option>
+                                <option value="GOVT_SUBMITTED">GOVT_SUBMITTED (Filed)</option>
+                                <option value="QUERY_RAISED">QUERY_RAISED (Resubmission)</option>
+                                <option value="APPROVED">APPROVED (Authority Cleared)</option>
+                                <option
+                                  value="COMPLETED"
+                                  disabled={!isServiceLocked && isPaymentPending}
+                                  title={
+                                    isPaymentPending
+                                      ? `Payment pending (₹${pendingDealAmt.toLocaleString('en-IN')}) — accounts clearance required`
+                                      : 'Set milestone to COMPLETED to unlock deliverable submission below'
+                                  }
+                                >
+                                  COMPLETED {isServiceLocked ? '(Locked)' : isPaymentPending ? '(Blocked: Payment Pending)' : '(Unlocks Deliverables)'}
+                                </option>
+                              </select>
+                              {!isServiceLocked && isPaymentPending && (
+                                <p className="text-[10px] text-amber-700 mt-1 font-medium leading-tight">
+                                  ⚠️ Payment pending (₹{pendingDealAmt.toLocaleString('en-IN')}) — clear with Accounts before milestone can be completed.
+                                </p>
+                              )}
+                              {!isServiceLocked && !isPaymentPending && !isMilestoneSetToComplete && (
+                                <p className="text-[10px] text-slate-500 mt-1 font-medium leading-tight">
+                                  ℹ️ Set Milestone to COMPLETED to open deliverable submission below.
+                                </p>
+                              )}
+                              {!isServiceLocked && !isPaymentPending && isMilestoneSetToComplete && (
+                                <p className="text-[10px] text-emerald-700 mt-1 font-bold leading-tight">
+                                  ✓ Milestone set to COMPLETED. Attach deliverable file(s) below to finalize.
+                                </p>
+                              )}
+                            </div>
+
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <label className="text-xs text-slate-700 font-semibold block">
+                                  Govt Application / SRN Number
+                                </label>
+                                {isServiceLocked && (
+                                  <span className="text-[10px] text-slate-400 font-medium">Read-only</span>
+                                )}
+                              </div>
+                              <input
+                                type="text"
+                                defaultValue={activeTask.govApplicationNumber || ''}
+                                placeholder="e.g. SRN29182371 / Ref"
+                                disabled={isServiceLocked}
+                                onBlur={(e) => {
+                                  if (!isServiceLocked && e.target.value !== (activeTask.govApplicationNumber || '')) {
+                                    handleUpdateService(activeTask.dealId, activeTask.id, {
+                                      govApplicationNumber: e.target.value.trim() || null,
+                                    });
+                                  }
+                                }}
+                                className={`w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono focus:outline-none ${isServiceLocked
+                                    ? 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
+                                    : 'bg-white border-slate-300 text-slate-800 focus:border-slate-800'
+                                  }`}
+                              />
+                            </div>
 
                         <div>
                           <label className="text-xs text-slate-700 font-semibold block mb-1">
@@ -1777,7 +1933,9 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                           </div>
                         </div>
                       </div>
-                    </div>
+                    );
+                  })()}
+                </div>
 
                     {/* 2. DEAL DOSSIER: COMPANY DETAILS & DIRECTORS */}
                     <div className="bg-white border border-slate-200 rounded-xl p-4.5 space-y-3.5 shadow-xs">
@@ -1891,186 +2049,145 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                         </div>
 
                         {/* Add Deliverable Button */}
-                        <button
-                          type="button"
-                          onClick={handleAddDeliverableSlot}
-                          disabled={activeTask.status !== 'COMPLETED'}
-                          className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition flex-shrink-0 ${activeTask.status === 'COMPLETED'
-                              ? 'bg-slate-900 hover:bg-slate-800 text-white cursor-pointer'
-                              : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                        {!isServiceLocked && (
+                          <button
+                            type="button"
+                            onClick={handleAddDeliverableSlot}
+                            disabled={!isMilestoneSetToComplete}
+                            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition flex-shrink-0 ${
+                              !isMilestoneSetToComplete
+                                ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                                : 'bg-slate-900 hover:bg-slate-800 text-white cursor-pointer'
                             }`}
-                          title={
-                            activeTask.status === 'COMPLETED'
-                              ? 'Add another deliverable file field'
-                              : 'Milestone must be set to COMPLETED before deliverables are allowed'
-                          }
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          <span>Add Deliverable</span>
-                        </button>
+                            title={
+                              !isMilestoneSetToComplete
+                                ? 'Set Milestone Status to COMPLETED above to unlock deliverable addition'
+                                : 'Add another deliverable file field'
+                            }
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Add Deliverable</span>
+                          </button>
+                        )}
                       </div>
 
-                      {/* Warning when milestone is NOT COMPLETED */}
-                      {activeTask.status !== 'COMPLETED' && (
-                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-start gap-2.5">
-                          <Lock className="w-4 h-4 text-amber-700 mt-0.5 flex-shrink-0" />
+                      {/* Status Banner (Only when service is finalized & locked) */}
+                      {isServiceLocked && (
+                        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-900 flex items-start gap-2.5">
+                          <Lock className="w-4 h-4 text-emerald-700 mt-0.5 flex-shrink-0" />
                           <div className="leading-relaxed">
-                            <strong>Filing Incomplete — Deliverables Not Allowed:</strong> Milestone status is currently{' '}
-                            <span className="font-bold underline uppercase">{activeTask.status?.replace(/_/g, ' ') || 'PENDING'}</span>.
-                            Filing Deliverables and Certificates are strictly not allowed until the milestone status above is set to <strong>COMPLETED</strong>.
+                            <strong>Service Completed & Locked:</strong> This filing has been completed and verified. Deliverables and milestone settings are permanently archived and read-only.
                           </div>
                         </div>
                       )}
 
-                      {/* Display Existing Uploaded Deliverables */}
-                      {(() => {
-                        const dealDeliverables = (activeDeal.documents || []).filter(
-                          (d) =>
-                            d.documentType === 'FINAL_DELIVERABLE_CERTIFICATE' ||
-                            d.documentType === 'DELIVERABLE_CERTIFICATE'
-                        );
-                        if (dealDeliverables.length === 0) return null;
-
-                        return (
-                          <div className="space-y-2 p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                            <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
-                              Attached Deliverable Certificate(s) ({dealDeliverables.length})
-                            </span>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                              {dealDeliverables.map((doc) => (
-                                <div
-                                  key={doc.id}
-                                  className="p-2.5 bg-white border border-emerald-200 rounded-lg flex items-center justify-between gap-2 shadow-2xs"
-                                >
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <FileCheck className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                                    <div className="min-w-0">
-                                      <p className="text-xs font-bold text-slate-900 truncate" title={doc.title}>
-                                        {doc.title}
-                                      </p>
-                                      <span className="text-[10px] text-emerald-700 font-semibold flex items-center gap-1">
-                                        <Check className="w-3 h-3 text-emerald-600" /> Ready for Client Handover
-                                      </span>
-                                    </div>
-                                  </div>
+                      {/* Deliverable Upload Fields (Only when service is active) */}
+                      {!isServiceLocked && (
+                        <div className={`space-y-3 ${!isMilestoneSetToComplete ? 'opacity-40 pointer-events-none select-none' : ''}`}>
+                          {deliverableSlots.map((slot, idx) => (
+                            <div
+                              key={slot.id}
+                              className="p-3 rounded-lg space-y-2 text-xs border bg-slate-50/70 border-slate-200"
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-bold text-slate-700 uppercase text-[10px] tracking-wider">
+                                  Deliverable Field #{idx + 1}
+                                </span>
+                                {deliverableSlots.length > 1 && (
                                   <button
                                     type="button"
-                                    onClick={() => handlePreviewDocument(doc)}
-                                    className="px-2 py-1 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded text-[11px] font-semibold flex items-center gap-1 cursor-pointer flex-shrink-0"
+                                    onClick={() => handleRemoveDeliverableSlot(slot.id)}
+                                    disabled={!isMilestoneSetToComplete}
+                                    className="text-slate-400 hover:text-rose-600 text-xs flex items-center gap-1 cursor-pointer"
+                                    title="Remove this deliverable field"
                                   >
-                                    <Eye className="w-3 h-3" /> Preview
+                                    <Trash2 className="w-3.5 h-3.5" /> Remove
                                   </button>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })()}
+                                )}
+                              </div>
 
-                      {/* Deliverable Upload Fields (Default: 1 field) */}
-                      <div className="space-y-3">
-                        {deliverableSlots.map((slot, idx) => (
-                          <div
-                            key={slot.id}
-                            className={`p-3 rounded-lg space-y-2 text-xs border ${activeTask.status === 'COMPLETED'
-                                ? 'bg-slate-50/70 border-slate-200'
-                                : 'bg-slate-100/60 border-slate-200/80 opacity-60'
-                              }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="font-bold text-slate-700 uppercase text-[10px] tracking-wider">
-                                Deliverable Field #{idx + 1}
-                              </span>
-                              {deliverableSlots.length > 1 && activeTask.status === 'COMPLETED' && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveDeliverableSlot(slot.id)}
-                                  className="text-slate-400 hover:text-rose-600 text-xs flex items-center gap-1 cursor-pointer"
-                                  title="Remove this deliverable field"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" /> Remove
-                                </button>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                <div>
+                                  <label className="text-xs font-semibold text-slate-700 block mb-1">
+                                    Deliverable Title / Note
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={slot.title}
+                                    disabled={!isMilestoneSetToComplete}
+                                    onChange={(e) => handleUpdateDeliverableSlot(slot.id, 'title', e.target.value)}
+                                    placeholder="e.g. Certificate of Incorporation / License PDF"
+                                    className="w-full bg-white border border-slate-300 text-slate-800 focus:border-slate-800 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="text-xs font-semibold text-slate-700 block mb-1">
+                                    Select Deliverable File
+                                  </label>
+                                  <input
+                                    type="file"
+                                    disabled={!isMilestoneSetToComplete}
+                                    accept="application/pdf,image/*,.doc,.docx"
+                                    onChange={(e) => handleUpdateDeliverableSlot(slot.id, 'file', e.target.files?.[0] || null)}
+                                    className="w-full text-xs text-slate-700 file:mr-2.5 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-slate-900 file:text-white hover:file:bg-slate-800 cursor-pointer"
+                                  />
+                                </div>
+                              </div>
+
+                              {slot.file && (
+                                <div className="text-[11px] text-emerald-700 font-medium flex items-center gap-1.5 pt-1">
+                                  <Check className="w-3 h-3 text-emerald-600" /> Selected: {slot.file.name} ({(slot.file.size / 1024).toFixed(0)} KB)
+                                </div>
                               )}
                             </div>
+                          ))}
+                        </div>
+                      )}
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                              <div>
-                                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                                  Deliverable Title / Note
-                                </label>
-                                <input
-                                  type="text"
-                                  value={slot.title}
-                                  onChange={(e) => handleUpdateDeliverableSlot(slot.id, 'title', e.target.value)}
-                                  disabled={activeTask.status !== 'COMPLETED'}
-                                  placeholder={
-                                    activeTask.status === 'COMPLETED'
-                                      ? 'e.g. Certificate of Incorporation / License PDF'
-                                      : 'Locked: Milestone must be COMPLETED first'
-                                  }
-                                  className={`w-full rounded-lg px-2.5 py-1.5 text-xs focus:outline-none ${activeTask.status === 'COMPLETED'
-                                      ? 'bg-white border border-slate-300 text-slate-800 focus:border-slate-800'
-                                      : 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
-                                    }`}
-                                />
-                              </div>
+                      {/* Submit Deliverables Bar (Only when active) */}
+                      {!isServiceLocked && (
+                        <div className="pt-2 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                          <span className="text-xs text-slate-500 font-medium">
+                            {!isMilestoneSetToComplete
+                              ? 'Milestone status must be set to COMPLETED above to open deliverable upload & submission.'
+                              : 'Attach deliverable document(s) and click button to finalize and move service to Complete section.'}
+                          </span>
 
-                              <div>
-                                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                                  Select Deliverable File
-                                </label>
-                                <input
-                                  type="file"
-                                  accept="application/pdf,image/*,.doc,.docx"
-                                  onChange={(e) => handleUpdateDeliverableSlot(slot.id, 'file', e.target.files?.[0] || null)}
-                                  disabled={activeTask.status !== 'COMPLETED'}
-                                  className={`w-full text-xs text-slate-700 file:mr-2.5 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-semibold ${activeTask.status === 'COMPLETED'
-                                      ? 'file:bg-slate-900 file:text-white hover:file:bg-slate-800 cursor-pointer'
-                                      : 'file:bg-slate-200 file:text-slate-400 cursor-not-allowed'
-                                    }`}
-                                />
-                              </div>
-                            </div>
-
-                            {slot.file && (
-                              <div className="text-[11px] text-emerald-700 font-medium flex items-center gap-1.5 pt-1">
-                                <Check className="w-3 h-3 text-emerald-600" /> Selected: {slot.file.name} ({(slot.file.size / 1024).toFixed(0)} KB)
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Unified Submit Bar (Locked until milestone is COMPLETED) */}
-                      <div className="pt-2 border-t border-slate-200">
-                        {activeTask.status !== 'COMPLETED' ? (
                           <button
                             type="button"
-                            disabled={true}
-                            className="w-full sm:w-auto px-5 py-2.5 bg-slate-200 text-slate-400 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 cursor-not-allowed shadow-none"
-                            title="Set milestone status to COMPLETED to enable submission"
+                            onClick={() => handleSubmitAllDeliverables(activeDeal.id, activeTask.id)}
+                            disabled={
+                              !isMilestoneSetToComplete ||
+                              isUploadingDoc ||
+                              !deliverableSlots.some((s) => Boolean(s.file))
+                            }
+                            className={`w-full sm:w-auto px-5 py-2.5 rounded-lg text-xs font-bold shadow-xs flex items-center justify-center gap-2 transition ${
+                              !isMilestoneSetToComplete ||
+                              isUploadingDoc ||
+                              !deliverableSlots.some((s) => Boolean(s.file))
+                                ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed opacity-60'
+                                : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
+                            }`}
+                            title={
+                              !isMilestoneSetToComplete
+                                ? 'Blocked: Set Milestone Status to COMPLETED above to unlock'
+                                : !deliverableSlots.some((s) => Boolean(s.file))
+                                  ? 'Select at least one deliverable file to submit'
+                                  : 'Upload deliverable(s) and move service to Complete section'
+                            }
                           >
-                            <Lock className="w-3.5 h-3.5" />
-                            <span>Deliverables Not Allowed (Milestone Not Completed)</span>
-                          </button>
-                        ) : (
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                            <span className="text-xs text-emerald-700 font-medium flex items-center gap-1">
-                              <CheckCircle2 className="w-4 h-4 text-emerald-600" /> Milestone completed! Attach deliverable file(s) and submit.
+                            <UploadCloud className="w-4 h-4" />
+                            <span>
+                              {isUploadingDoc
+                                ? 'Submitting Deliverables...'
+                                : !isMilestoneSetToComplete
+                                  ? 'Blocked (Set Milestone to COMPLETED)'
+                                  : 'Upload & Submit Deliverable(s)'}
                             </span>
-
-                            <button
-                              type="button"
-                              onClick={() => handleSubmitAllDeliverables(activeDeal.id, activeTask.status)}
-                              disabled={isUploadingDoc || !deliverableSlots.some((s) => Boolean(s.file))}
-                              className="w-full sm:w-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center justify-center gap-2 transition disabled:opacity-40 cursor-pointer"
-                            >
-                              <UploadCloud className="w-4 h-4" />
-                              <span>{isUploadingDoc ? 'Submitting Deliverables...' : 'Submit Deliverable(s)'}</span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : (
@@ -2155,34 +2272,61 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                               </td>
 
                               <td className="py-3 px-4 min-w-[180px]">
-                                <select
-                                  value={svc.status || 'NOT_STARTED'}
-                                  onChange={(e) =>
-                                    handleUpdateService(svc.dealId, svc.id, {
-                                      status: e.target.value,
-                                      completedAt: e.target.value === 'COMPLETED' ? new Date().toISOString() : undefined,
-                                    })
-                                  }
-                                  className={`w-full text-xs font-bold rounded-lg px-2.5 py-1.5 border focus:outline-none ${svc.status === 'COMPLETED'
-                                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                                      : svc.status === 'APPROVED'
-                                        ? 'bg-teal-50 text-teal-800 border-teal-300'
-                                        : svc.status === 'GOVT_SUBMITTED'
-                                          ? 'bg-blue-50 text-blue-800 border-blue-300'
-                                          : svc.status === 'QUERY_RAISED'
-                                            ? 'bg-rose-50 text-rose-800 border-rose-300'
-                                            : svc.status === 'IN_PROGRESS'
-                                              ? 'bg-amber-50 text-amber-800 border-amber-300'
-                                              : 'bg-slate-50 text-slate-700 border-slate-300'
-                                    }`}
-                                >
-                                  <option value="NOT_STARTED">Not Started</option>
-                                  <option value="IN_PROGRESS">In Progress (Drafting)</option>
-                                  <option value="GOVT_SUBMITTED">Govt / MCA Submitted</option>
-                                  <option value="QUERY_RAISED">Query / Resubmission</option>
-                                  <option value="APPROVED">APPROVED (Authority Cleared)</option>
-                                  <option value="COMPLETED">COMPLETED (Filing Finished)</option>
-                                </select>
+                                {(() => {
+                                  const isTableSvcLocked = svc.status === 'COMPLETED';
+                                  const svcMilestone = milestoneStatusMap[svc.id] || svc.status || 'NOT_STARTED';
+                                  const svcPendingAmt = Math.max(0, Math.round(Number(svcDeal?.pendingAmount ?? (Number(svcDeal?.totalAmount || 0) - Number(svcDeal?.amountReceived || 0)))));
+                                  const svcHasUnverifiedPymts = (svcDeal?.payments || []).some((p) => p.status !== 'VERIFIED');
+                                  const isSvcPaymentPending = svcPendingAmt > 0 || svcHasUnverifiedPymts || !svcDeal?.isAccountsVerified;
+
+                                  return (
+                                    <div>
+                                      <select
+                                        value={svcMilestone}
+                                        onChange={(e) =>
+                                          handleMilestoneStatusChange(svc.dealId, svc.id, e.target.value)
+                                        }
+                                        disabled={actionLoading || isTableSvcLocked}
+                                        className={`w-full text-xs font-bold rounded-lg px-2.5 py-1.5 border focus:outline-none ${isTableSvcLocked
+                                            ? 'bg-emerald-50 text-emerald-800 border-emerald-300 cursor-not-allowed opacity-90'
+                                            : svcMilestone === 'COMPLETED'
+                                              ? 'bg-emerald-50 text-emerald-800 border-emerald-300 ring-2 ring-emerald-400'
+                                              : svcMilestone === 'APPROVED'
+                                                ? 'bg-teal-50 text-teal-800 border-teal-300'
+                                                : svcMilestone === 'GOVT_SUBMITTED'
+                                                  ? 'bg-blue-50 text-blue-800 border-blue-300'
+                                                  : svcMilestone === 'QUERY_RAISED'
+                                                    ? 'bg-rose-50 text-rose-800 border-rose-300'
+                                                    : svcMilestone === 'IN_PROGRESS'
+                                                      ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                                      : 'bg-slate-50 text-slate-700 border-slate-300'
+                                          }`}
+                                      >
+                                        <option value="NOT_STARTED">Not Started</option>
+                                        <option value="IN_PROGRESS">In Progress (Drafting)</option>
+                                        <option value="GOVT_SUBMITTED">Govt / MCA Submitted</option>
+                                        <option value="QUERY_RAISED">Query / Resubmission</option>
+                                        <option value="APPROVED">APPROVED (Authority Cleared)</option>
+                                        <option
+                                          value="COMPLETED"
+                                          disabled={!isTableSvcLocked && isSvcPaymentPending}
+                                          title={
+                                            isSvcPaymentPending
+                                              ? `Payment pending (₹${svcPendingAmt.toLocaleString('en-IN')}) — accounts clearance required`
+                                              : 'Set milestone to COMPLETED to open deliverable submission'
+                                          }
+                                        >
+                                          COMPLETED {isTableSvcLocked ? '(Locked)' : isSvcPaymentPending ? '(Blocked: Payment)' : '(Ready to Complete)'}
+                                        </option>
+                                      </select>
+                                      {isTableSvcLocked && (
+                                        <span className="text-[10px] text-emerald-700 font-bold flex items-center gap-0.5 mt-0.5">
+                                          <Lock className="w-2.5 h-2.5" /> Locked
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                               </td>
 
                               <td className="py-3 px-4 min-w-[160px]">
@@ -2190,14 +2334,18 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                   type="text"
                                   defaultValue={svc.govApplicationNumber || ''}
                                   placeholder="Enter SRN / Ref..."
+                                  disabled={svc.status === 'COMPLETED'}
                                   onBlur={(e) => {
-                                    if (e.target.value !== (svc.govApplicationNumber || '')) {
+                                    if (svc.status !== 'COMPLETED' && e.target.value !== (svc.govApplicationNumber || '')) {
                                       handleUpdateService(svc.dealId, svc.id, {
                                         govApplicationNumber: e.target.value.trim(),
                                       });
                                     }
                                   }}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1 text-xs font-mono text-slate-800 focus:outline-none focus:border-slate-800"
+                                  className={`w-full border rounded px-2.5 py-1 text-xs font-mono focus:outline-none ${svc.status === 'COMPLETED'
+                                      ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                                      : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-slate-800'
+                                    }`}
                                 />
                               </td>
 
@@ -3081,65 +3229,111 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                               </div>
 
                               {/* Execution Controls Grid */}
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-slate-200 text-xs">
-                                <div>
-                                  <label className="text-xs text-slate-600 font-medium block mb-1">
-                                    Assign Specialist
-                                  </label>
-                                  <select
-                                    value={svc.assignedOpsUserId || ''}
-                                    onChange={(e) =>
-                                      handleUpdateService(activeDossierDeal.id, svc.id, {
-                                        assignedOpsUserId: e.target.value || null,
-                                      })
-                                    }
-                                    className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-slate-800"
-                                  >
-                                    <option value="">-- Select Specialist --</option>
-                                    {opsTeam.map((u) => (
-                                      <option key={u.id} value={u.id}>{u.fullName}</option>
-                                    ))}
-                                  </select>
-                                </div>
+                              {(() => {
+                                const isModalSvcLocked = svc.status === 'COMPLETED';
+                                const dTotal = Math.round(Number(activeDossierDeal?.totalAmount || 0));
+                                const dReceived = Math.round(Number(activeDossierDeal?.amountReceived || 0));
+                                const dPending = Math.max(0, Math.round(Number(activeDossierDeal?.pendingAmount ?? (dTotal - dReceived))));
+                                const dHasUnverified = (activeDossierDeal?.payments || []).some((p) => p.status !== 'VERIFIED');
+                                const dIsPaymentPending = dPending > 0 || dHasUnverified || !activeDossierDeal?.isAccountsVerified;
+                                const dHasDeliverable = (activeDossierDeal?.documents || []).some(
+                                  (d) =>
+                                    d.documentType === 'FINAL_DELIVERABLE_CERTIFICATE' ||
+                                    d.documentType === 'DELIVERABLE_CERTIFICATE' ||
+                                    (d.title && d.title.toLowerCase().includes('deliverable')) ||
+                                    (d.title && d.title.toLowerCase().includes('certificate'))
+                                );
 
-                                <div>
-                                  <label className="text-xs text-slate-600 font-medium block mb-1">
-                                    Govt Application / SRN Number
-                                  </label>
-                                  <input
-                                    type="text"
-                                    defaultValue={svc.govApplicationNumber || ''}
-                                    placeholder="e.g. SRN29182371"
-                                    onBlur={(e) =>
-                                      handleUpdateService(activeDossierDeal.id, svc.id, {
-                                        govApplicationNumber: e.target.value.trim() || null,
-                                      })
-                                    }
-                                    className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-800 focus:outline-none focus:border-slate-800"
-                                  />
-                                </div>
+                                return (
+                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-slate-200 text-xs">
+                                    <div>
+                                      <label className="text-xs text-slate-600 font-medium block mb-1">
+                                        Assign Specialist {isModalSvcLocked && <span className="text-[10px] text-slate-400">(Locked)</span>}
+                                      </label>
+                                      <select
+                                        value={svc.assignedOpsUserId || ''}
+                                        disabled={isModalSvcLocked}
+                                        onChange={(e) =>
+                                          handleUpdateService(activeDossierDeal.id, svc.id, {
+                                            assignedOpsUserId: e.target.value || null,
+                                          })
+                                        }
+                                        className={`w-full border rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none ${isModalSvcLocked
+                                            ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                                            : 'bg-white border-slate-300 focus:border-slate-800'
+                                          }`}
+                                      >
+                                        <option value="">-- Select Specialist --</option>
+                                        {opsTeam.map((u) => (
+                                          <option key={u.id} value={u.id}>{u.fullName}</option>
+                                        ))}
+                                      </select>
+                                    </div>
 
-                                <div>
-                                  <label className="text-xs text-slate-600 font-medium block mb-1">Milestone Stage</label>
-                                  <select
-                                    defaultValue={svc.status}
-                                    onChange={(e) =>
-                                      handleUpdateService(activeDossierDeal.id, svc.id, {
-                                        status: e.target.value,
-                                        completedAt: e.target.value === 'COMPLETED' ? new Date().toISOString() : null,
-                                      })
-                                    }
-                                    className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:outline-none focus:border-slate-800"
-                                  >
-                                    <option value="PENDING">PENDING</option>
-                                    <option value="IN_PROGRESS">IN_PROGRESS (Drafting)</option>
-                                    <option value="GOVT_SUBMITTED">GOVT_SUBMITTED (Filed)</option>
-                                    <option value="QUERY_RAISED">QUERY_RAISED (Resubmit)</option>
-                                    <option value="APPROVED">APPROVED (Authority Cleared)</option>
-                                    <option value="COMPLETED">COMPLETED</option>
-                                  </select>
-                                </div>
-                              </div>
+                                    <div>
+                                      <label className="text-xs text-slate-600 font-medium block mb-1">
+                                        Govt Application / SRN Number {isModalSvcLocked && <span className="text-[10px] text-slate-400">(Locked)</span>}
+                                      </label>
+                                      <input
+                                        type="text"
+                                        defaultValue={svc.govApplicationNumber || ''}
+                                        placeholder="e.g. SRN29182371"
+                                        disabled={isModalSvcLocked}
+                                        onBlur={(e) => {
+                                          if (!isModalSvcLocked) {
+                                            handleUpdateService(activeDossierDeal.id, svc.id, {
+                                              govApplicationNumber: e.target.value.trim() || null,
+                                            });
+                                          }
+                                        }}
+                                        className={`w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-800 focus:outline-none ${isModalSvcLocked
+                                            ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                                            : 'bg-white border-slate-300 focus:border-slate-800'
+                                          }`}
+                                      />
+                                    </div>
+
+                                    <div>
+                                      <div className="flex items-center justify-between mb-1">
+                                        <label className="text-xs text-slate-600 font-medium block">Milestone Stage</label>
+                                        {isModalSvcLocked && (
+                                          <span className="text-[10px] text-emerald-800 bg-emerald-100/80 px-1.5 py-0.2 rounded font-bold flex items-center gap-0.5">
+                                            <Lock className="w-2.5 h-2.5" /> Locked
+                                          </span>
+                                        )}
+                                      </div>
+                                      <select
+                                        value={milestoneStatusMap[svc.id] || svc.status || 'PENDING'}
+                                        disabled={isModalSvcLocked}
+                                        onChange={(e) =>
+                                          handleMilestoneStatusChange(activeDossierDeal.id, svc.id, e.target.value)
+                                        }
+                                        className={`w-full border rounded-lg px-2.5 py-1.5 text-xs font-medium focus:outline-none ${isModalSvcLocked
+                                            ? 'bg-emerald-50 text-emerald-800 border-emerald-300 cursor-not-allowed'
+                                            : 'bg-white border-slate-300 text-slate-800 focus:border-slate-800'
+                                          }`}
+                                      >
+                                        <option value="PENDING">PENDING</option>
+                                        <option value="IN_PROGRESS">IN_PROGRESS (Drafting)</option>
+                                        <option value="GOVT_SUBMITTED">GOVT_SUBMITTED (Filed)</option>
+                                        <option value="QUERY_RAISED">QUERY_RAISED (Resubmit)</option>
+                                        <option value="APPROVED">APPROVED (Authority Cleared)</option>
+                                        <option
+                                          value="COMPLETED"
+                                          disabled={!isModalSvcLocked && dIsPaymentPending}
+                                          title={
+                                            dIsPaymentPending
+                                              ? `Payment pending (₹${dPending.toLocaleString('en-IN')}) — accounts clearance required`
+                                              : 'Set milestone to COMPLETED to open deliverable submission'
+                                          }
+                                        >
+                                          COMPLETED {isModalSvcLocked ? '(Locked)' : dIsPaymentPending ? '(Blocked: Payment)' : ''}
+                                        </option>
+                                      </select>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
                             </div>
                           );
                         })

@@ -422,14 +422,14 @@ export default function AdminDashboard({
       const [overviewResult, clientsResult, leadsResult] = await Promise.allSettled([
         api.get('/dashboard/admin-overview'),
         api.get('/dashboard/clients'),
-        api.get('/leads'),
+        api.get('/leads', { params: { monthFilter: 'THIS_MONTH' } }),
       ]);
 
       const overviewData = overviewResult.status === 'fulfilled' ? overviewResult.value.data : null;
       const clientsData = clientsResult.status === 'fulfilled' ? clientsResult.value.data?.clients || [] : [];
       
       if (leadsResult.status === 'fulfilled' && leadsResult.value.data) {
-        const totalLeads = leadsResult.value.data.pagination?.total ?? leadsResult.value.data.analytics?.totalLeads ?? (leadsResult.value.data.leads || []).length;
+        const totalLeads = leadsResult.value.data.analytics?.thisMonthCount ?? leadsResult.value.data.pagination?.total ?? leadsResult.value.data.analytics?.totalLeads ?? (leadsResult.value.data.leads || []).length;
         setLmsCount(totalLeads);
         setLmsAnalytics(leadsResult.value.data.analytics || null);
       }
@@ -513,10 +513,15 @@ export default function AdminDashboard({
   useEffect(() => {
     fetchAdminData();
 
-    const handleLmsChanged = () => {
-      api.get('/leads').then((res) => {
+    const handleLmsChanged = (event) => {
+      if (event?.detail?.thisMonthCount !== undefined) {
+        setLmsCount(event.detail.thisMonthCount);
+        if (event.detail.analytics) setLmsAnalytics(event.detail.analytics);
+        return;
+      }
+      api.get('/leads', { params: { monthFilter: 'THIS_MONTH' } }).then((res) => {
         if (res.data) {
-          const totalLeads = res.data.pagination?.total ?? res.data.analytics?.totalLeads ?? (res.data.leads || []).length;
+          const totalLeads = res.data.analytics?.thisMonthCount ?? res.data.pagination?.total ?? res.data.analytics?.totalLeads ?? (res.data.leads || []).length;
           setLmsCount(totalLeads);
           setLmsAnalytics(res.data.analytics || null);
         }
