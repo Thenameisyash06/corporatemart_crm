@@ -605,6 +605,14 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
   useEffect(() => {
     fetchOpsData();
+
+    const handleGlobalRefresh = () => {
+      fetchOpsData();
+    };
+    window.addEventListener('app_refresh_all', handleGlobalRefresh);
+    return () => {
+      window.removeEventListener('app_refresh_all', handleGlobalRefresh);
+    };
   }, []);
 
   // ---------------------------------------------------------------------------

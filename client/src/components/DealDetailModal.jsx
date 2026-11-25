@@ -159,6 +159,15 @@ export default function DealDetailModal({ dealId, isOpen, onClose, currentUser, 
 
   useEffect(() => {
     fetchDeal();
+
+    if (!dealId) return;
+    const handleGlobalRefresh = () => {
+      fetchDeal();
+    };
+    window.addEventListener('app_refresh_all', handleGlobalRefresh);
+    return () => {
+      window.removeEventListener('app_refresh_all', handleGlobalRefresh);
+    };
   }, [dealId]);
 
   const handleResubmit = async () => {

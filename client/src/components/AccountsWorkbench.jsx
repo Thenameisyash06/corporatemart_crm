@@ -80,6 +80,14 @@ export default function AccountsWorkbench({ currentUser, onRefreshParent, onOpen
 
   useEffect(() => {
     fetchAccountsQueue(); // account begin fetched
+
+    const handleGlobalRefresh = () => {
+      fetchAccountsQueue();
+    };
+    window.addEventListener('app_refresh_all', handleGlobalRefresh);
+    return () => {
+      window.removeEventListener('app_refresh_all', handleGlobalRefresh);
+    };
   }, []);
 
   useEffect(() => {
