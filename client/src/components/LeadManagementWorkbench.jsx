@@ -134,6 +134,21 @@ export const BDM_TARGET_MAP = {
   'Jimit Panchal': 25000,
 };
 
+export const getCanonicalBdmName = (rawName) => {
+  if (!rawName) return '';
+  const trimmed = String(rawName).replace(/\s*\([^)]*\)/g, '').trim();
+  if (!trimmed || trimmed === '-- None (Single BDM) --') return '';
+  const lower = trimmed.toLowerCase();
+  const matchedLeader = LMS_LEADERS.find((l) => l.toLowerCase() === lower);
+  if (matchedLeader) return matchedLeader;
+  const matchedBdm = LMS_BDMS.find((b) => b.toLowerCase() === lower);
+  if (matchedBdm) return matchedBdm;
+  return trimmed
+    .split(/\s+/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+};
+
 export const LMS_CLOSER_STATUSES = [
   'Self Closer',
   'Lead Sharing',
@@ -302,7 +317,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
   const [selectedBdmDetailModal, setSelectedBdmDetailModal] = useState(null);
   const [adminCockpitTab, setAdminCockpitTab] = useState('ALL'); // 'ALL' | 'LEADERS' | 'MEMBERS' | 'ACTIVE_ONLY'
   const [adminCockpitSearch, setAdminCockpitSearch] = useState('');
-  const [bdmDetailModalTab, setBdmDetailModalTab] = useState('LEADS'); // 'LEADS' | 'FOLLOWUPS' | 'METRICS'
+  const [bdmDetailModalTab, setBdmDetailModalTab] = useState('FOLLOWUPS'); // 'FOLLOWUPS' | 'METRICS'
 
   // Quotation File Upload State
   const [quotationFile, setQuotationFile] = useState(null);
@@ -755,7 +770,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       } else {
         if (selectedBdmFilter !== 'ALL') params.bdmName = selectedBdmFilter;
       }
-      if (selectedLeaderFilter !== 'ALL') params.leaderName = selectedLeaderFilter;
+      if (isAdmin && selectedLeaderFilter !== 'ALL') params.leaderName = selectedLeaderFilter;
       if (selectedCloserFilter !== 'ALL') params.closerStatus = selectedCloserFilter;
       if (selectedClientStatusFilter !== 'ALL') params.clientStatus = selectedClientStatusFilter;
       if (selectedSourcingFilter !== 'ALL') params.sourcingStatus = selectedSourcingFilter;
@@ -996,7 +1011,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     const membersMap = {};
 
     // 1. Get all team member names for this leader from DB analytics (or BDM_LEADER_MAP fallback)
-    const teamMemberNames = (analytics?.dbTeamMembers && analytics.dbTeamMembers.length > 0)
+    const rawTeamMemberNames = (analytics?.dbTeamMembers && analytics.dbTeamMembers.length > 0)
       ? analytics.dbTeamMembers
       : Object.entries(BDM_LEADER_MAP)
           .filter(([_, ldr]) => {
@@ -1005,13 +1020,19 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
           })
           .map(([bdm]) => bdm);
 
+    // Canonicalize and deduplicate team member names
+    const uniqueMembers = new Map();
+    rawTeamMemberNames.forEach((n) => {
+      const canonical = getCanonicalBdmName(n);
+      if (!canonical || canonical.toLowerCase() === leaderKey) return;
+      uniqueMembers.set(canonical.toLowerCase(), canonical);
+    });
+
     // Initialize every team member from DB so their card is ALWAYS present!
-    teamMemberNames.forEach((name) => {
-      const cleanName = name.trim();
-      if (!cleanName || cleanName.toLowerCase() === leaderKey) return;
-      membersMap[cleanName] = {
-        name: cleanName,
-        salesTarget: analytics?.dbTargetMap?.[cleanName] || BDM_TARGET_MAP[cleanName] || 0,
+    uniqueMembers.forEach((name, lowerKey) => {
+      membersMap[lowerKey] = {
+        name,
+        salesTarget: analytics?.dbTargetMap?.[name] || analytics?.dbTargetMap?.[lowerKey] || BDM_TARGET_MAP[name] || 0,
         leads: [],
       };
     });
@@ -1033,10 +1054,11 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       }
       if (!memberName || memberName.toLowerCase() === leaderKey || memberName === '-- None (Single BDM) --') return;
 
-      const cleanLower = memberName.toLowerCase().trim();
+      const canonical = getCanonicalBdmName(memberName);
+      const cleanLower = canonical.toLowerCase();
       // Match to an existing member of this leader's team
       const matchKey = Object.keys(membersMap).find(
-        (k) => k.toLowerCase() === cleanLower || cleanLower.includes(k.toLowerCase()) || k.toLowerCase().includes(cleanLower)
+        (k) => k === cleanLower || cleanLower.includes(k) || k.includes(cleanLower)
       );
       if (matchKey) {
         membersMap[matchKey].leads.push(lead);
@@ -1117,17 +1139,33 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
 
       const totalLeads = mLeads.length > 0 ? mLeads.length : (bo?.totalLeads ?? 0);
 
+      let maxOverdue = 0;
+      let overdueCount = 0;
+      mLeads.forEach((l) => {
+        const info = getLeadOverdueInfo(l);
+        if (info.isOverdue) {
+          overdueCount++;
+          if (info.daysOverdue > maxOverdue) maxOverdue = info.daysOverdue;
+        }
+      });
+
       return {
         name: member.name,
         salesTarget: member.salesTarget || bo?.salesTarget || 0,
         isLeaderMember: false,
         isSelf: false,
+        leads: mLeads || [],
         totalLeads,
         activeLeads,
         hotCount,
+        hotValue: mLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'hot').reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0) || (bo?.hotValue ?? 0),
         warmCount,
+        warmValue: mLeads.filter((l) => (l.clientStatus || 'warm').toLowerCase() === 'warm').reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0) || (bo?.warmValue ?? 0),
         lostCount,
         closedCount,
+        closedValue: mLeads.filter((l) => l.leadStatus === 'CLOSED_WON' || (l.clientStatus || '').toLowerCase() === 'closed').reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0) || (bo?.closedValue ?? 0),
+        pendingFollowupsCount: overdueCount || bo?.pendingFollowupsCount || 0,
+        maxDaysOverdue: maxOverdue || bo?.maxDaysOverdue || 0,
         meetingCount: meetingLeads.length > 0 ? meetingLeads.length : (bo?.meetingCount ?? 0),
         nextMeetingLead,
         lastFollowUp,
@@ -1139,12 +1177,12 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     cards.sort((a, b) => (b.totalFunnel || 0) - (a.totalFunnel || 0) || (b.totalLeads || 0) - (a.totalLeads || 0) || a.name.localeCompare(b.name));
 
     return cards;
-  }, [isLeader, matchedLeaderName, loggedInBdmName, leads, sharedTeamLeads, analytics]);
+  }, [isLeader, matchedLeaderName, loggedInBdmName, leads, sharedTeamLeads, analytics, getLeadOverdueInfo]);
 
   // Leads actually displayed in the table below (supports filtering to a selected team member, selected month, and pending follow-ups)
   const displayedLeads = useMemo(() => {
     let list = visibleLeads;
-    if (selectedLeaderFilter && selectedLeaderFilter !== 'ALL') {
+    if (isAdmin && selectedLeaderFilter && selectedLeaderFilter !== 'ALL') {
       const ldr = selectedLeaderFilter.toLowerCase().trim();
       list = list.filter((l) => {
         const leadLdr = (l.leaderName || '').toLowerCase().trim();
@@ -1381,33 +1419,41 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     } else {
       // Fallback: build from leads + LMS_LEADERS + LMS_BDMS
       const map = {};
-      LMS_LEADERS.forEach((ldr) => {
-        map[ldr] = {
-          name: ldr,
-          isLeader: true,
-          leaderName: BDM_LEADER_MAP[ldr] || ldr,
-          salesTarget: BDM_TARGET_MAP[ldr] || 0,
-          leads: [],
-          totalLeads: 0,
-          activeLeads: 0,
-          totalFunnel: 0,
-          hotCount: 0,
-          hotValue: 0,
-          warmCount: 0,
-          warmValue: 0,
-          lostCount: 0,
-          closedCount: 0,
-          closedValue: 0,
-          pendingFollowupsCount: 0,
-          nextMeetingLead: null,
-          lastFollowUp: null,
-          nearestEdcLead: null,
-        };
+      LMS_LEADERS.forEach((rawLdr) => {
+        const ldr = getCanonicalBdmName(rawLdr);
+        if (!ldr) return;
+        const key = ldr.toLowerCase();
+        if (!map[key]) {
+          map[key] = {
+            name: ldr,
+            isLeader: true,
+            leaderName: BDM_LEADER_MAP[ldr] || ldr,
+            salesTarget: BDM_TARGET_MAP[ldr] || 0,
+            leads: [],
+            totalLeads: 0,
+            activeLeads: 0,
+            totalFunnel: 0,
+            hotCount: 0,
+            hotValue: 0,
+            warmCount: 0,
+            warmValue: 0,
+            lostCount: 0,
+            closedCount: 0,
+            closedValue: 0,
+            pendingFollowupsCount: 0,
+            nextMeetingLead: null,
+            lastFollowUp: null,
+            nearestEdcLead: null,
+          };
+        }
       });
-      LMS_BDMS.forEach((b) => {
-        const isLdr = LMS_LEADERS.some((l) => l.toLowerCase() === b.toLowerCase());
-        if (!map[b]) {
-          map[b] = {
+      LMS_BDMS.forEach((rawB) => {
+        const b = getCanonicalBdmName(rawB);
+        if (!b) return;
+        const key = b.toLowerCase();
+        const isLdr = LMS_LEADERS.some((l) => l.toLowerCase() === key);
+        if (!map[key]) {
+          map[key] = {
             name: b,
             isLeader: isLdr,
             leaderName: BDM_LEADER_MAP[b] || null,
@@ -1431,9 +1477,9 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         }
       });
       (leads || []).forEach((l) => {
-        const b1 = (l.bdmName1 || '').trim();
-        const b2 = (l.bdmName2 || '').trim();
-        const ldr = (l.leaderName || '').trim();
+        const b1 = getCanonicalBdmName(l.bdmName1);
+        const b2 = getCanonicalBdmName(l.bdmName2);
+        const ldr = getCanonicalBdmName(l.leaderName);
         const names = [b1, b2].filter((n) => n && n !== '-- None (Single BDM) --');
         const val = parseFloat(l.dealValue) || 0;
         const cs = (l.clientStatus || 'warm').toLowerCase();
@@ -1441,11 +1487,12 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         const isLost = l.leadStatus === 'CLOSED_LOST' || cs === 'lost';
         const isActive = !isWon && !isLost;
 
-        names.forEach((name) => {
-          if (!map[name]) {
-            const isLdr = LMS_LEADERS.some((l) => l.toLowerCase() === name.toLowerCase());
-            map[name] = {
-              name,
+        names.forEach((canonicalName) => {
+          const key = canonicalName.toLowerCase();
+          if (!map[key]) {
+            const isLdr = LMS_LEADERS.some((l) => l.toLowerCase() === key);
+            map[key] = {
+              name: canonicalName,
               isLeader: isLdr,
               leads: [],
               totalLeads: 0,
@@ -1464,33 +1511,33 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
               nearestEdcLead: null,
             };
           }
-          map[name].leads.push(l);
-          map[name].totalLeads++;
+          map[key].leads.push(l);
+          map[key].totalLeads++;
           if (isActive) {
-            map[name].activeLeads++;
-            map[name].totalFunnel += val;
+            map[key].activeLeads++;
+            map[key].totalFunnel += val;
           }
           if (cs === 'hot') {
-            map[name].hotCount++;
-            map[name].hotValue += val;
+            map[key].hotCount++;
+            map[key].hotValue += val;
           } else if (cs === 'warm') {
-            map[name].warmCount++;
-            map[name].warmValue += val;
+            map[key].warmCount++;
+            map[key].warmValue += val;
           } else if (isLost) {
-            map[name].lostCount++;
+            map[key].lostCount++;
           }
           if (isWon) {
-            map[name].closedCount++;
-            map[name].closedValue += val;
+            map[key].closedCount++;
+            map[key].closedValue += val;
           }
-          if (ldr && !map[name].leaderName && !map[name].isLeader) {
-            map[name].leaderName = ldr;
+          if (ldr && !map[key].leaderName && !map[key].isLeader) {
+            map[key].leaderName = ldr;
           }
           const overdueInfo = getLeadOverdueInfo(l);
           if (overdueInfo.isOverdue) {
-            map[name].pendingFollowupsCount = (map[name].pendingFollowupsCount || 0) + 1;
-            if (overdueInfo.daysOverdue > (map[name].maxDaysOverdue || 0)) {
-              map[name].maxDaysOverdue = overdueInfo.daysOverdue;
+            map[key].pendingFollowupsCount = (map[key].pendingFollowupsCount || 0) + 1;
+            if (overdueInfo.daysOverdue > (map[key].maxDaysOverdue || 0)) {
+              map[key].maxDaysOverdue = overdueInfo.daysOverdue;
             }
           }
         });
@@ -1502,6 +1549,48 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         return (b.totalFunnel || 0) - (a.totalFunnel || 0) || (b.totalLeads || 0) - (a.totalLeads || 0);
       });
     }
+
+    // Strictly deduplicate list by canonical name case-insensitively
+    const deduplicatedMap = {};
+    list.forEach((card) => {
+      const canonical = getCanonicalBdmName(card.name);
+      if (!canonical) return;
+      const key = canonical.toLowerCase();
+      if (!deduplicatedMap[key]) {
+        deduplicatedMap[key] = {
+          ...card,
+          name: canonical,
+          leads: Array.isArray(card.leads) ? [...card.leads] : [],
+        };
+      } else {
+        const existing = deduplicatedMap[key];
+        const existingLeadIds = new Set((existing.leads || []).map((l) => l.id));
+        if (Array.isArray(card.leads)) {
+          card.leads.forEach((l) => {
+            if (!existingLeadIds.has(l.id)) {
+              existing.leads.push(l);
+              existingLeadIds.add(l.id);
+            }
+          });
+        }
+        existing.totalLeads = Math.max(existing.totalLeads || 0, card.totalLeads || 0, existing.leads.length);
+        existing.activeLeads = Math.max(existing.activeLeads || 0, card.activeLeads || 0);
+        existing.totalFunnel = Math.max(existing.totalFunnel || 0, card.totalFunnel || 0);
+        existing.hotCount = Math.max(existing.hotCount || 0, card.hotCount || 0);
+        existing.hotValue = Math.max(existing.hotValue || 0, card.hotValue || 0);
+        existing.warmCount = Math.max(existing.warmCount || 0, card.warmCount || 0);
+        existing.warmValue = Math.max(existing.warmValue || 0, card.warmValue || 0);
+        existing.lostCount = Math.max(existing.lostCount || 0, card.lostCount || 0);
+        existing.closedCount = Math.max(existing.closedCount || 0, card.closedCount || 0);
+        existing.closedValue = Math.max(existing.closedValue || 0, card.closedValue || 0);
+        existing.meetingCount = Math.max(existing.meetingCount || 0, card.meetingCount || 0);
+        if (!existing.nextMeetingLead && card.nextMeetingLead) existing.nextMeetingLead = card.nextMeetingLead;
+        if (!existing.lastFollowUp && card.lastFollowUp) existing.lastFollowUp = card.lastFollowUp;
+        if (!existing.nearestEdcLead && card.nearestEdcLead) existing.nearestEdcLead = card.nearestEdcLead;
+        if (!existing.isLeader && card.isLeader) existing.isLeader = true;
+      }
+    });
+    list = Object.values(deduplicatedMap);
 
     // Ensure pendingFollowupsCount and maxDaysOverdue are strictly synchronized
     list = list.map((card) => {
@@ -1900,7 +1989,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       } else {
         if (selectedBdmFilter !== 'ALL') params.bdmName = selectedBdmFilter;
       }
-      if (selectedLeaderFilter !== 'ALL') params.leaderName = selectedLeaderFilter;
+      if (isAdmin && selectedLeaderFilter !== 'ALL') params.leaderName = selectedLeaderFilter;
       if (selectedCloserFilter !== 'ALL') params.closerStatus = selectedCloserFilter;
       if (selectedClientStatusFilter !== 'ALL') params.clientStatus = selectedClientStatusFilter;
       if (selectedSourcingFilter !== 'ALL') params.sourcingStatus = selectedSourcingFilter;
@@ -2555,47 +2644,18 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                     </div>
 
                     {/* Card Action Buttons */}
-                    <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                    <div className="pt-2 border-t border-slate-100">
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelectedBdmDetailModal(member);
                         }}
-                        className="flex-1 py-1.5 bg-white hover:bg-slate-50 text-slate-700 font-semibold rounded-lg text-xs flex items-center justify-center gap-1 border border-slate-300 transition cursor-pointer"
-                        title="Click to view detailed info and leads dossier"
+                        className="w-full py-1.5 bg-white hover:bg-slate-50 text-slate-700 font-semibold rounded-lg text-xs flex items-center justify-center gap-1 border border-slate-300 transition cursor-pointer"
+                        title="Click to view detailed info"
                       >
                         <Eye className="w-3.5 h-3.5 text-slate-500" />
                         <span>View Details</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (selectedTeamMemberFilter.toLowerCase() === member.name.toLowerCase()) {
-                            setSelectedTeamMemberFilter('ALL');
-                          } else {
-                            setSelectedTeamMemberFilter(member.name);
-                          }
-                        }}
-                        className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-1 cursor-pointer ${isSelected
-                          ? 'bg-slate-900 text-white hover:bg-slate-800 shadow-xs'
-                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
-                          }`}
-                        title="Filter table below to this person's leads"
-                      >
-                        {isSelected ? (
-                          <>
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>Filtered</span>
-                          </>
-                        ) : (
-                          <>
-                            <Filter className="w-3.5 h-3.5 text-slate-500" />
-                            <span>Filter Table</span>
-                          </>
-                        )}
                       </button>
                     </div>
                   </div>
@@ -3178,17 +3238,33 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
             <option value="Lost">❄️ Lost Clients</option>
           </select>
 
-          {/* Leader Filter */}
-          <select
-            value={selectedLeaderFilter}
-            onChange={(e) => setSelectedLeaderFilter(e.target.value)}
-            className="h-9 bg-slate-50 border border-slate-200 rounded-lg px-2.5 text-xs text-slate-700 font-semibold focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800 transition-colors"
-          >
-            <option value="ALL">All Leaders</option>
-            {LMS_LEADERS.map((ldr) => (
-              <option key={ldr} value={ldr}>{ldr}</option>
-            ))}
-          </select>
+          {/* Leader Filter (ADMIN ONLY) */}
+          {isAdmin && (
+            <select
+              value={selectedLeaderFilter}
+              onChange={(e) => setSelectedLeaderFilter(e.target.value)}
+              className="h-9 bg-slate-50 border border-slate-200 rounded-lg px-2.5 text-xs text-slate-700 font-semibold focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800 transition-colors"
+            >
+              <option value="ALL">All Leaders</option>
+              {LMS_LEADERS.map((ldr) => (
+                <option key={ldr} value={ldr}>{ldr}</option>
+              ))}
+            </select>
+          )}
+
+          {/* Team Member Filter for Leaders */}
+          {isLeader && !isAdmin && (
+            <select
+              value={selectedTeamMemberFilter}
+              onChange={(e) => setSelectedTeamMemberFilter(e.target.value)}
+              className="h-9 bg-slate-50 border border-slate-200 rounded-lg px-2.5 text-xs text-slate-700 font-semibold focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800 transition-colors"
+            >
+              <option value="ALL">All Team Members</option>
+              {teamMembersCards.map((m) => (
+                <option key={m.name} value={m.name}>{m.name}</option>
+              ))}
+            </select>
+          )}
 
           {/* BDM Filter (ADMIN ONLY) */}
           {isAdmin && (
@@ -3500,47 +3576,18 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                     </div>
 
                     {/* Card Action Buttons */}
-                    <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                    <div className="pt-2 border-t border-slate-100">
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelectedBdmDetailModal(member);
                         }}
-                        className="flex-1 py-1.5 bg-white hover:bg-slate-50 text-slate-700 font-semibold rounded-lg text-xs flex items-center justify-center gap-1 border border-slate-300 transition cursor-pointer"
-                        title="Click to view detailed info and leads dossier"
+                        className="w-full py-1.5 bg-white hover:bg-slate-50 text-slate-700 font-semibold rounded-lg text-xs flex items-center justify-center gap-1 border border-slate-300 transition cursor-pointer"
+                        title="Click to view detailed info"
                       >
                         <Eye className="w-3.5 h-3.5 text-slate-500" />
                         <span>View Details</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (selectedTeamMemberFilter.toLowerCase() === member.name.toLowerCase()) {
-                            setSelectedTeamMemberFilter('ALL');
-                          } else {
-                            setSelectedTeamMemberFilter(member.name);
-                          }
-                        }}
-                        className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-1 cursor-pointer ${isSelected
-                          ? 'bg-slate-900 text-white hover:bg-slate-800 shadow-xs'
-                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
-                          }`}
-                        title="Filter table below to this person's leads"
-                      >
-                        {isSelected ? (
-                          <>
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>Filtered</span>
-                          </>
-                        ) : (
-                          <>
-                            <Filter className="w-3.5 h-3.5 text-slate-500" />
-                            <span>Filter Table</span>
-                          </>
-                        )}
                       </button>
                     </div>
                   </div>
@@ -4688,17 +4735,6 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
             <div className="flex items-center gap-2 px-5 pt-3 border-b border-slate-200 bg-white">
               <button
                 type="button"
-                onClick={() => setBdmDetailModalTab('LEADS')}
-                className={`pb-2.5 px-3 text-xs font-semibold border-b-2 transition cursor-pointer flex items-center gap-1.5 ${bdmDetailModalTab === 'LEADS'
-                  ? 'border-slate-900 text-slate-900 font-bold'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-                  }`}
-              >
-                <Briefcase className="w-3.5 h-3.5" />
-                <span>Leads Dossier ({selectedBdmDetailModal.leads?.length || 0})</span>
-              </button>
-              <button
-                type="button"
                 onClick={() => setBdmDetailModalTab('FOLLOWUPS')}
                 className={`pb-2.5 px-3 text-xs font-semibold border-b-2 transition cursor-pointer flex items-center gap-1.5 ${bdmDetailModalTab === 'FOLLOWUPS'
                   ? 'border-slate-900 text-slate-900 font-bold'
@@ -4723,139 +4759,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
 
             {/* Modal Body / Tab Contents */}
             <div className="flex-1 overflow-y-auto p-4 sm:p-5">
-              {/* TAB 1: LEADS DOSSIER */}
-              {bdmDetailModalTab === 'LEADS' && (
-                <div className="space-y-3">
-                  {!selectedBdmDetailModal.leads || selectedBdmDetailModal.leads.length === 0 ? (
-                    <div className="p-8 text-center text-xs text-slate-400 italic">
-                      No leads recorded for {selectedBdmDetailModal.name} in this period.
-                    </div>
-                  ) : (
-                    <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead>
-                          <tr className="bg-slate-50 text-slate-600 font-semibold uppercase text-[10px] border-b border-slate-200">
-                            <th className="py-2.5 px-3">Company & Contact</th>
-                            <th className="py-2.5 px-3">Status</th>
-                            <th className="py-2.5 px-3 text-right">Deal Value</th>
-                            <th className="py-2.5 px-3">Meeting</th>
-                            <th className="py-2.5 px-3">Follow-up</th>
-                            <th className="py-2.5 px-3 text-center">Action</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 font-medium">
-                          {selectedBdmDetailModal.leads.map((l) => (
-                            <tr key={l.id} className="hover:bg-slate-50 transition">
-                              <td className="py-2.5 px-3">
-                                <span className="font-bold text-slate-900 block">{l.companyName}</span>
-                                <span className="text-[10px] text-slate-500 block">
-                                  {l.directorName || 'N/A'} • {l.mobileNo || 'N/A'}
-                                </span>
-                              </td>
-                              <td className="py-2.5 px-3">
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span
-                                    className="text-[10px] px-2 py-0.5 rounded font-semibold bg-slate-100 text-slate-700 border border-slate-200"
-                                  >
-                                    {normalizeClientStatus(l.clientStatus)}
-                                  </span>
-                                  {l.leadStatus === 'CLOSED_WON' && (
-                                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-900 text-white font-semibold">
-                                      Won
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
-                                ₹{Number(l.dealValue || 0).toLocaleString('en-IN')}
-                              </td>
-                              <td className="py-2.5 px-3 text-[11px] text-slate-700">
-                                {l.meetingDate ? (
-                                  <div>
-                                    <span className="font-semibold block">
-                                      {new Date(l.meetingDate).toLocaleDateString('en-IN', {
-                                        day: '2-digit',
-                                        month: 'short',
-                                      })}
-                                    </span>
-                                    <span className="text-[10px] text-slate-500">{l.meetingStatus}</span>
-                                  </div>
-                                ) : (
-                                  <span className="text-slate-400 italic">None</span>
-                                )}
-                              </td>
-                              <td className="py-2.5 px-3 text-[11px]">
-                                {l.nextFollowUpDate ? (
-                                  <span className="font-semibold text-slate-800 block">
-                                    {new Date(l.nextFollowUpDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
-                                  </span>
-                                ) : (
-                                  <span className="text-slate-400 italic">None</span>
-                                )}
-                              </td>
-                              <td className="py-2.5 px-3 text-center">
-                                <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                                  {onConvertToDeal && l.leadStatus !== 'CONVERTED' && l.leadStatus !== 'CLOSED_WON' && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setSelectedBdmDetailModal(null);
-                                        onConvertToDeal(l);
-                                      }}
-                                      className="px-2 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded text-[10px] font-semibold transition shadow-2xs cursor-pointer"
-                                      title="Convert to Active Deal Dossier"
-                                    >
-                                      Convert
-                                    </button>
-                                  )}
-                                  {isAdmin && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const overdueInfo = getLeadOverdueInfo(l);
-                                        setReassignModalLead(l);
-                                        setReassignForm({
-                                          newBdmName: '',
-                                          newLeaderName: l.leaderName || LMS_LEADERS[0],
-                                          reason: overdueInfo.isOverdue
-                                            ? `Follow-up overdue for ${overdueInfo.daysOverdue} days without response.`
-                                            : 'Administrative lead reassignment.',
-                                          nextFollowUpDate: getTodayDateStr(),
-                                          handoverNotes: '',
-                                        });
-                                      }}
-                                      className="px-2 py-1 bg-rose-700 hover:bg-rose-800 text-white rounded text-[10px] font-bold transition shadow-2xs flex items-center gap-1 cursor-pointer"
-                                      title="Revoke & Reassign Lead to another BDM"
-                                    >
-                                      <ArrowRightLeft className="w-2.5 h-2.5" />
-                                      <span>Revoke</span>
-                                    </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setSelectedTeamMemberFilter(selectedBdmDetailModal.name);
-                                      setSelectedBdmDetailModal(null);
-                                      const rowEl = document.getElementById(`lead-row-${l.id}`);
-                                      if (rowEl) rowEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                    }}
-                                    className="p-1 hover:bg-slate-200 rounded text-slate-600 transition cursor-pointer"
-                                    title="View row in main table"
-                                  >
-                                    <Eye className="w-3.5 h-3.5 text-slate-500" />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* TAB 2: FOLLOW-UPS & MEETINGS */}
+              {/* TAB 1: FOLLOW-UPS & MEETINGS */}
               {bdmDetailModalTab === 'FOLLOWUPS' && (
                 <div className="space-y-4">
                   {/* Overdue Follow-ups Alert Section if any */}
@@ -4923,13 +4827,13 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                       <Calendar className="w-4 h-4 text-slate-700" />
                       <span>Scheduled Meetings</span>
                     </h4>
-                    {selectedBdmDetailModal.leads?.filter((l) => l.meetingDate).length === 0 ? (
+                    {(selectedBdmDetailModal.leads || []).filter((l) => l.meetingDate).length === 0 ? (
                       <p className="text-xs text-slate-400 italic bg-slate-50 p-3 rounded-lg border border-slate-200">
                         No scheduled meetings for this BDM.
                       </p>
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {selectedBdmDetailModal.leads
+                        {(selectedBdmDetailModal.leads || [])
                           .filter((l) => l.meetingDate)
                           .map((l) => (
                             <div
