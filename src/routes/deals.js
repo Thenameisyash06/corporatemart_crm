@@ -1730,22 +1730,11 @@ router.patch('/:id/services/:serviceId', authenticateToken, requireRoles('OPERAT
       });
     }
 
-    // Requirements 1 & 2: When setting status to 'COMPLETED'
+    // Requirements: When setting status to 'COMPLETED'
     if (status === 'COMPLETED') {
       const parentDeal = currentService.deal;
-      const totalAmount = Math.round(Number(parentDeal?.totalAmount || 0));
-      const amountReceived = Math.round(Number(parentDeal?.amountReceived || 0));
-      const pendingAmount = Math.max(0, Math.round(Number(parentDeal?.pendingAmount || (totalAmount - amountReceived))));
-      const hasUnverifiedPayments = (parentDeal?.payments || []).some((p) => p.status !== 'VERIFIED');
 
-      // Requirement 1: If payment is pending, service can't complete
-      if (pendingAmount > 0 || hasUnverifiedPayments || !parentDeal?.isAccountsVerified) {
-        return res.status(400).json({
-          error: `Service cannot be marked as COMPLETED because payment is pending (Pending Balance: ₹${pendingAmount.toLocaleString('en-IN')}). All payment tranches must be verified and cleared before completing this service.`,
-        });
-      }
-
-      // Requirement 2: If deliverable not submitted, service can't complete
+      // Requirement: Deliverable must be submitted before service can be marked as COMPLETED
       const dealDocuments = parentDeal?.documents || [];
       const hasDeliverable = dealDocuments.some(
         (d) =>
