@@ -249,6 +249,28 @@ export default function App() {
     };
   }, [currentUser]);
 
+  // Global desktop hard refresh shortcut handler
+  useEffect(() => {
+    const handleGlobalKeyDown = (e) => {
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const isModifier = isMac ? e.metaKey : e.ctrlKey;
+      const isKeyR = e.key === 'r' || e.key === 'R' || e.code === 'KeyR';
+      const isKeyF5 = e.key === 'F5' || e.code === 'F5';
+
+      // Hard reload shortcuts: Ctrl+Shift+R, Cmd+Shift+R, Ctrl+F5, Shift+F5
+      if ((isModifier && e.shiftKey && isKeyR) || (isModifier && isKeyF5) || (e.shiftKey && isKeyF5)) {
+        if (window.desktopAPI?.hardReload) {
+          e.preventDefault();
+          toast.info('Initiating hard reload: clearing cache and refreshing...', 'Desktop App');
+          window.desktopAPI.hardReload();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
+
   // Re-fetch deals when stage filter or debounced search changes
   useEffect(() => {
     if (currentUser) {
