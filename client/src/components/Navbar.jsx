@@ -24,6 +24,29 @@ export default function Navbar({
 }) {
   const [switching, setSwitching] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isReloading, setIsReloading] = useState(false);
+
+  const handleReloadPage = async () => {
+    setIsReloading(true);
+    try {
+      // Clear cache storage if available to ensure freshest code/assets
+      if ('caches' in window) {
+        const names = await caches.keys();
+        await Promise.all(names.map((name) => caches.delete(name)));
+      }
+    } catch (e) {
+      // Ignore cache clearing errors
+    }
+
+    // In Electron Desktop App, trigger native hard reload (clears session cache and reloads)
+    if (window.desktopAPI?.hardReload) {
+      window.desktopAPI.hardReload();
+      return;
+    }
+
+    // In browser web app, trigger hard page reload with timestamp cache buster
+    window.location.href = window.location.pathname + '?_t=' + Date.now();
+  };
 
   const handleQuickSwitch = async (roleObj) => {
     try {
@@ -114,46 +137,20 @@ export default function Navbar({
           )}
 
           <button
-            onClick={(e) => {
-              // Shift-click, Ctrl-click, or Alt-click triggers full hard refresh of desktop app
-              if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) {
-                if ('caches' in window) {
-                  caches.keys().then((names) => {
-                    names.forEach((name) => caches.delete(name));
-                  });
-                }
-                if (window.desktopAPI?.hardReload) {
-                  window.desktopAPI.hardReload();
-                  return;
-                }
-                window.location.href = window.location.pathname + '?_t=' + Date.now();
-                return;
-              }
-              onRefresh();
-            }}
+            onClick={handleReloadPage}
             onContextMenu={(e) => {
-              // Right-click triggers full hard refresh
               e.preventDefault();
-              if ('caches' in window) {
-                caches.keys().then((names) => {
-                  names.forEach((name) => caches.delete(name));
-                });
-              }
-              if (window.desktopAPI?.hardReload) {
-                window.desktopAPI.hardReload();
-              } else {
-                window.location.href = window.location.pathname + '?_t=' + Date.now();
-              }
+              handleReloadPage();
             }}
-            disabled={isRefreshing}
+            disabled={isReloading || isRefreshing}
             title={
               window.desktopAPI?.isDesktop
-                ? 'Refresh Workspace Data (Shift+Click or Right-Click for Full Hard Refresh)'
-                : 'Refresh All System & Workspace Data'
+                ? 'Reload & Refresh Page (Desktop App)'
+                : 'Reload & Refresh Page'
             }
             className="w-9 h-9 flex items-center justify-center text-slate-600 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-all cursor-pointer disabled:opacity-50"
           >
-            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-indigo-600' : ''}`} />
+            <RefreshCw className={`w-4 h-4 ${(isReloading || isRefreshing) ? 'animate-spin text-indigo-600' : ''}`} />
           </button>
 
           {currentUser ? (
