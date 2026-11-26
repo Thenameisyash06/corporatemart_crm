@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Cog,
   CheckCircle2,
@@ -515,7 +515,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
   useEffect(() => {
     if (isManager) {
-      if (activeTab === 'pool') setActiveTab('allocation');
+      if (activeTab === 'pool' || activeTab === 'my_tasks') setActiveTab('allocation');
     } else {
       if (activeTab === 'allocation' || activeTab === 'team' || activeTab === 'dossier') setActiveTab('my_tasks');
     }
@@ -676,35 +676,41 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
     return EXPERTISE_SECTORS[3]; // Default to Incorporation
   }, [currentUser, isManager]);
 
-  // Specialist's personal assigned services
-  const myServices = useMemo(() => {
-    return allServices.filter(
-      (s) =>
-        s.assignedOpsUserId === currentUser?.id ||
-        (currentUser?.email && s.assignedOpsUser?.email === currentUser?.email)
-    );
-  }, [allServices, currentUser]);
-
-  // Unassigned General Pool
-  // Deals assigned specifically to the logged-in Operations Manager
-  const managerDossierDeals = useMemo(() => {
-    return deals.filter((d) => {
-      const isDealAssigned =
-        (currentUser?.id && d.assignedOpsUserId === currentUser.id) ||
-        (currentUser?.email && d.assignedOpsUser?.email === currentUser.email);
-      const hasAssignedService = (d.services || []).some(
-        (s) =>
-          (currentUser?.id && s.assignedOpsUserId === currentUser.id) ||
-          (currentUser?.email && s.assignedOpsUser?.email === currentUser.email)
+  // Helper: Detect whether a service is assigned to the current manager/specialist
+  const isServiceAssignedToManager = useCallback(
+    (svc) => {
+      if (!svc) return false;
+      return Boolean(
+        (currentUser?.id && svc.assignedOpsUserId === currentUser.id) ||
+        (currentUser?.email && svc.assignedOpsUser?.email === currentUser.email) ||
+        (currentUser?.fullName && svc.assignedOpsUser?.fullName === currentUser.fullName) ||
+        (svc.assignedOpsUserId && (opsTeam || []).some((m) => m.id === svc.assignedOpsUserId && (
+          (currentUser?.email && m.email === currentUser.email) ||
+          (currentUser?.fullName && m.fullName === currentUser.fullName) ||
+          m.email === 'ops@corporatemart.com'
+        )))
       );
-      return isDealAssigned || hasAssignedService;
+    },
+    [currentUser, opsTeam]
+  );
+
+  // Specialist's / Manager's personal assigned services
+  const myServices = useMemo(() => {
+    return (allServices || []).filter(isServiceAssignedToManager);
+  }, [allServices, isServiceAssignedToManager]);
+
+  // Deals containing only the Operations Manager's personal assigned services
+  const managerPersonalDeals = useMemo(() => {
+    return (deals || []).filter((d) => {
+      return (d.services || []).some(isServiceAssignedToManager);
     });
-  }, [deals, currentUser?.id, currentUser?.email]);
+  }, [deals, isServiceAssignedToManager]);
 
   const activeDossierDeal = useMemo(() => {
-    if (!selectedDeal) return managerDossierDeals[0] || null;
-    return managerDossierDeals.find((d) => d.id === selectedDeal.id) || managerDossierDeals[0] || null;
-  }, [selectedDeal, managerDossierDeals]);
+    if (managerPersonalDeals.length === 0) return null;
+    if (!selectedDeal) return managerPersonalDeals[0] || null;
+    return managerPersonalDeals.find((d) => d.id === selectedDeal.id) || managerPersonalDeals[0] || null;
+  }, [selectedDeal, managerPersonalDeals]);
 
   const poolServices = useMemo(() => {
     return allServices.filter((s) => !s.assignedOpsUserId);
@@ -841,7 +847,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
       // Find matching sector for this member
       const matchingSector = EXPERTISE_SECTORS.find((sec) =>
-        sec.specialists.some((name) => member.fullName.includes(name.split(' ')[0]))
+        sec.specialists?.some((name) => (member.fullName || '').includes(name.split(' ')[0]))
       ) || EXPERTISE_SECTORS[0];
 
       return {
@@ -1368,20 +1374,6 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
           {isManager ? (
             <>
               <button
-                onClick={() => setActiveTab('my_tasks')}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${activeTab === 'my_tasks'
-                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
-                    : 'text-slate-600 hover:text-slate-900'
-                  }`}
-              >
-                <FileCheck className="w-3.5 h-3.5 text-blue-600" />
-                <span>My Desk Tasks & Files</span>
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-blue-50 text-blue-700">
-                  {filteredMyServices.length}
-                </span>
-              </button>
-
-              <button
                 onClick={() => setActiveTab('allocation')}
                 className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${activeTab === 'allocation'
                     ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
@@ -1391,7 +1383,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                 <Briefcase className="w-3.5 h-3.5 text-indigo-600" />
                 <span>Service Allocation Hub</span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-indigo-50 text-indigo-700">
-                  {allServices.length}
+                  {allServices.filter((s) => s.status !== 'COMPLETED').length}
                 </span>
               </button>
 
@@ -1419,7 +1411,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                 <FileCheck className="w-3.5 h-3.5 text-cyan-600" />
                 <span>Deal Dossier & Dispatch</span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-cyan-50 text-cyan-700">
-                  {managerDossierDeals.length}
+                  {myServices.filter((s) => s.status !== 'COMPLETED').length}
                 </span>
               </button>
             </>
@@ -2857,9 +2849,9 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                             >
                               <option value="">-- Unassigned (Open in Pool) --</option>
                               <optgroup label="Sector Recommended Specialists">
-                                {opsTeam
+                                {(opsTeam || [])
                                   .filter((m) =>
-                                    sectorMeta.specialists.some((name) => m.fullName.includes(name.split(' ')[0]))
+                                    sectorMeta?.specialists?.some((name) => (m.fullName || '').includes(name.split(' ')[0]))
                                   )
                                   .map((m) => (
                                     <option key={m.id} value={m.id}>
@@ -2868,10 +2860,10 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                   ))}
                               </optgroup>
                               <optgroup label="Other Operations Members">
-                                {opsTeam
+                                {(opsTeam || [])
                                   .filter(
                                     (m) =>
-                                      !sectorMeta.specialists.some((name) => m.fullName.includes(name.split(' ')[0]))
+                                      !sectorMeta?.specialists?.some((name) => (m.fullName || '').includes(name.split(' ')[0]))
                                   )
                                   .map((m) => (
                                     <option key={m.id} value={m.id}>
@@ -3049,30 +3041,42 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
       {/* ----------------------------------------------------------------------- */}
       {activeTab === 'dossier' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-[640px]">
-          {/* LEFT PANE: Active Ops Deals List (4 cols) */}
+          {/* LEFT PANE: Manager's Assigned Personal Deals List (4 cols) */}
           <div className="lg:col-span-4 bg-white border border-slate-200 rounded-xl flex flex-col overflow-hidden shadow-xs">
             <div className="p-3.5 border-b border-slate-200 bg-slate-50/70 flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-600">
-                Operations Queue ({managerDossierDeals.length})
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                <FileCheck className="w-4 h-4 text-indigo-600" />
+                My Assigned Dossiers ({managerPersonalDeals.length})
               </span>
               <button
                 onClick={fetchOpsData}
-                className="text-xs text-slate-600 hover:text-slate-900 flex items-center gap-1.5 font-medium px-2 py-1 rounded hover:bg-slate-200/60 transition"
+                className="text-xs text-slate-600 hover:text-slate-900 flex items-center gap-1.5 font-medium px-2 py-1 rounded hover:bg-slate-200/60 transition cursor-pointer"
               >
                 <RotateCcw className="w-3.5 h-3.5" /> Refresh
               </button>
             </div>
 
             <div className="flex-1 overflow-y-auto divide-y divide-slate-100 p-2.5 space-y-1.5">
-              {managerDossierDeals.length === 0 ? (
-                <div className="p-10 text-center text-slate-400 text-sm">
-                  <CheckCircle2 className="w-7 h-7 text-slate-300 mx-auto mb-2" />
-                  No operations files currently assigned to you.
+              {managerPersonalDeals.length === 0 ? (
+                <div className="p-10 text-center text-slate-400 text-sm space-y-2">
+                  <CheckCircle2 className="w-8 h-8 text-slate-300 mx-auto mb-1" />
+                  <p className="font-semibold text-slate-700">No personal services currently assigned to you.</p>
+                  <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                    In the Service Allocation Hub, allocate any filing service to yourself to manage its execution and deliverables here.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('allocation')}
+                    className="mt-3 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer inline-flex items-center gap-1.5"
+                  >
+                    <Briefcase className="w-3.5 h-3.5" /> Go to Service Allocation Hub
+                  </button>
                 </div>
               ) : (
-                managerDossierDeals.map((d) => {
+                managerPersonalDeals.map((d) => {
                   const isSelected = selectedDeal?.id === d.id;
                   const isReadyDelivery = d.stage === 'STAGE_07_SERVICE_COMPLETED';
+                  const myDealServices = (d.services || []).filter(isServiceAssignedToManager);
 
                   return (
                     <div
@@ -3084,9 +3088,14 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                         }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-xs font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                          {d.dealCode}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-xs font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                            {d.dealCode}
+                          </span>
+                          <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                            ⭐ My Task ({myDealServices.length})
+                          </span>
+                        </div>
                         <span
                           className={`text-xs font-medium px-2 py-0.5 rounded border ${isReadyDelivery
                               ? 'bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold'
@@ -3098,13 +3107,13 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                       </div>
 
                       <div className="font-semibold text-sm text-slate-900 mt-2 truncate">
-                        {d.client.companyName}
+                        {d.client?.companyName || 'N/A'}
                       </div>
 
                       <div className="text-xs text-slate-500 flex items-center justify-between mt-2 pt-1.5 border-t border-slate-100">
-                        <span>Services: <strong className="text-slate-800">{d.services?.length || 0}</strong></span>
+                        <span>My Assigned Tasks: <strong className="text-indigo-700 font-bold">{myDealServices.length}</strong></span>
                         <span className="text-slate-600 font-mono font-medium">
-                          {d.client.directors?.length || 0} Directors
+                          {d.client?.directors?.length || 0} Directors
                         </span>
                       </div>
                     </div>
@@ -3125,55 +3134,47 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                       <span className="font-mono text-xs font-bold text-slate-800 px-2.5 py-1 rounded-md bg-slate-100 border border-slate-200">
                         {activeDossierDeal.dealCode}
                       </span>
-                      <h3 className="text-base font-bold text-slate-900">{activeDossierDeal.client.companyName}</h3>
+                      <h3 className="text-base font-bold text-slate-900">{activeDossierDeal.client?.companyName || 'N/A'}</h3>
                     </div>
                     <p className="text-xs text-slate-600 mt-1">
-                      Client: <strong className="text-slate-800">{activeDossierDeal.client.clientName}</strong> ({activeDossierDeal.client.phone}) • Accounts & Legal Verified: <strong className="text-emerald-700">✓ Yes</strong>
+                      Client: <strong className="text-slate-800">{activeDossierDeal.client?.clientName || 'N/A'}</strong> ({activeDossierDeal.client?.phone || 'N/A'}) • Accounts & Legal Verified: <strong className="text-emerald-700">✓ Yes</strong>
                     </p>
                   </div>
 
                   <button
                     onClick={() => onOpenDossier(activeDossierDeal.id)}
-                    className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-md border border-slate-300 flex items-center gap-1.5 transition shadow-xs"
+                    className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-md border border-slate-300 flex items-center gap-1.5 transition shadow-xs cursor-pointer"
                   >
                     <Eye className="w-4 h-4" /> View Full Dossier
                   </button>
                 </div>
 
-                {/* SERVICES IN THIS DEAL (Only Unassigned/Operable Tasks Shown to Manager) */}
+                {/* SERVICES IN THIS DEAL (SHOW ONLY MANAGER'S PERSONAL ASSIGNED TASKS) */}
                 {(() => {
-                  const managerOperableServices = (activeDossierDeal.services || []).filter(
-                    (svc) => !svc.assignedOpsUserId || (currentUser?.id && svc.assignedOpsUserId === currentUser.id)
-                  );
-                  const assignedToSpecialistsCount = (activeDossierDeal.services || []).length - managerOperableServices.length;
+                  const managerPersonalServices = (activeDossierDeal.services || []).filter(isServiceAssignedToManager);
 
                   return (
                     <div className="space-y-3.5">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
                         <div className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
-                          <Layers className="w-4 h-4 text-slate-500" /> Service Filing Tasks ({managerOperableServices.length})
+                          <Layers className="w-4 h-4 text-indigo-600" /> My Assigned Service Tasks ({managerPersonalServices.length})
                         </div>
-                        {assignedToSpecialistsCount > 0 && (
-                          <span className="text-[11px] text-slate-500 font-medium">
-                            {assignedToSpecialistsCount} assigned to specialist desk{assignedToSpecialistsCount > 1 ? 's' : ''} (hidden from manager execution)
-                          </span>
-                        )}
                       </div>
 
-                      {managerOperableServices.length === 0 ? (
+                      {managerPersonalServices.length === 0 ? (
                         <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 flex items-start gap-2.5">
                           <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
                           <div>
                             <p className="font-semibold text-slate-800">
-                              All services in this deal are assigned to team specialists.
+                              No services in this deal are currently assigned to you.
                             </p>
                             <p className="mt-0.5 text-slate-500">
-                              Assigned services are operated directly by specialists in their assigned workspaces and cannot be operated from the manager dossier view. To reallocate, use the Team Dispatch & Workload tab.
+                              To operate a filing service for this client, assign it to yourself in the Service Allocation Hub.
                             </p>
                           </div>
                         </div>
                       ) : (
-                        managerOperableServices.map((svc) => {
+                        managerPersonalServices.map((svc) => {
                           const sector = detectSector(svc.serviceName);
 
                           return (
