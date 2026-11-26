@@ -418,17 +418,17 @@ async function notifyCustomerStageChange({
       // 7. SERVICE COMPLETED -> STAGE_07_SERVICE_COMPLETED
       case 'SERVICE_COMPLETED': {
         const primaryServiceName = serviceName || (services.length > 0 ? services.join(', ') : 'Service');
-        subject = `${primaryServiceName} deliverables`;
-        stepCompleted = 'Step 3: Operations Processing & Government Filings Completed';
-        stepStarted = 'Step 4: Deliverables & Certificate Finalization Started';
-        description = `All filings and operational processing for your services have been successfully completed. Our team is now preparing the official deliverables, certificates, and government approval documents for release.`;
+        subject = `Service Deliverables & Certificates Finalized - Deal #${dealCode} | Corporate Mart`;
+        stepCompleted = 'Operations Processing & Government Filings Completed';
+        stepStarted = null;
+        description = `All filings and operational processing for "${primaryServiceName}" have been successfully completed by our Operations department. Your official deliverable certificate(s) are attached to this email.`;
         break;
       }
 
       // 8. FINAL DOCS DELIVERED -> STAGE_08_FINAL_DOCS_DELIVERED
       case 'FINAL_DOCS_DELIVERED': {
         const primaryServiceName = serviceName || (services.length > 0 ? services.join(', ') : 'Service');
-        subject = `${primaryServiceName} deliverables`;
+        subject = `Final Deliverable Certificates Dispatched - Deal #${dealCode} | Corporate Mart`;
         stepCompleted = 'Step 4: Deliverables & Certificate Release Completed';
         stepStarted = 'Step 5: Relationship Management & Handover Started';
         description = `Your official certificates and final deliverables have been released and delivered. Your dossier is now moving to our dedicated Relationship Management team for post-service handover.`;
@@ -455,8 +455,8 @@ async function notifyCustomerStageChange({
       case 'INDIVIDUAL_SERVICE_COMPLETED':
         subject = `Service Completed: ${serviceName || 'Milestone'} - Deal #${dealCode} | Corporate Mart`;
         stepCompleted = `Service Milestone Completed: ${serviceName || ''}`;
-        stepStarted = 'Subsequent Filing Milestone';
-        description = `We are pleased to notify you that the filing/service milestone for "${serviceName || 'Service'}" has been marked COMPLETED by our Operations department.`;
+        stepStarted = null;
+        description = `We are pleased to notify you that the filing/service for "${serviceName || 'Service'}" has been marked COMPLETED by our Operations department. The official deliverable certificate(s) are attached to this notification.`;
         break;
 
       default:

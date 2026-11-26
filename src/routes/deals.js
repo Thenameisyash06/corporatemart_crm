@@ -130,14 +130,13 @@ async function recordAuditLog({ dealId, userId, action, fromStage, toStage, rema
     });
 
     // Automated Customer Email Notifications for each stage start & completion
-    // Note: 'LEGAL_APPROVED' notification is handled explicitly in /:id/legal-verify to attach the official legal agreement document
+    // Note: 'LEGAL_APPROVED' and Operations deliverable completion emails are dispatched explicitly with official document attachments
     const NOTIFIABLE_ACTIONS = [
       'DEAL_CREATED',
       'ACCOUNTS_APPROVED',
       'ACCOUNTS_REJECTED',
       'RESUBMIT_TO_ACCOUNTS',
       'LEGAL_REJECTED',
-      'SERVICE_COMPLETED',
       'FINAL_DOCS_DELIVERED',
       'WORKFLOW_CLOSED',
       'BALANCE_PAYMENT_VERIFIED',
@@ -1839,16 +1838,6 @@ router.patch('/:id/services/:serviceId', authenticateToken, requireRoles('OPERAT
       action: 'SERVICE_MILESTONE_UPDATED',
       remarks: `Service "${updatedService.serviceName}" updated.${updateData.status ? ` Status: ${updatedService.status}.` : ''}${feeMsg}`,
     });
-
-    if (updateData.status === 'COMPLETED') {
-      notifyCustomerStageChange({
-        dealId: req.params.id,
-        event: 'INDIVIDUAL_SERVICE_COMPLETED',
-        serviceName: updatedService.serviceName,
-        notes: notes || undefined,
-        attachCertificates: true,
-      }).catch((e) => console.error('[EmailService] Service milestone email error:', e));
-    }
 
     return res.json({ message: 'Service updated.', service: updatedService, totalAmount: newDealTotal });
   } catch (error) {
