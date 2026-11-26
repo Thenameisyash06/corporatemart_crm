@@ -43,6 +43,7 @@ import {
 import api from '../lib/api';
 import { toast } from '../context/ToastContext';
 import { exportLeadsToCsv } from '../lib/exportCsv';
+import CountryCodePhoneInput from './CountryCodePhoneInput';
 
 // -----------------------------------------------------------------------------
 // MASTER CONFIGURATION & DROPDOWN DATA
@@ -609,11 +610,20 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     }
   }, [isAdmin, loggedInBdmName, fetchedLeaderName, isLeader]);
 
-  // Real-time check for duplicate phone number in form
+  // Real-time check for duplicate phone number in form (matches digits with or without country code)
   const duplicatePhoneLead = useMemo(() => {
-    const p = (form.mobileNo || '').trim();
-    if (p.length !== 10) return null;
-    return leads.find((l) => (l.mobileNo || '').trim() === p) || null;
+    const raw = (form.mobileNo || '').trim();
+    if (!raw) return null;
+    const digits = raw.replace(/\D/g, '');
+    if (digits.length < 8) return null;
+    const coreDigits = digits.length >= 10 ? digits.slice(-10) : digits;
+    return leads.find((l) => {
+      const lRaw = (l.mobileNo || '').trim();
+      const lDigits = lRaw.replace(/\D/g, '');
+      if (lDigits === digits) return true;
+      if (coreDigits.length === 10 && lDigits.slice(-10) === coreDigits) return true;
+      return false;
+    }) || null;
   }, [form.mobileNo, leads]);
 
   // Real-time check for duplicate company name in form (match characters only, ignore symbols/spaces)
@@ -1736,13 +1746,20 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     }
     const cleanPhone = form.mobileNo.trim();
     if (!cleanPhone) {
-      toast.warning('Please provide a 10-digit mobile number for client communication.', 'Missing Mobile Number');
+      toast.warning('Please provide a mobile number for client communication.', 'Missing Mobile Number');
       return;
     }
-    const exact10DigitPhoneRegex = /^[6-9]\d{9}$/;
-    if (!exact10DigitPhoneRegex.test(cleanPhone)) {
-      toast.warning('Mobile number must be exactly 10 digits starting with 6, 7, 8, or 9 (do not include +91, spaces, or dashes).', 'Invalid Mobile Format');
+    const digits = cleanPhone.replace(/\D/g, '');
+    if (digits.length < 8 || digits.length > 15) {
+      toast.warning('Please enter a valid mobile number (must be 8-15 digits including country code).', 'Invalid Mobile Format');
       return;
+    }
+    if (cleanPhone.startsWith('+91') || (!cleanPhone.startsWith('+') && digits.length === 10)) {
+      const indianDigits = cleanPhone.startsWith('+91') ? digits.slice(2) : digits;
+      if (indianDigits.length !== 10 || !/^[6-9]\d{9}$/.test(indianDigits)) {
+        toast.warning('Indian mobile number must be exactly 10 digits starting with 6, 7, 8, or 9.', 'Invalid Mobile Format');
+        return;
+      }
     }
     if (duplicateCompanyLead) {
       toast.warning(
@@ -2830,18 +2847,12 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 <label className="text-xs font-semibold text-slate-700 block mb-1.5">
                   Mobile No <span className="text-rose-500">*</span>
                 </label>
-                <div className="relative">
-                  <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    type="tel"
-                    required
-                    maxLength={10}
-                    value={form.mobileNo}
-                    onChange={(e) => setForm({ ...form, mobileNo: e.target.value.replace(/\D/g, '').slice(0, 10) })}
-                    placeholder="9876543210 (10 digits)"
-                    className="w-full h-10 bg-slate-50 border border-slate-300 rounded-xl pl-9 pr-3 text-xs text-slate-900 focus:bg-white focus:border-slate-800 focus:outline-none font-mono tabular-nums transition-colors"
-                  />
-                </div>
+                <CountryCodePhoneInput
+                  value={form.mobileNo}
+                  onChange={(val) => setForm({ ...form, mobileNo: val })}
+                  required
+                  className="w-full h-10 bg-slate-50 border border-slate-300 rounded-xl focus-within:bg-white focus-within:border-slate-800 transition-colors shadow-2xs"
+                />
               </div>
 
               <div>
@@ -5245,7 +5256,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
               <div className="flex items-center justify-between pb-2 border-b border-slate-200/80">
                 <span className="text-slate-500 font-medium">Entered Mobile:</span>
                 <span className="font-mono font-bold text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200">
-                  +91 {form.mobileNo || '—'}
+                  {form.mobileNo ? (form.mobileNo.startsWith('+') ? form.mobileNo : `+91 ${form.mobileNo}`) : '—'}
                 </span>
               </div>
               <p className="text-slate-700 leading-relaxed font-medium">

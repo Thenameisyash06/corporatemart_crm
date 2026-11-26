@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from '../context/ToastContext';
+import CountryCodePhoneInput from './CountryCodePhoneInput';
 import {
   exportDealsToCsv,
   exportClientsToCsv,
@@ -712,9 +713,12 @@ export default function AdminDashboard({
       // Validation 3: Mobile Phone format
       if (phone) {
         const digits = phone.replace(/\D/g, '');
-        const isValidPhone = digits.length === 10 ? /^[6-9]\d{9}$/.test(digits) : digits.length === 12 && digits.startsWith('91') ? /^91[6-9]\d{9}$/.test(digits) : false;
+        const isValidPhone =
+          (digits.length === 10 && /^[6-9]\d{9}$/.test(digits)) ||
+          (digits.length === 12 && digits.startsWith('91') && /^91[6-9]\d{9}$/.test(digits)) ||
+          (phone.startsWith('+') && digits.length >= 8 && digits.length <= 15);
         if (!isValidPhone) {
-          throw new Error('Please enter a valid 10-digit mobile number (e.g. +91 98765 43210).');
+          throw new Error('Please enter a valid mobile number with country code (e.g. +91 98765 43210).');
         }
       }
 
@@ -2033,11 +2037,11 @@ export default function AdminDashboard({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-slate-700 font-semibold block mb-1">Mobile Phone</label>
-                  <input
-                    type="tel"
+                  <CountryCodePhoneInput
                     value={memberFormData.phone}
-                    onChange={(e) => setMemberFormData({ ...memberFormData, phone: e.target.value })}
-                    className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-slate-900 focus:outline-none focus:border-indigo-600 font-medium"
+                    onChange={(val) => setMemberFormData({ ...memberFormData, phone: val })}
+                    placeholder="98765 43210"
+                    className="w-full bg-white border border-slate-300 rounded-lg text-slate-900 focus-within:border-indigo-600 h-[42px] font-medium shadow-2xs"
                   />
                 </div>
                 <div>
