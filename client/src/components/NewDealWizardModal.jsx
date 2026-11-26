@@ -18,6 +18,7 @@ import {
 import api from '../lib/api';
 import { toast } from '../context/ToastContext';
 import DealFinancialMetrics, { RECEIVING_ACCOUNTS } from './DealFinancialMetrics';
+import CountryCodePhoneInput from './CountryCodePhoneInput';
 
 import { CORPORATEMART_SERVICES_CATALOG, SERVICES_BY_CATEGORY } from '../constants/servicesCatalog';
 
@@ -769,12 +770,12 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
 
                   <div>
                     <label className="text-xs text-slate-700 font-semibold block mb-1">Mobile Number *</label>
-                    <input
-                      type="tel"
+                    <CountryCodePhoneInput
                       value={form.clientPhone}
-                      onChange={(e) => setForm({ ...form, clientPhone: e.target.value })}
-                      placeholder="+91 98765 43210"
-                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 focus:border-slate-800 focus:outline-none"
+                      onChange={(val) => setForm({ ...form, clientPhone: val })}
+                      required
+                      placeholder="98765 43210"
+                      className="w-full bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus-within:border-slate-800 h-9 shadow-2xs"
                     />
                   </div>
 
@@ -1114,12 +1115,11 @@ export default function NewDealWizardModal({ isOpen, onClose, onSuccess, initial
                           onChange={(e) => handleDirectorChange(index, 'pan', e.target.value.toUpperCase())}
                           className="bg-white border border-slate-300 rounded px-2.5 py-1.5 text-xs text-slate-900"
                         />
-                        <input
-                          type="tel"
-                          placeholder="Mobile Number"
-                          value={d.phone}
-                          onChange={(e) => handleDirectorChange(index, 'phone', e.target.value)}
-                          className="bg-white border border-slate-300 rounded px-2.5 py-1.5 text-xs text-slate-900"
+                        <CountryCodePhoneInput
+                          value={d.phone || ''}
+                          onChange={(val) => handleDirectorChange(index, 'phone', val)}
+                          placeholder="Director Mobile"
+                          className="w-full bg-white border border-slate-300 rounded text-xs text-slate-900 focus-within:border-slate-800 h-[34px]"
                         />
                       </div>
                     </div>

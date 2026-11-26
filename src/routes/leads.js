@@ -168,6 +168,31 @@ const LEAD_STAGES_LIST = [
 const EXACT_10_DIGIT_PHONE_REGEX = /^[6-9]\d{9}$/;
 
 /**
+ * Validates phone numbers with or without international country code (+91, +1, +971, etc.)
+ */
+function validateLeadPhoneNumber(mobileNo) {
+  if (!mobileNo || typeof mobileNo !== 'string') {
+    return { valid: false, error: 'Mobile Number is mandatory. Please provide a valid mobile number.' };
+  }
+  const cleanPhone = mobileNo.trim();
+  const digits = cleanPhone.replace(/\D/g, '');
+
+  if (digits.length < 8 || digits.length > 15) {
+    return { valid: false, error: 'Invalid mobile number. Please check country code and number (must be 8-15 digits).' };
+  }
+
+  // If Indian number (+91 or 10 digits without +)
+  if (cleanPhone.startsWith('+91') || (!cleanPhone.startsWith('+') && digits.length === 10)) {
+    const indianDigits = cleanPhone.startsWith('+91') ? digits.slice(2) : digits;
+    if (indianDigits.length !== 10 || !/^[6-9]\d{9}$/.test(indianDigits)) {
+      return { valid: false, error: 'Invalid Indian mobile number. Must be 10 digits starting with 6, 7, 8, or 9.' };
+    }
+  }
+
+  return { valid: true, cleanPhone, digits };
+}
+
+/**
  * Access Control Helper: Checks if a user has permission to access a specific lead
  */
 function userCanAccessLead(lead, user) {
@@ -1424,15 +1449,13 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
     if (!companyName || !companyName.trim()) {
       return res.status(400).json({ error: 'Company Name is mandatory. Please enter the client company name.' });
     }
-    const cleanPhone = (mobileNo || '').trim();
-    if (!cleanPhone) {
-      return res.status(400).json({ error: 'Mobile Number is mandatory. Please provide a 10-digit mobile number.' });
+    const phoneVal = validateLeadPhoneNumber(mobileNo);
+    if (!phoneVal.valid) {
+      return res.status(400).json({ error: phoneVal.error });
     }
-    if (!EXACT_10_DIGIT_PHONE_REGEX.test(cleanPhone)) {
-      return res.status(400).json({
-        error: 'Invalid mobile number. Must be exactly 10 digits starting with 6, 7, 8, or 9 (without country code, symbols, or spaces).',
-      });
-    }
+    const cleanPhone = phoneVal.cleanPhone;
+    const phoneDigits = phoneVal.digits;
+    const coreDigits = phoneDigits.length >= 10 ? phoneDigits.slice(-10) : phoneDigits;
 
     // 2. Duplicate check by Company Name & Mobile Number (Both must be strictly unique in LMS)
     // Only match characters/words, ignore symbols/punctuation
@@ -1451,8 +1474,14 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
     }
 
     const existingPhoneLeads = await prisma.$queryRawUnsafe(
-      `SELECT "id", "companyName" FROM "leads" WHERE "mobileNo" = $1 LIMIT 1`,
-      cleanPhone
+      `SELECT "id", "companyName" FROM "leads" 
+       WHERE "mobileNo" = $1 
+          OR REGEXP_REPLACE("mobileNo", '\\D', '', 'g') = $2 
+          OR (LENGTH($3) >= 10 AND RIGHT(REGEXP_REPLACE("mobileNo", '\\D', '', 'g'), 10) = $3)
+       LIMIT 1`,
+      cleanPhone,
+      phoneDigits,
+      coreDigits
     );
     if (existingPhoneLeads && existingPhoneLeads.length > 0) {
       return res.status(400).json({
@@ -1757,15 +1786,24 @@ router.patch('/:id', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req
       params.push(directorName ? directorName.trim().toUpperCase() : null);
     }
     if (mobileNo !== undefined) {
-      const cleanPhone = mobileNo.trim();
-      if (!EXACT_10_DIGIT_PHONE_REGEX.test(cleanPhone)) {
-        return res.status(400).json({
-          error: 'Invalid mobile number. Must be exactly 10 digits without symbols, spaces, or country code (starting with 6-9).',
-        });
+      const phoneVal = validateLeadPhoneNumber(mobileNo);
+      if (!phoneVal.valid) {
+        return res.status(400).json({ error: phoneVal.error });
       }
+      const cleanPhone = phoneVal.cleanPhone;
+      const phoneDigits = phoneVal.digits;
+      const coreDigits = phoneDigits.length >= 10 ? phoneDigits.slice(-10) : phoneDigits;
+
       const existingPhoneLeads = await prisma.$queryRawUnsafe(
-        `SELECT "id", "companyName" FROM "leads" WHERE "mobileNo" = $1 AND "id" != $2 LIMIT 1`,
+        `SELECT "id", "companyName" FROM "leads" 
+         WHERE ("mobileNo" = $1 
+            OR REGEXP_REPLACE("mobileNo", '\\D', '', 'g') = $2 
+            OR (LENGTH($3) >= 10 AND RIGHT(REGEXP_REPLACE("mobileNo", '\\D', '', 'g'), 10) = $3))
+           AND "id" != $4 
+         LIMIT 1`,
         cleanPhone,
+        phoneDigits,
+        coreDigits,
         id
       );
       if (existingPhoneLeads && existingPhoneLeads.length > 0) {

@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from '../context/ToastContext';
+import CountryCodePhoneInput from './CountryCodePhoneInput';
 
 export default function UserProfileModal({
   isOpen,
@@ -295,29 +296,30 @@ export default function UserProfileModal({
                 </div>
 
                 {isEditingPhone && (
-                  <div className="flex items-center gap-2 pt-1 border-t border-slate-200/80">
-                    <input
-                      type="text"
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1 border-t border-slate-200/80">
+                    <CountryCodePhoneInput
                       value={phoneVal}
-                      onChange={(e) => setPhoneVal(e.target.value)}
-                      placeholder="e.g. +91 9876543210"
-                      className="flex-1 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 font-mono focus:outline-none focus:border-indigo-600"
+                      onChange={(val) => setPhoneVal(val)}
+                      placeholder="98765 43210"
+                      className="flex-1 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus-within:border-indigo-600 h-9"
                     />
-                    <button
-                      type="button"
-                      onClick={handleSavePhone}
-                      disabled={phoneLoading}
-                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-xs transition disabled:opacity-50"
-                    >
-                      {phoneLoading ? 'Saving...' : 'Save'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingPhone(false)}
-                      className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-medium border border-slate-200"
-                    >
-                      Cancel
-                    </button>
+                    <div className="flex items-center gap-1.5 justify-end">
+                      <button
+                        type="button"
+                        onClick={handleSavePhone}
+                        disabled={phoneLoading}
+                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-xs transition disabled:opacity-50"
+                      >
+                        {phoneLoading ? 'Saving...' : 'Save'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingPhone(false)}
+                        className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-medium border border-slate-200"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
