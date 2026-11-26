@@ -50,6 +50,30 @@ function createWindow() {
     mainWindow.show();
   });
 
+  // Keyboard shortcut: Ctrl + Shift + R (or Cmd + Shift + R on macOS) & F5 to reload ignoring cache
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown') {
+      const isMac = process.platform === 'darwin';
+      const isModifier = isMac ? input.meta : input.control;
+
+      // Ctrl + Shift + R or Cmd + Shift + R -> Force reload ignoring cache
+      if (isModifier && input.shift && input.key.toLowerCase() === 'r') {
+        event.preventDefault();
+        console.log('[Desktop] Triggering hard reload ignoring cache (Ctrl+Shift+R)...');
+        mainWindow.webContents.reloadIgnoringCache();
+        return;
+      }
+
+      // F5 or Ctrl + R -> Reload ignoring cache
+      if ((isModifier && !input.shift && input.key.toLowerCase() === 'r') || input.key === 'F5') {
+        event.preventDefault();
+        console.log('[Desktop] Triggering reload ignoring cache...');
+        mainWindow.webContents.reloadIgnoringCache();
+        return;
+      }
+    }
+  });
+
   // Open external links (e.g. documentation, government portals) in default web browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
@@ -101,6 +125,13 @@ function createWindow() {
 ipcMain.handle('open-external', async (_, url) => {
   if (url && typeof url === 'string') {
     shell.openExternal(url);
+  }
+});
+
+ipcMain.handle('hard-reload', async () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    console.log('[Desktop] Hard reload requested via IPC');
+    mainWindow.webContents.reloadIgnoringCache();
   }
 });
 
