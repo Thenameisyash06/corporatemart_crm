@@ -20,7 +20,11 @@ class ErrorBoundary extends Component {
 
   handleReset = () => {
     localStorage.clear();
-    window.location.reload();
+    if (window.desktopAPI?.hardReload) {
+      window.desktopAPI.hardReload();
+    } else {
+      window.location.reload();
+    }
   };
 
   render() {
@@ -37,7 +41,13 @@ class ErrorBoundary extends Component {
             </pre>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
-                onClick={() => window.location.reload()}
+                onClick={() => {
+                  if (window.desktopAPI?.hardReload) {
+                    window.desktopAPI.hardReload();
+                  } else {
+                    window.location.reload();
+                  }
+                }}
                 style={{ padding: '8px 16px', background: '#0f172a', color: '#fff', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}
               >
                 Reload Page
