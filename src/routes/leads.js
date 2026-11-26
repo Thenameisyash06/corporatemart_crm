@@ -115,6 +115,21 @@ const BDM_TARGET_MAP = {
   'Jimit Panchal': 25000,
 };
 
+function getCanonicalBdmName(rawName) {
+  if (!rawName) return '';
+  const trimmed = String(rawName).replace(/\s*\([^)]*\)/g, '').trim();
+  if (!trimmed || trimmed === '-- None (Single BDM) --') return '';
+  const lower = trimmed.toLowerCase();
+  const matchedLeader = LEADERS_LIST.find((l) => l.toLowerCase() === lower);
+  if (matchedLeader) return matchedLeader;
+  const matchedBdm = BDMS_LIST.find((b) => b.toLowerCase() === lower);
+  if (matchedBdm) return matchedBdm;
+  return trimmed
+    .split(/\s+/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
 const CLOSER_STATUS_LIST = [
   'Self Closer',
   'Lead Sharing',
@@ -411,22 +426,34 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
 
     const dbBdmLeaderMap = {};
     const dbBdmTargetMap = {};
-    const dbBdmsList = [];
-    const dbLeadersSet = new Set(LEADERS_LIST);
+    const dbBdmsMap = new Map();
+    const dbLeadersMap = new Map();
+
+    LEADERS_LIST.forEach((ldr) => {
+      dbLeadersMap.set(ldr.toLowerCase(), ldr);
+    });
 
     dbUsers.forEach((u) => {
-      const cleanName = (u.fullName || '').replace(/\s*\([^)]*\)/g, '').trim();
-      if (!cleanName) return;
-      dbBdmsList.push(cleanName);
-      if (u.salesTarget) dbBdmTargetMap[cleanName] = parseFloat(u.salesTarget);
+      const canonicalName = getCanonicalBdmName(u.fullName);
+      if (!canonicalName) return;
+      const lowerName = canonicalName.toLowerCase();
+      dbBdmsMap.set(lowerName, canonicalName);
+      if (u.salesTarget) {
+        dbBdmTargetMap[canonicalName] = parseFloat(u.salesTarget);
+        dbBdmTargetMap[lowerName] = parseFloat(u.salesTarget);
+      }
       if (u.leaderName) {
-        const cleanLeader = u.leaderName.replace(/\s*\([^)]*\)/g, '').trim();
-        dbBdmLeaderMap[cleanName] = cleanLeader;
-        dbLeadersSet.add(cleanLeader);
+        const canonicalLeader = getCanonicalBdmName(u.leaderName);
+        if (canonicalLeader) {
+          dbBdmLeaderMap[canonicalName] = canonicalLeader;
+          dbBdmLeaderMap[lowerName] = canonicalLeader;
+          dbLeadersMap.set(canonicalLeader.toLowerCase(), canonicalLeader);
+        }
       }
     });
 
-    const activeLeadersList = Array.from(dbLeadersSet);
+    const activeLeadersList = Array.from(dbLeadersMap.values());
+    const dbBdmsList = Array.from(dbBdmsMap.values());
 
     const userFullName = (req.user.fullName || '').replace(/\s*\([^)]*\)/g, '').trim();
     const matchedLeader = activeLeadersList.find((l) => {
@@ -442,24 +469,31 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
     let myTeamMemberNames = [];
     if (targetLeader) {
       const tl = targetLeader.toLowerCase().trim();
-      myTeamMemberNames = dbUsers
-        .filter((u) => {
-          const uLeader = (u.leaderName || dbBdmLeaderMap[u.fullName] || BDM_LEADER_MAP[u.fullName] || '').toLowerCase().trim();
-          const uName = (u.fullName || '').replace(/\s*\([^)]*\)/g, '').toLowerCase().trim();
-          return (uLeader === tl || uLeader.includes(tl) || tl.includes(uLeader)) && uName !== tl;
-        })
-        .map((u) => (u.fullName || '').replace(/\s*\([^)]*\)/g, '').trim());
+      const uniqueTeamMembers = new Map();
+
+      dbUsers.forEach((u) => {
+        const canonicalLeader = getCanonicalBdmName(u.leaderName || dbBdmLeaderMap[u.fullName] || BDM_LEADER_MAP[u.fullName] || '');
+        const uLeader = canonicalLeader.toLowerCase().trim();
+        const canonicalName = getCanonicalBdmName(u.fullName);
+        const uName = canonicalName.toLowerCase().trim();
+        if ((uLeader === tl || uLeader.includes(tl) || tl.includes(uLeader)) && uName !== tl) {
+          uniqueTeamMembers.set(uName, canonicalName);
+        }
+      });
 
       // Fallback to static mapping if needed
-      if (myTeamMemberNames.length === 0) {
+      if (uniqueTeamMembers.size === 0) {
         Object.entries(BDM_LEADER_MAP).forEach(([bdm, ldr]) => {
           const cl = ldr.toLowerCase().trim();
           const cb = bdm.toLowerCase().trim();
           if ((cl === tl || cl.includes(tl) || tl.includes(cl)) && cb !== tl) {
-            myTeamMemberNames.push(bdm);
+            const canonicalBdm = getCanonicalBdmName(bdm);
+            uniqueTeamMembers.set(cb, canonicalBdm);
           }
         });
       }
+
+      myTeamMemberNames = Array.from(uniqueTeamMembers.values());
     }
 
     // Build SQL Query conditions (Separated into Scope vs Table Filters)
@@ -996,57 +1030,74 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
     const allBdmMap = {};
 
     // 1. Initialize all known leaders and BDMs from DB
-    activeLeaders.forEach((ldr) => {
-      if (!allBdmMap[ldr]) {
-        allBdmMap[ldr] = {
-          name: ldr,
+    activeLeaders.forEach((rawLdr) => {
+      const canonical = getCanonicalBdmName(rawLdr);
+      if (!canonical) return;
+      const key = canonical.toLowerCase();
+      if (!allBdmMap[key]) {
+        allBdmMap[key] = {
+          name: canonical,
           isLeader: true,
           leads: [],
-          leaderName: dbBdmLeaderMap[ldr] || BDM_LEADER_MAP[ldr] || ldr,
-          salesTarget: dbBdmTargetMap[ldr] || BDM_TARGET_MAP[ldr] || 0,
+          leaderName: dbBdmLeaderMap[key] || dbBdmLeaderMap[canonical] || BDM_LEADER_MAP[canonical] || canonical,
+          salesTarget: dbBdmTargetMap[key] || dbBdmTargetMap[canonical] || BDM_TARGET_MAP[canonical] || 0,
         };
       }
     });
 
-    activeBdms.forEach((bdm) => {
-      const isLdr = activeLeaders.some((l) => l.toLowerCase() === bdm.toLowerCase());
-      if (!allBdmMap[bdm]) {
-        allBdmMap[bdm] = {
-          name: bdm,
+    activeBdms.forEach((rawBdm) => {
+      const canonical = getCanonicalBdmName(rawBdm);
+      if (!canonical) return;
+      const key = canonical.toLowerCase();
+      const isLdr = LEADERS_LIST.some((l) => l.toLowerCase() === key);
+      if (!allBdmMap[key]) {
+        allBdmMap[key] = {
+          name: canonical,
           isLeader: isLdr,
           leads: [],
-          leaderName: dbBdmLeaderMap[bdm] || BDM_LEADER_MAP[bdm] || null,
-          salesTarget: dbBdmTargetMap[bdm] || BDM_TARGET_MAP[bdm] || 0,
+          leaderName: dbBdmLeaderMap[key] || dbBdmLeaderMap[canonical] || BDM_LEADER_MAP[canonical] || null,
+          salesTarget: dbBdmTargetMap[key] || dbBdmTargetMap[canonical] || BDM_TARGET_MAP[canonical] || 0,
         };
       }
     });
 
     // 2. Distribute activeSummaryRows leads to BDMs and Leaders
     activeSummaryRows.forEach((l) => {
-      const bdm1 = (l.bdmName1 || '').trim();
-      const bdm2 = (l.bdmName2 || '').trim();
-      const ldr = (l.leaderName || '').trim();
+      const bdm1 = getCanonicalBdmName(l.bdmName1);
+      const bdm2 = getCanonicalBdmName(l.bdmName2);
+      const ldr = getCanonicalBdmName(l.leaderName);
 
       const namesToAssign = new Set();
-      if (bdm1 && bdm1 !== '-- None (Single BDM) --') namesToAssign.add(bdm1);
-      if (bdm2 && bdm2 !== '-- None (Single BDM) --' && bdm2.toLowerCase() !== bdm1.toLowerCase()) namesToAssign.add(bdm2);
+      if (bdm1) namesToAssign.add(bdm1);
+      if (bdm2 && bdm2.toLowerCase() !== bdm1.toLowerCase()) namesToAssign.add(bdm2);
 
-      namesToAssign.forEach((name) => {
-        const isLdr = LEADERS_LIST.some((l) => l.toLowerCase() === name.toLowerCase());
-        if (!allBdmMap[name]) {
-          allBdmMap[name] = { name, isLeader: isLdr, leads: [], leaderName: ldr || null };
+      namesToAssign.forEach((canonical) => {
+        const key = canonical.toLowerCase();
+        const isLdr = LEADERS_LIST.some((l) => l.toLowerCase() === key);
+        if (!allBdmMap[key]) {
+          allBdmMap[key] = {
+            name: canonical,
+            isLeader: isLdr,
+            leads: [],
+            leaderName: ldr || null,
+            salesTarget: dbBdmTargetMap[key] || dbBdmTargetMap[canonical] || BDM_TARGET_MAP[canonical] || 0,
+          };
         }
-        allBdmMap[name].leads.push(l);
-        if (ldr && !allBdmMap[name].leaderName && !allBdmMap[name].isLeader) {
-          allBdmMap[name].leaderName = ldr;
+        allBdmMap[key].leads.push(l);
+        if (ldr && !allBdmMap[key].leaderName && !allBdmMap[key].isLeader) {
+          allBdmMap[key].leaderName = ldr;
         }
       });
 
       // If leader is also in allBdmMap and not already having this lead directly (only if Lead Sharing)
       const isLeadSharing = (l.closerStatus || '').toUpperCase().includes('LEAD SHARING');
-      if (ldr && allBdmMap[ldr] && !namesToAssign.has(ldr) && isLeadSharing) {
-        if (!allBdmMap[ldr].teamLeads) allBdmMap[ldr].teamLeads = [];
-        allBdmMap[ldr].teamLeads.push(l);
+      if (ldr) {
+        const ldrKey = ldr.toLowerCase();
+        const hasDirectly = Array.from(namesToAssign).some((n) => n.toLowerCase() === ldrKey);
+        if (allBdmMap[ldrKey] && !hasDirectly && isLeadSharing) {
+          if (!allBdmMap[ldrKey].teamLeads) allBdmMap[ldrKey].teamLeads = [];
+          allBdmMap[ldrKey].teamLeads.push(l);
+        }
       }
     });
 

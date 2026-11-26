@@ -117,20 +117,32 @@ export default function Navbar({
             onClick={(e) => {
               // Shift-click, Ctrl-click, or Alt-click triggers full hard refresh of desktop app
               if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) {
+                if ('caches' in window) {
+                  caches.keys().then((names) => {
+                    names.forEach((name) => caches.delete(name));
+                  });
+                }
                 if (window.desktopAPI?.hardReload) {
                   window.desktopAPI.hardReload();
                   return;
                 }
-                window.location.reload();
+                window.location.href = window.location.pathname + '?_t=' + Date.now();
                 return;
               }
               onRefresh();
             }}
             onContextMenu={(e) => {
-              // Right-click triggers full hard refresh on desktop
-              if (window.desktopAPI?.isDesktop) {
-                e.preventDefault();
+              // Right-click triggers full hard refresh
+              e.preventDefault();
+              if ('caches' in window) {
+                caches.keys().then((names) => {
+                  names.forEach((name) => caches.delete(name));
+                });
+              }
+              if (window.desktopAPI?.hardReload) {
                 window.desktopAPI.hardReload();
+              } else {
+                window.location.href = window.location.pathname + '?_t=' + Date.now();
               }
             }}
             disabled={isRefreshing}

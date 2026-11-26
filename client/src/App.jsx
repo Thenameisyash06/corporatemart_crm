@@ -259,10 +259,18 @@ export default function App() {
 
       // Hard reload shortcuts: Ctrl+Shift+R, Cmd+Shift+R, Ctrl+F5, Shift+F5
       if ((isModifier && e.shiftKey && isKeyR) || (isModifier && isKeyF5) || (e.shiftKey && isKeyF5)) {
+        e.preventDefault();
+        if ('caches' in window) {
+          caches.keys().then((names) => {
+            names.forEach((name) => caches.delete(name));
+          });
+        }
         if (window.desktopAPI?.hardReload) {
-          e.preventDefault();
           toast.info('Initiating hard reload: clearing cache and refreshing...', 'Desktop App');
           window.desktopAPI.hardReload();
+        } else {
+          // Bypasses browser cache on older desktop wrappers & browsers
+          window.location.href = window.location.pathname + '?_t=' + Date.now();
         }
       }
     };
