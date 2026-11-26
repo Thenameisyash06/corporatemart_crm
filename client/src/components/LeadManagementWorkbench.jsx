@@ -1078,26 +1078,34 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       const cleanNameLower = member.name.toLowerCase().trim();
       const bo = backendOverviewMap[cleanNameLower] || Object.entries(backendOverviewMap).find(([k]) => k.includes(cleanNameLower) || cleanNameLower.includes(k))?.[1];
 
-      // If local leads slice is partial or empty, use the richer backend counts
-      const activeLeads = mLeads.length > 0
-        ? mLeads.filter((l) => l.leadStatus !== 'CLOSED_WON' && l.leadStatus !== 'CLOSED_LOST').length
-        : (bo?.activeLeads ?? 0);
+      // Use overall backend counts (includes both shared and self-close counts for the card summary)
+      const activeLeads = bo?.activeLeads !== undefined
+        ? bo.activeLeads
+        : mLeads.filter((l) => l.leadStatus !== 'CLOSED_WON' && l.leadStatus !== 'CLOSED_LOST').length;
 
-      const hotCount = mLeads.length > 0
-        ? mLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'hot').length
-        : (bo?.hotCount ?? 0);
+      const hotCount = bo?.hotCount !== undefined
+        ? bo.hotCount
+        : mLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'hot').length;
 
-      const warmCount = mLeads.length > 0
-        ? mLeads.filter((l) => (l.clientStatus || 'warm').toLowerCase() === 'warm').length
-        : (bo?.warmCount ?? 0);
+      const warmCount = bo?.warmCount !== undefined
+        ? bo.warmCount
+        : mLeads.filter((l) => (l.clientStatus || 'warm').toLowerCase() === 'warm').length;
 
-      const lostCount = mLeads.length > 0
-        ? mLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'lost' || l.leadStatus === 'CLOSED_LOST').length
-        : (bo?.lostCount ?? 0);
+      const lostCount = bo?.lostCount !== undefined
+        ? bo.lostCount
+        : mLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'lost' || l.leadStatus === 'CLOSED_LOST').length;
 
-      const closedCount = mLeads.length > 0
-        ? mLeads.filter((l) => l.leadStatus === 'CLOSED_WON' || (l.clientStatus || '').toLowerCase() === 'closed').length
-        : (bo?.closedCount ?? 0);
+      const closedCount = bo?.closedCount !== undefined
+        ? bo.closedCount
+        : mLeads.filter((l) => l.leadStatus === 'CLOSED_WON' || (l.clientStatus || '').toLowerCase() === 'closed').length;
+
+      const selfCloseCount = bo?.selfCloseCount !== undefined
+        ? bo.selfCloseCount
+        : mLeads.filter((l) => (l.closerStatus || '').toUpperCase().includes('SELF')).length;
+
+      const pendingFollowUpsCount = bo?.pendingFollowUpsCount !== undefined
+        ? bo.pendingFollowUpsCount
+        : mLeads.filter((l) => getLeadOverdueInfo(l).isOverdue).length;
 
       const meetingLeads = mLeads.filter(
         (l) => l.meetingDate || (l.meetingStatus && l.meetingStatus !== 'None')
@@ -1133,9 +1141,9 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       activeLeadsWithEdc.sort((a, b) => new Date(a.expectedDateOfCloser) - new Date(b.expectedDateOfCloser));
       const nearestEdcLead = activeLeadsWithEdc[0] || mLeads.find((l) => l.expectedDateOfCloser) || bo?.nearestEdcLead || null;
 
-      const totalFunnel = mLeads.length > 0
-        ? mLeads.reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0)
-        : (bo?.totalFunnel ?? 0);
+      const totalFunnel = bo?.totalFunnel !== undefined
+        ? bo.totalFunnel
+        : mLeads.reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
 
       const totalLeads = mLeads.length > 0 ? mLeads.length : (bo?.totalLeads ?? 0);
 
@@ -1163,9 +1171,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         warmValue: mLeads.filter((l) => (l.clientStatus || 'warm').toLowerCase() === 'warm').reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0) || (bo?.warmValue ?? 0),
         lostCount,
         closedCount,
-        closedValue: mLeads.filter((l) => l.leadStatus === 'CLOSED_WON' || (l.clientStatus || '').toLowerCase() === 'closed').reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0) || (bo?.closedValue ?? 0),
-        pendingFollowupsCount: overdueCount || bo?.pendingFollowupsCount || 0,
-        maxDaysOverdue: maxOverdue || bo?.maxDaysOverdue || 0,
+        selfCloseCount,
+        pendingFollowUpsCount,
         meetingCount: meetingLeads.length > 0 ? meetingLeads.length : (bo?.meetingCount ?? 0),
         nextMeetingLead,
         lastFollowUp,
@@ -3444,10 +3451,10 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                       </div>
 
                       {/* Status Badges Row in Clean Neutral Grid */}
-                      <div className="grid grid-cols-5 gap-1.5 mt-3 text-center">
+                      <div className="grid grid-cols-4 gap-1.5 mt-3 text-center">
                         <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-1.5">
                           <span className="text-[9px] text-slate-500 uppercase font-medium block truncate">
-                            Active
+                            Active Leads
                           </span>
                           <span className="text-xs font-bold text-slate-900">
                             {member.activeLeads}
@@ -3489,88 +3496,23 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                             {member.closedCount}
                           </span>
                         </div>
-                      </div>
 
-                      {/* Detail Metrics: Meeting, Last Follow-up, EDC */}
-                      <div className="mt-3 space-y-1.5 text-xs border-t border-slate-100 pt-2.5">
-                        {/* Meeting */}
-                        <div className="flex items-start justify-between gap-2">
-                          <span className="text-[10px] text-slate-400 font-medium uppercase flex items-center gap-1 shrink-0 mt-0.5">
-                            Meeting:
+                        <div className="bg-indigo-50/70 border border-indigo-200/80 rounded-lg p-1.5">
+                          <span className="text-[9px] text-indigo-700 uppercase font-medium block truncate">
+                            Self Close
                           </span>
-                          <div className="text-right">
-                            {member.nextMeetingLead ? (
-                              <div className="leading-snug">
-                                <span className="font-semibold text-slate-800 text-[11px]">
-                                  {member.nextMeetingLead.meetingDate
-                                    ? new Date(member.nextMeetingLead.meetingDate).toLocaleDateString('en-IN', {
-                                      day: '2-digit',
-                                      month: 'short',
-                                      year: 'numeric',
-                                    })
-                                    : 'Scheduled'}
-                                </span>
-                                <span className="text-[10px] text-slate-500 block truncate max-w-[170px]" title={`${member.nextMeetingLead.meetingStatus} (${member.nextMeetingLead.companyName})`}>
-                                  {member.nextMeetingLead.meetingStatus} ({member.nextMeetingLead.companyName})
-                                </span>
-                              </div>
-                            ) : (
-                              <span className="text-[11px] text-slate-400 italic">None scheduled</span>
-                            )}
-                          </div>
+                          <span className="text-xs font-bold text-indigo-900">
+                            {member.selfCloseCount ?? 0}
+                          </span>
                         </div>
 
-                        {/* Last Follow Up */}
-                        <div className="flex items-start justify-between gap-2">
-                          <span className="text-[10px] text-slate-400 font-medium uppercase flex items-center gap-1 shrink-0 mt-0.5">
-                            Follow-up:
+                        <div className="col-span-2 bg-rose-50/70 border border-rose-200/80 rounded-lg p-1.5">
+                          <span className="text-[9px] text-rose-700 uppercase font-medium block truncate">
+                            Pending Follow-ups
                           </span>
-                          <div className="text-right">
-                            {member.lastFollowUp ? (
-                              <div className="leading-snug">
-                                <div className="flex items-center justify-end gap-1.5 text-[11px]">
-                                  <span className="font-semibold text-slate-800">
-                                    {new Date(member.lastFollowUp.date).toLocaleDateString('en-IN', {
-                                      day: '2-digit',
-                                      month: 'short',
-                                    })}
-                                  </span>
-                                  <span className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
-                                    {member.lastFollowUp.status}
-                                  </span>
-                                </div>
-                                <span className="text-[10px] text-slate-500 block truncate max-w-[170px]" title={member.lastFollowUp.companyName}>
-                                  {member.lastFollowUp.companyName}
-                                </span>
-                              </div>
-                            ) : (
-                              <span className="text-[11px] text-slate-400 italic">No follow-ups yet</span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* EDC Target */}
-                        <div className="flex items-start justify-between gap-2">
-                          <span className="text-[10px] text-slate-400 font-medium uppercase flex items-center gap-1 shrink-0 mt-0.5">
-                            EDC Target:
+                          <span className="text-xs font-bold text-rose-900">
+                            {member.pendingFollowUpsCount ?? 0}
                           </span>
-                          <div className="text-right">
-                            {member.nearestEdcLead?.expectedDateOfCloser ? (
-                              <div className="leading-snug">
-                                <span className="font-semibold text-slate-800 text-[11px]">
-                                  {new Date(member.nearestEdcLead.expectedDateOfCloser).toLocaleDateString('en-IN', {
-                                    day: '2-digit',
-                                    month: 'short',
-                                  })}
-                                </span>
-                                <span className="text-[10px] text-slate-500 block truncate max-w-[170px]" title={member.nearestEdcLead.companyName}>
-                                  {member.nearestEdcLead.companyName}
-                                </span>
-                              </div>
-                            ) : (
-                              <span className="text-[11px] text-slate-400 italic">Not set</span>
-                            )}
-                          </div>
                         </div>
                       </div>
                     </div>

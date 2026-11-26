@@ -949,14 +949,102 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
     }
     const totalPages = isAll ? 1 : Math.max(1, Math.ceil(total / limit));
 
-    // Compute team member pipeline cards for Leader BDM
+    // Compute team member pipeline cards for Leader BDM (include overall member counts: active, hot, warm, lost, closed, self close, pending follow-ups)
+    const teamMemberAllLeadsMap = {};
+    if (targetLeader && myTeamMemberNames.length > 0) {
+      myTeamMemberNames.forEach((bdm) => {
+        teamMemberAllLeadsMap[bdm] = [];
+      });
+      const lowerTeamNames = myTeamMemberNames.map((n) => n.toLowerCase().trim()).filter(Boolean);
+      const placeholders = lowerTeamNames.map((_, i) => `$${i + 1}`).join(', ');
+      const allMemberLeadsRaw = lowerTeamNames.length > 0 ? await prisma.$queryRawUnsafe(
+        `SELECT "id", "bdmName1", "bdmName2", "clientStatus", "leadStatus", "closerStatus", "dealValue", "followUps", "nextFollowUpDate", "meetingDate"
+         FROM "leads"
+         WHERE LOWER(TRIM("bdmName1")) IN (${placeholders}) OR LOWER(TRIM("bdmName2")) IN (${placeholders})`,
+        ...lowerTeamNames
+      ) : [];
+      const leaderLower = (targetLeader || '').toLowerCase().trim();
+      allMemberLeadsRaw.forEach((ml) => {
+        let mName = (ml.bdmName1 || '').trim();
+        if (!mName || mName.toLowerCase() === leaderLower || mName === '-- None (Single BDM) --') {
+          mName = (ml.bdmName2 || '').trim();
+        }
+        const cleanM = mName.toLowerCase();
+        const matchKey = Object.keys(teamMemberAllLeadsMap).find((k) => {
+          const kl = k.toLowerCase();
+          return kl === cleanM || kl.includes(cleanM) || cleanM.includes(kl);
+        });
+        if (matchKey) {
+          teamMemberAllLeadsMap[matchKey].push(ml);
+        }
+      });
+    }
+
+    const isLeadOverdueForCard = (lead) => {
+      if (!lead) return false;
+      const lStatus = (lead.leadStatus || '').toUpperCase();
+      if (lStatus === 'CLOSED_WON' || lStatus === 'CLOSED_LOST') return false;
+      const cStatus = (lead.clientStatus || '').toLowerCase();
+      if (cStatus === 'lost' || cStatus === 'closed') return false;
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const candidateDates = [];
+      let fus = [];
+      if (Array.isArray(lead.followUps)) fus = lead.followUps;
+      else if (typeof lead.followUps === 'string') {
+        try { fus = JSON.parse(lead.followUps); } catch {}
+      }
+      if (Array.isArray(fus) && fus.length > 0) {
+        const sorted = [...fus].sort((a, b) => {
+          const da = a.date ? new Date(a.date).getTime() : (a.addedAt ? new Date(a.addedAt).getTime() : 0);
+          const db = b.date ? new Date(b.date).getTime() : (b.addedAt ? new Date(b.addedAt).getTime() : 0);
+          return db - da;
+        });
+        const latest = sorted[0];
+        if (latest && latest.date && (latest.status || '').toLowerCase() !== 'closed' && (latest.status || '').toLowerCase() !== 'lost') {
+          const dStr = String(latest.date).includes('T') ? String(latest.date).split('T')[0] : String(latest.date);
+          if (dStr) candidateDates.push(dStr);
+        }
+      }
+      if (lead.nextFollowUpDate) {
+        try {
+          const nfu = new Date(lead.nextFollowUpDate);
+          if (!isNaN(nfu.getTime())) candidateDates.push(nfu.toISOString().split('T')[0]);
+        } catch {}
+      }
+      if (lead.meetingDate) {
+        try {
+          const md = new Date(lead.meetingDate);
+          if (!isNaN(md.getTime())) candidateDates.push(md.toISOString().split('T')[0]);
+        } catch {}
+      }
+
+      for (const dStr of candidateDates) {
+        const parts = dStr.split('-');
+        if (parts.length < 3) continue;
+        const [y, m, d] = parts.map(Number);
+        if (!y || !m || !d) continue;
+        const targetDate = new Date(y, m - 1, d);
+        targetDate.setHours(0, 0, 0, 0);
+        if (today.getTime() - targetDate.getTime() > 0) {
+          return true;
+        }
+      }
+      return false;
+    };
+
     const teamMembersOverview = Object.values(teamMembersMap).map((member) => {
       const mLeads = member.leads;
-      const activeLeads = mLeads.filter((l) => l.leadStatus !== 'CLOSED_WON' && l.leadStatus !== 'CLOSED_LOST').length;
-      const hotCount = mLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'hot').length;
-      const warmCount = mLeads.filter((l) => (l.clientStatus || 'warm').toLowerCase() === 'warm').length;
-      const lostCount = mLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'lost' || l.leadStatus === 'CLOSED_LOST').length;
-      const closedCount = mLeads.filter((l) => l.leadStatus === 'CLOSED_WON' || (l.clientStatus || '').toLowerCase() === 'closed').length;
+      const allMemberLeads = teamMemberAllLeadsMap[member.name] || mLeads;
+      const activeLeads = allMemberLeads.filter((l) => l.leadStatus !== 'CLOSED_WON' && l.leadStatus !== 'CLOSED_LOST').length;
+      const hotCount = allMemberLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'hot').length;
+      const warmCount = allMemberLeads.filter((l) => (l.clientStatus || 'warm').toLowerCase() === 'warm').length;
+      const lostCount = allMemberLeads.filter((l) => (l.clientStatus || '').toLowerCase() === 'lost' || l.leadStatus === 'CLOSED_LOST').length;
+      const closedCount = allMemberLeads.filter((l) => l.leadStatus === 'CLOSED_WON' || (l.clientStatus || '').toLowerCase() === 'closed').length;
+      const selfCloseCount = allMemberLeads.filter((l) => (l.closerStatus || '').toUpperCase().includes('SELF')).length;
+      const pendingFollowUpsCount = allMemberLeads.filter((l) => isLeadOverdueForCard(l)).length;
       const meetingLeads = mLeads.filter((l) => l.meetingDate || (l.meetingStatus && l.meetingStatus !== 'None'));
       const sortedMeetings = [...meetingLeads].sort((a, b) => {
         const da = a.meetingDate ? new Date(a.meetingDate).getTime() : 0;
@@ -988,7 +1076,7 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
       const activeLeadsWithEdc = mLeads.filter((l) => l.expectedDateOfCloser && l.leadStatus !== 'CLOSED_WON' && l.leadStatus !== 'CLOSED_LOST');
       activeLeadsWithEdc.sort((a, b) => new Date(a.expectedDateOfCloser) - new Date(b.expectedDateOfCloser));
       const nearestEdcLead = activeLeadsWithEdc[0] || mLeads.find((l) => l.expectedDateOfCloser) || null;
-      const totalFunnel = mLeads.reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
+      const totalFunnel = allMemberLeads.reduce((sum, l) => sum + (parseFloat(l.dealValue) || 0), 0);
 
       return {
         name: member.name,
@@ -999,6 +1087,8 @@ router.get('/', authenticateToken, requireRoles('BDM', 'ADMIN'), async (req, res
         warmCount,
         lostCount,
         closedCount,
+        selfCloseCount,
+        pendingFollowUpsCount,
         meetingCount: meetingLeads.length,
         nextMeetingLead,
         lastFollowUp,

@@ -27,6 +27,11 @@ export const setStoredCloudUrl = (url) => {
 
 // Detect runtime environment: Web browser (relative /api), custom API url, or Electron desktop
 export const getApiBaseUrl = () => {
+  // 0. Always use relative /api (Vite proxy -> localhost:4000) during local development
+  if (import.meta.env?.DEV) {
+    return '/api';
+  }
+
   // 1. In-app customized Cloud Server URL (saved in localStorage by user or staff)
   const stored = getStoredCloudUrl();
   if (stored) return stored;
