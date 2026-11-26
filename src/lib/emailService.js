@@ -23,6 +23,8 @@ function buildStageEmailHtml({
   stepStarted,
   description,
   remarks,
+  hideNote = false,
+  subject,
   attachedDocsSummary = [],
   bdmName,
   bdmPhone,
@@ -86,7 +88,7 @@ function buildStageEmailHtml({
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
-  <title>Corporate Mart Status Update</title>
+  <title>${subject || 'Corporate Mart Status Update'}</title>
   <style type="text/css">
     body, table, td, p, a, li {
       -webkit-text-size-adjust: 100% !important;
@@ -177,7 +179,10 @@ function buildStageEmailHtml({
                       ${description || ''}
                     </div>
                     ${
-                      remarks
+                      !hideNote &&
+                      remarks &&
+                      remarks.trim() &&
+                      remarks.trim().toLowerCase() !== (description || '').trim().toLowerCase()
                         ? `<div style="margin-top: 16px; padding-top: 14px; border-top: 2px dashed #000000; font-size: 18px; color: #000000; font-style: italic; line-height: 1.5;">
                              <strong style="font-style: normal; color: #000000;">Note:</strong> "${remarks}"
                            </div>`
@@ -307,6 +312,9 @@ async function notifyCustomerStageChange({
   notes,
   customSubject,
   serviceName,
+  stepCompleted: customStepCompleted,
+  stepStarted: customStepStarted,
+  hideNote = false,
   documentIds = [],
   attachAgreement = false,
   attachCertificates = false,
@@ -418,20 +426,33 @@ async function notifyCustomerStageChange({
       // 7. SERVICE COMPLETED -> STAGE_07_SERVICE_COMPLETED
       case 'SERVICE_COMPLETED': {
         const primaryServiceName = serviceName || (services.length > 0 ? services.join(', ') : 'Service');
-        subject = `Service Deliverables & Certificates Finalized - Deal #${dealCode} | Corporate Mart`;
-        stepCompleted = 'Operations Processing & Government Filings Completed';
+        subject = `Final Deliverable Certificate(s): ${primaryServiceName} - Deal #${dealCode} | Corporate Mart`;
+        stepCompleted = `Completed: ${primaryServiceName}`;
         stepStarted = null;
-        description = `All filings and operational processing for "${primaryServiceName}" have been successfully completed by our Operations department. Your official deliverable certificate(s) are attached to this email.`;
+        description = notes || `All filings and operational processing for "${primaryServiceName}" have been successfully completed by our Operations department. Your official deliverable certificate(s) are attached to this email.`;
+        hideNote = true;
         break;
       }
 
       // 8. FINAL DOCS DELIVERED -> STAGE_08_FINAL_DOCS_DELIVERED
       case 'FINAL_DOCS_DELIVERED': {
         const primaryServiceName = serviceName || (services.length > 0 ? services.join(', ') : 'Service');
-        subject = `Final Deliverable Certificates Dispatched - Deal #${dealCode} | Corporate Mart`;
-        stepCompleted = 'Step 4: Deliverables & Certificate Release Completed';
-        stepStarted = 'Step 5: Relationship Management & Handover Started';
-        description = `Your official certificates and final deliverables have been released and delivered. Your dossier is now moving to our dedicated Relationship Management team for post-service handover.`;
+        subject = `Final Deliverable Certificate(s): ${primaryServiceName} - Deal #${dealCode} | Corporate Mart`;
+        stepCompleted = `Completed: ${primaryServiceName}`;
+        stepStarted = null;
+        description = notes || `Your official certificates and final deliverables for "${primaryServiceName}" have been released and delivered. Your dossier is now moving to our dedicated Relationship Management team for post-service handover.`;
+        hideNote = true;
+        break;
+      }
+
+      // 8b. OPERATIONS FINAL DELIVERABLE
+      case 'OPERATIONS_FINAL_DELIVERABLE': {
+        const primaryServiceName = serviceName || (services.length > 0 ? services.join(', ') : 'Service');
+        subject = `Final Deliverable Certificate(s): ${primaryServiceName} - Deal #${dealCode} | Corporate Mart`;
+        stepCompleted = `Completed: ${primaryServiceName}`;
+        stepStarted = null;
+        description = notes || `We are pleased to inform you that your filing for "${primaryServiceName}" has been completed, and the official deliverable certificate(s) have been generated. Please find the official deliverable document(s) attached to this email.`;
+        hideNote = true;
         break;
       }
 
@@ -452,22 +473,51 @@ async function notifyCustomerStageChange({
         break;
 
       // 11. INDIVIDUAL SERVICE COMPLETED
-      case 'INDIVIDUAL_SERVICE_COMPLETED':
-        subject = `Service Completed: ${serviceName || 'Milestone'} - Deal #${dealCode} | Corporate Mart`;
-        stepCompleted = `Service Milestone Completed: ${serviceName || ''}`;
+      case 'INDIVIDUAL_SERVICE_COMPLETED': {
+        const primaryServiceName = serviceName || (services.length > 0 ? services.join(', ') : 'Service');
+        subject = `Final Deliverable Certificate(s): ${primaryServiceName} - Deal #${dealCode} | Corporate Mart`;
+        stepCompleted = `Completed: ${primaryServiceName}`;
         stepStarted = null;
-        description = `We are pleased to notify you that the filing/service for "${serviceName || 'Service'}" has been marked COMPLETED by our Operations department. The official deliverable certificate(s) are attached to this notification.`;
+        description = notes || `We are pleased to notify you that the filing/service for "${primaryServiceName}" has been marked COMPLETED by our Operations department. The official deliverable certificate(s) are attached to this notification.`;
+        hideNote = true;
         break;
+      }
 
       default:
         subject = `Status Update on Your Request - Deal #${dealCode} | Corporate Mart`;
         stepCompleted = null;
-        stepStarted = `Current Stage: ${deal.stage}`;
+        stepStarted = `Current Stage: ${deal.stage?.replace(/^STAGE_\d+_/i, '').replace(/_/g, ' ') || deal.stage}`;
         description = notes || 'Your service request has received an update from the Corporate Mart team.';
         break;
     }
 
+    if (customStepCompleted !== undefined) stepCompleted = customStepCompleted;
+    if (customStepStarted !== undefined) stepStarted = customStepStarted;
     if (customSubject) subject = customSubject;
+
+    // Check if this is an operations deliverable event
+    const isOpsDeliverableEvent =
+      ['SERVICE_COMPLETED', 'FINAL_DOCS_DELIVERED', 'INDIVIDUAL_SERVICE_COMPLETED', 'OPERATIONS_FINAL_DELIVERABLE'].includes(event) ||
+      attachCertificates;
+
+    const primaryServiceName = serviceName || (services.length > 0 ? services.join(', ') : 'Service');
+
+    if (isOpsDeliverableEvent) {
+      hideNote = true;
+      // If stepCompleted was not set or stepStarted was set (e.g. showing "Current Stage: Operations Processing"), ensure it shows "Completed: <serviceName>"
+      if (!stepCompleted || stepStarted) {
+        stepCompleted = `Completed: ${primaryServiceName}`;
+        stepStarted = null;
+      }
+      // Ensure the email subject/title contains the service name
+      if (!subject || !subject.includes(primaryServiceName)) {
+        if (customSubject && !customSubject.includes(primaryServiceName)) {
+          subject = `Final Deliverable Certificate(s): ${primaryServiceName} - ${customSubject}`;
+        } else {
+          subject = `Final Deliverable Certificate(s): ${primaryServiceName} - Deal #${dealCode} | Corporate Mart`;
+        }
+      }
+    }
 
     // -------------------------------------------------------------------------
     // ATTACHMENTS RESOLVER:
@@ -508,9 +558,6 @@ async function notifyCustomerStageChange({
     }
 
     // 2. Service Deliverable Certificates (for Operations completion, final delivery, or explicit attachCertificates flag)
-    const isOpsDeliverableEvent =
-      ['SERVICE_COMPLETED', 'FINAL_DOCS_DELIVERED', 'INDIVIDUAL_SERVICE_COMPLETED'].includes(event) ||
-      attachCertificates;
     if (isOpsDeliverableEvent) {
       const certDocs = allDealDocs.filter(
         (d) =>
@@ -567,7 +614,9 @@ async function notifyCustomerStageChange({
       stepCompleted,
       stepStarted,
       description,
-      remarks: notes,
+      remarks: hideNote ? null : notes,
+      hideNote,
+      subject,
       attachedDocsSummary,
       bdmName,
       bdmPhone,

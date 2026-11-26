@@ -2155,20 +2155,59 @@ router.delete('/:id', authenticateToken, async (req, res) => {
  */
 router.post('/:id/send-email-update', authenticateToken, async (req, res) => {
   try {
-    const { subject, message, documentIds, attachAgreement, attachCertificates } = req.body;
+    const {
+      subject,
+      message,
+      documentIds,
+      attachAgreement,
+      attachCertificates,
+      event,
+      serviceName,
+      stepCompleted,
+      stepStarted,
+      hideNote,
+    } = req.body;
     const deal = await prisma.deal.findUnique({
       where: { id: req.params.id },
-      include: { client: true, documents: true },
+      include: { client: true, documents: true, services: true },
     });
 
     if (!deal) return res.status(404).json({ error: 'Deal not found.' });
     if (!deal.client?.email) return res.status(400).json({ error: 'Client has no email address configured.' });
 
+    const isDeliverable =
+      attachCertificates ||
+      event === 'OPERATIONS_FINAL_DELIVERABLE' ||
+      (subject && subject.toLowerCase().includes('deliverable'));
+    const resolvedServiceName =
+      serviceName ||
+      (deal.services && deal.services.length > 0 ? deal.services.map((s) => s.serviceName).join(', ') : 'Service');
+
+    let resolvedSubject = subject;
+    if (isDeliverable) {
+      if (!resolvedSubject) {
+        resolvedSubject = `Final Deliverable Certificate(s): ${resolvedServiceName} - Deal #${deal.dealCode} | Corporate Mart`;
+      } else if (!resolvedSubject.includes(resolvedServiceName)) {
+        resolvedSubject = `Final Deliverable Certificate(s): ${resolvedServiceName} - ${resolvedSubject}`;
+      }
+    } else if (!resolvedSubject) {
+      resolvedSubject = `Update Regarding Deal #${deal.dealCode} | Corporate Mart`;
+    }
+
+    const resolvedEvent = event || (isDeliverable ? 'OPERATIONS_FINAL_DELIVERABLE' : 'CUSTOM_UPDATE');
+    const resolvedStepCompleted = stepCompleted !== undefined ? stepCompleted : (isDeliverable ? `Completed: ${resolvedServiceName}` : null);
+    const resolvedStepStarted = stepStarted !== undefined ? stepStarted : (isDeliverable ? null : undefined);
+    const resolvedHideNote = hideNote !== undefined ? hideNote : isDeliverable;
+
     await notifyCustomerStageChange({
       dealId: deal.id,
-      event: 'CUSTOM_UPDATE',
-      customSubject: subject || `Update Regarding Deal #${deal.dealCode} | Corporate Mart`,
+      event: resolvedEvent,
+      customSubject: resolvedSubject,
       notes: message,
+      serviceName: resolvedServiceName,
+      stepCompleted: resolvedStepCompleted,
+      stepStarted: resolvedStepStarted,
+      hideNote: resolvedHideNote,
       documentIds,
       attachAgreement,
       attachCertificates,
@@ -2179,7 +2218,7 @@ router.post('/:id/send-email-update', authenticateToken, async (req, res) => {
       dealId: deal.id,
       userId: req.user.id,
       action: 'EMAIL_SENT_TO_CLIENT',
-      remarks: `Manual email update dispatched to ${deal.client.email} by ${req.user.fullName}. Subject: "${subject || 'Status Update'}"${docCountNote}`,
+      remarks: `Manual email update dispatched to ${deal.client.email} by ${req.user.fullName}. Subject: "${resolvedSubject}"${docCountNote}`,
     });
 
     return res.json({ message: `Email successfully queued and sent to ${deal.client.email}.` });

@@ -1026,9 +1026,13 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
       setFeedback(null);
       const svcNames = (target.services || []).map((s) => s.serviceName).filter(Boolean).join(', ') || 'Service';
       await api.post(`/deals/${target.id}/send-email-update`, {
-        subject: `${svcNames} deliverables`,
+        event: 'OPERATIONS_FINAL_DELIVERABLE',
+        serviceName: svcNames,
+        subject: `Final Deliverable Certificate(s): ${svcNames} - Deal #${target.dealCode} | Corporate Mart`,
         message: `We are pleased to deliver your official service certificate(s) and completion documents for ${target.client?.companyName || 'your company'}. Please find the official files attached to this notification for your compliance and regulatory records.`,
+        stepCompleted: `Completed: ${svcNames}`,
         attachCertificates: true,
+        hideNote: true,
       });
       setFeedback({
         type: 'success',
@@ -1219,10 +1223,15 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
         const targetDeal = (deals || []).find((d) => d.id === dealId) || activeDeal;
         const clientEmail = targetDeal?.client?.email;
         if (clientEmail) {
+          const currentServiceName = svc?.serviceName || 'Service';
           await api.post(`/deals/${dealId}/send-email-update`, {
-            subject: `Official Service Deliverable Certificate(s) - Deal #${targetDeal?.dealCode} | Corporate Mart`,
-            message: `We are pleased to inform you that your filing for "${svc?.serviceName || 'Service'}" has been completed, and the official deliverable certificate(s) have been generated. Please find the official deliverable document(s) attached to this email.`,
+            event: 'OPERATIONS_FINAL_DELIVERABLE',
+            serviceName: currentServiceName,
+            subject: `Final Deliverable Certificate(s): ${currentServiceName} - Deal #${targetDeal?.dealCode || dealId} | Corporate Mart`,
+            message: `We are pleased to inform you that your filing for "${currentServiceName}" has been completed, and the official deliverable certificate(s) have been generated. Please find the official deliverable document(s) attached to this email.`,
+            stepCompleted: `Completed: ${currentServiceName}`,
             attachCertificates: true,
+            hideNote: true,
           });
           toast.success(`Deliverable document(s) sent via email to ${clientEmail}!`, 'Email Sent');
         }
