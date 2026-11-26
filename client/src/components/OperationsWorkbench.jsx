@@ -515,7 +515,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
 
   useEffect(() => {
     if (isManager) {
-      if (activeTab === 'my_tasks' || activeTab === 'pool') setActiveTab('allocation');
+      if (activeTab === 'pool') setActiveTab('allocation');
     } else {
       if (activeTab === 'allocation' || activeTab === 'team' || activeTab === 'dossier') setActiveTab('my_tasks');
     }
@@ -878,28 +878,11 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
         return;
       }
 
-      // Requirements 1 & 2: When marking a service as COMPLETED
+      // Requirement: When marking a service as COMPLETED
       if (updates.status === 'COMPLETED') {
         const deal = activeDeal || selectedDeal || (deals || []).find((d) => d.id === dealId);
-        const total = Math.round(Number(deal?.totalAmount || 0));
-        const received = Math.round(Number(deal?.amountReceived || 0));
-        const pending = Math.max(0, Math.round(Number(deal?.pendingAmount || (total - received))));
-        const hasUnverified = (deal?.payments || []).some((p) => p.status !== 'VERIFIED');
 
-        // Requirement 1: If payment is pending, service cannot complete
-        if (pending > 0 || hasUnverified || (deal && !deal.isAccountsVerified)) {
-          toast.error(
-            `Service cannot be completed because payment is pending (Pending Balance: ₹${pending.toLocaleString('en-IN')}). All payment tranches must be verified and cleared first.`,
-            'Payment Pending'
-          );
-          setFeedback({
-            type: 'error',
-            message: `Service cannot be completed because payment is pending (Pending Balance: ₹${pending.toLocaleString('en-IN')}). All payment tranches must be verified and cleared first.`,
-          });
-          return;
-        }
-
-        // Requirement 2: If deliverable not submitted, service cannot complete
+        // Requirement: If deliverable not submitted, service cannot complete
         const docs = deal?.documents || [];
         const hasDeliverable = docs.some(
           (d) =>
@@ -1084,34 +1067,15 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
     }
 
     if (newStatus === 'COMPLETED') {
-      const deal = (deals || []).find((d) => d.id === dealId) || activeDeal;
-      const total = Math.round(Number(deal?.totalAmount || 0));
-      const received = Math.round(Number(deal?.amountReceived || 0));
-      const pending = Math.max(0, Math.round(Number(deal?.pendingAmount ?? (total - received))));
-      const hasUnverified = (deal?.payments || []).some((p) => p.status !== 'VERIFIED');
-
-      // Requirement 1: If payment is pending, service cannot complete
-      if (pending > 0 || hasUnverified || (deal && !deal.isAccountsVerified)) {
-        toast.error(
-          `Service cannot be marked as COMPLETED because payment is pending (Pending Balance: ₹${pending.toLocaleString('en-IN')}). All payment tranches must be verified and cleared by Accounts first.`,
-          'Payment Pending'
-        );
-        setFeedback({
-          type: 'error',
-          message: `Service milestone cannot be set to COMPLETED because payment is pending (Pending Balance: ₹${pending.toLocaleString('en-IN')}). Clear with Accounts first.`,
-        });
-        return;
-      }
-
       // Unlock deliverable submission gate
       setMilestoneStatusMap((prev) => ({ ...prev, [serviceId]: 'COMPLETED' }));
       toast.info(
-        'Milestone status set to COMPLETED! Deliverable upload section is now unlocked below. Please attach the deliverable certificate(s) and click "Upload & Submit Deliverable(s)" to finalize.',
+        'Milestone status set to COMPLETED! Deliverable upload section is now unlocked. Please attach the deliverable certificate(s) and click "Upload & Submit Deliverable(s)" to finalize.',
         'Deliverables Unlocked'
       );
       setFeedback({
         type: 'success',
-        message: 'Milestone set to COMPLETED. Deliverables upload is now open. Attach certificate(s) below and click "Upload & Submit Deliverable(s)" to finalize.',
+        message: 'Milestone set to COMPLETED. Deliverables upload is now open. Attach certificate(s) and click "Upload & Submit Deliverable(s)" to finalize.',
       });
     } else {
       // Revert or switch to another in-progress milestone
@@ -1403,6 +1367,20 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
         <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 self-stretch md:self-auto justify-center">
           {isManager ? (
             <>
+              <button
+                onClick={() => setActiveTab('my_tasks')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${activeTab === 'my_tasks'
+                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
+                    : 'text-slate-600 hover:text-slate-900'
+                  }`}
+              >
+                <FileCheck className="w-3.5 h-3.5 text-blue-600" />
+                <span>My Desk Tasks & Files</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-blue-50 text-blue-700">
+                  {filteredMyServices.length}
+                </span>
+              </button>
+
               <button
                 onClick={() => setActiveTab('allocation')}
                 className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${activeTab === 'allocation'
@@ -1857,27 +1835,17 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                 <option value="APPROVED">APPROVED (Authority Cleared)</option>
                                 <option
                                   value="COMPLETED"
-                                  disabled={!isServiceLocked && isPaymentPending}
-                                  title={
-                                    isPaymentPending
-                                      ? `Payment pending (₹${pendingDealAmt.toLocaleString('en-IN')}) — accounts clearance required`
-                                      : 'Set milestone to COMPLETED to unlock deliverable submission below'
-                                  }
+                                  title="Set milestone to COMPLETED to unlock deliverable submission below"
                                 >
-                                  COMPLETED {isServiceLocked ? '(Locked)' : isPaymentPending ? '(Blocked: Payment Pending)' : '(Unlocks Deliverables)'}
+                                  COMPLETED {isServiceLocked ? '(Locked)' : '(Unlocks Deliverables)'}
                                 </option>
                               </select>
-                              {!isServiceLocked && isPaymentPending && (
-                                <p className="text-[10px] text-amber-700 mt-1 font-medium leading-tight">
-                                  ⚠️ Payment pending (₹{pendingDealAmt.toLocaleString('en-IN')}) — clear with Accounts before milestone can be completed.
-                                </p>
-                              )}
-                              {!isServiceLocked && !isPaymentPending && !isMilestoneSetToComplete && (
+                              {!isServiceLocked && !isMilestoneSetToComplete && (
                                 <p className="text-[10px] text-slate-500 mt-1 font-medium leading-tight">
                                   ℹ️ Set Milestone to COMPLETED to open deliverable submission below.
                                 </p>
                               )}
-                              {!isServiceLocked && !isPaymentPending && isMilestoneSetToComplete && (
+                              {!isServiceLocked && isMilestoneSetToComplete && (
                                 <p className="text-[10px] text-emerald-700 mt-1 font-bold leading-tight">
                                   ✓ Milestone set to COMPLETED. Attach deliverable file(s) below to finalize.
                                 </p>
@@ -2318,14 +2286,9 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                         <option value="APPROVED">APPROVED (Authority Cleared)</option>
                                         <option
                                           value="COMPLETED"
-                                          disabled={!isTableSvcLocked && isSvcPaymentPending}
-                                          title={
-                                            isSvcPaymentPending
-                                              ? `Payment pending (₹${svcPendingAmt.toLocaleString('en-IN')}) — accounts clearance required`
-                                              : 'Set milestone to COMPLETED to open deliverable submission'
-                                          }
+                                          title="Set milestone to COMPLETED to open deliverable submission"
                                         >
-                                          COMPLETED {isTableSvcLocked ? '(Locked)' : isSvcPaymentPending ? '(Blocked: Payment)' : '(Ready to Complete)'}
+                                          COMPLETED {isTableSvcLocked ? '(Locked)' : '(Ready to Complete)'}
                                         </option>
                                       </select>
                                       {isTableSvcLocked && (
@@ -3329,17 +3292,70 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                                         <option value="APPROVED">APPROVED (Authority Cleared)</option>
                                         <option
                                           value="COMPLETED"
-                                          disabled={!isModalSvcLocked && dIsPaymentPending}
-                                          title={
-                                            dIsPaymentPending
-                                              ? `Payment pending (₹${dPending.toLocaleString('en-IN')}) — accounts clearance required`
-                                              : 'Set milestone to COMPLETED to open deliverable submission'
-                                          }
+                                          title="Set milestone to COMPLETED to open deliverable submission"
                                         >
-                                          COMPLETED {isModalSvcLocked ? '(Locked)' : dIsPaymentPending ? '(Blocked: Payment)' : ''}
+                                          COMPLETED {isModalSvcLocked ? '(Locked)' : '(Ready to Complete)'}
                                         </option>
                                       </select>
                                     </div>
+
+                                    {milestoneStatusMap[svc.id] === 'COMPLETED' && !isModalSvcLocked && (
+                                      <div className="col-span-1 sm:col-span-3 mt-2 p-3 bg-emerald-50/70 border border-emerald-200 rounded-lg space-y-2.5">
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
+                                            <FileCheck className="w-4 h-4 text-emerald-600" />
+                                            Attach Deliverable Certificate(s) for {svc.serviceName}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={handleAddDeliverableSlot}
+                                            className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded text-[11px] font-semibold flex items-center gap-1 shadow-2xs"
+                                          >
+                                            <Plus className="w-3 h-3" /> Add Slot
+                                          </button>
+                                        </div>
+                                        <div className="space-y-2">
+                                          {deliverableSlots.map((slot, idx) => (
+                                            <div key={slot.id} className="p-2 bg-white rounded border border-emerald-200/80 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 text-xs">
+                                              <input
+                                                type="text"
+                                                value={slot.title}
+                                                onChange={(e) => handleUpdateDeliverableSlot(slot.id, 'title', e.target.value)}
+                                                placeholder="Certificate Title / Note"
+                                                className="flex-1 bg-white border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:border-slate-800"
+                                              />
+                                              <input
+                                                type="file"
+                                                accept="application/pdf,image/*,.doc,.docx"
+                                                onChange={(e) => handleUpdateDeliverableSlot(slot.id, 'file', e.target.files?.[0] || null)}
+                                                className="text-xs file:py-1 file:px-2 file:rounded file:border-0 file:bg-slate-800 file:text-white file:text-xs cursor-pointer"
+                                              />
+                                              {deliverableSlots.length > 1 && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleRemoveDeliverableSlot(slot.id)}
+                                                  className="text-slate-400 hover:text-rose-600 p-1"
+                                                  title="Remove Slot"
+                                                >
+                                                  <Trash2 className="w-3.5 h-3.5" />
+                                                </button>
+                                              )}
+                                            </div>
+                                          ))}
+                                        </div>
+                                        <div className="flex justify-end pt-1">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleSubmitAllDeliverables(activeDossierDeal.id, svc.id)}
+                                            disabled={isUploadingDoc || !deliverableSlots.some((s) => Boolean(s.file))}
+                                            className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold flex items-center gap-1.5 transition shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                                          >
+                                            <UploadCloud className="w-3.5 h-3.5" />
+                                            <span>{isUploadingDoc ? 'Submitting...' : 'Upload & Submit Deliverable(s)'}</span>
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
                                 );
                               })()}
@@ -3448,6 +3464,36 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                         </button>
                       </div>
                     )}
+
+                    {/* Direct Upload Deliverable Certificate to Dossier */}
+                    <div className="pt-2 border-t border-slate-200">
+                      <span className="text-[11px] font-bold text-slate-700 block mb-1">
+                        Attach Deal Deliverable Certificate (PDF/DOC):
+                      </span>
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                        <input
+                          id="deliverable-file-input"
+                          type="file"
+                          accept="application/pdf,image/*,.doc,.docx"
+                          onChange={(e) => setDeliverableFile(e.target.files?.[0] || null)}
+                          className="flex-1 text-xs text-slate-700 file:mr-2.5 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-slate-900 file:text-white hover:file:bg-slate-800 cursor-pointer border border-slate-200 rounded-lg p-1 bg-white"
+                        />
+                        <button
+                          type="button"
+                          disabled={!deliverableFile || isUploadingDoc}
+                          onClick={() => handleDirectDeliverableUpload(activeDossierDeal.id)}
+                          className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <UploadCloud className="w-3.5 h-3.5" />
+                          <span>{isUploadingDoc ? 'Uploading...' : 'Upload Certificate'}</span>
+                        </button>
+                      </div>
+                      {deliverableFile && (
+                        <p className="text-[11px] text-emerald-700 font-medium mt-1">
+                          Selected: {deliverableFile.name} ({(deliverableFile.size / 1024).toFixed(0)} KB)
+                        </p>
+                      )}
+                    </div>
                   </div>
 
                   {/* Part-payment lock warning */}
