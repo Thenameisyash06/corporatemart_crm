@@ -561,7 +561,7 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
                       <tr>
                         <th className="py-2.5 px-3 font-bold">Service Name</th>
                         <th className="py-2.5 px-3 font-bold text-right">Professional Fee</th>
-                        <th className="py-2.5 px-3 font-bold text-right">Govt Fee</th>
+                        <th className="py-2.5 px-3 font-bold text-right">GST</th>
                         <th className="py-2.5 px-3 font-bold text-right">Subtotal</th>
                       </tr>
                     </thead>
@@ -701,17 +701,7 @@ export default function LegalWorkbench({ currentUser, onRefreshParent, onOpenDos
                   )}
 
                   {/* Clearance Notes from Accounts Desk (if recorded on deal level) */}
-                  {selectedDeal.accountsNotes && (
-                    <div className="p-3 bg-white border border-slate-200 rounded-lg shadow-xs text-xs space-y-2 mt-1.5">
-                      <div className="text-emerald-800 bg-emerald-50/60 p-2 rounded border border-emerald-200 flex items-start gap-1.5">
-                        <Check className="w-3.5 h-3.5 text-emerald-600 mt-0.5 flex-shrink-0" />
-                        <div>
-                          <span className="font-semibold">Accounts Verification Clearance Note: </span>
-                          <span>{selectedDeal.accountsNotes}</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                  
                 </div>
               </div>
 
