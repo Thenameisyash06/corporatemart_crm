@@ -244,7 +244,7 @@ function isBeforeToday(dateInput) {
 // -----------------------------------------------------------------------------
 // AUTOMATIC TABLE INITIALIZATION (PostgreSQL)
 // -----------------------------------------------------------------------------
-let tableReady = true; // Table schema is established via Prisma and DB migrations
+let tableReady = false; // Ensures columns & partial unique index are verified once per cold start
 async function ensureLeadsTable() {
   if (tableReady) return;
   try {
@@ -322,6 +322,9 @@ async function ensureLeadsTable() {
           ALTER TABLE "leads" ADD COLUMN "reassignmentHistory" JSONB DEFAULT '[]'::jsonb;
         EXCEPTION WHEN duplicate_column THEN END;
         BEGIN
+          ALTER TABLE "leads" ADD COLUMN "parentLeadId" TEXT;
+        EXCEPTION WHEN duplicate_column THEN END;
+        BEGIN
           UPDATE "leads" SET "clientStatus" = 'Hot' WHERE UPPER("clientStatus") = 'HOT';
           UPDATE "leads" SET "clientStatus" = 'Warm' WHERE UPPER("clientStatus") = 'WARM';
           UPDATE "leads" SET "clientStatus" = 'Lost' WHERE UPPER("clientStatus") = 'LOST';
@@ -364,7 +367,16 @@ async function ensureLeadsTable() {
 
     try {
       await prisma.$executeRawUnsafe(`
-        CREATE UNIQUE INDEX IF NOT EXISTS "idx_leads_mobile_no_unique" ON "leads"("mobileNo")
+        DROP INDEX IF EXISTS "idx_leads_mobile_no_unique"
+      `);
+      await prisma.$executeRawUnsafe(`
+        DROP INDEX IF EXISTS "leads_mobileNo_key"
+      `);
+      await prisma.$executeRawUnsafe(`
+        DROP INDEX IF EXISTS "leads_companyName_key"
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE UNIQUE INDEX IF NOT EXISTS "idx_leads_mobile_primary_unique" ON "leads"("mobileNo") WHERE "parentLeadId" IS NULL
       `);
     } catch (e) {
       // Index might already exist
@@ -1441,8 +1453,10 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
       leadStatus,
       dealValue,
       remarks,
+      parentLeadId,
     } = req.body;
 
+    const cleanParentLeadId = parentLeadId && String(parentLeadId).trim() ? String(parentLeadId).trim() : null;
     const file = req.file;
 
     // 1. Validate Required Text Fields first
@@ -1457,36 +1471,47 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
     const phoneDigits = phoneVal.digits;
     const coreDigits = phoneDigits.length >= 10 ? phoneDigits.slice(-10) : phoneDigits;
 
-    // 2. Duplicate check by Company Name & Mobile Number (Both must be strictly unique in LMS)
-    // Only match characters/words, ignore symbols/punctuation
+    // 2. Duplicate check by Company Name & Mobile Number
+    // Only enforced for primary/new leads; bypassed when creating an additional requirement linked via parentLeadId
     const normCompanyName = (companyName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     if (!normCompanyName) {
       return res.status(400).json({ error: 'Company Name must contain valid alphanumeric characters.' });
     }
-    const existingCompanyLeads = await prisma.$queryRawUnsafe(
-      `SELECT "id", "companyName" FROM "leads" WHERE REGEXP_REPLACE(LOWER("companyName"), '[^a-z0-9]', '', 'g') = $1 LIMIT 1`,
-      normCompanyName
-    );
-    if (existingCompanyLeads && existingCompanyLeads.length > 0) {
-      return res.status(400).json({
-        error: `A lead with company name "${existingCompanyLeads[0].companyName}" already exists in LMS. Company Name must be strictly unique.`,
-      });
-    }
 
-    const existingPhoneLeads = await prisma.$queryRawUnsafe(
-      `SELECT "id", "companyName" FROM "leads" 
-       WHERE "mobileNo" = $1 
-          OR REGEXP_REPLACE("mobileNo", '\\D', '', 'g') = $2 
-          OR (LENGTH($3) >= 10 AND RIGHT(REGEXP_REPLACE("mobileNo", '\\D', '', 'g'), 10) = $3)
-       LIMIT 1`,
-      cleanPhone,
-      phoneDigits,
-      coreDigits
-    );
-    if (existingPhoneLeads && existingPhoneLeads.length > 0) {
-      return res.status(400).json({
-        error: `A lead with mobile number ${cleanPhone} already exists (${existingPhoneLeads[0].companyName}). Each lead must have a unique phone number in LMS.`,
-      });
+    if (cleanParentLeadId) {
+      const parentRows = await prisma.$queryRawUnsafe(
+        `SELECT "id" FROM "leads" WHERE "id" = $1 LIMIT 1`,
+        cleanParentLeadId
+      );
+      if (!parentRows || parentRows.length === 0) {
+        return res.status(404).json({ error: 'Original parent lead not found.' });
+      }
+    } else {
+      const existingCompanyLeads = await prisma.$queryRawUnsafe(
+        `SELECT "id", "companyName" FROM "leads" WHERE REGEXP_REPLACE(LOWER("companyName"), '[^a-z0-9]', '', 'g') = $1 LIMIT 1`,
+        normCompanyName
+      );
+      if (existingCompanyLeads && existingCompanyLeads.length > 0) {
+        return res.status(400).json({
+          error: `A lead with company name "${existingCompanyLeads[0].companyName}" already exists in LMS. Company Name must be strictly unique.`,
+        });
+      }
+
+      const existingPhoneLeads = await prisma.$queryRawUnsafe(
+        `SELECT "id", "companyName" FROM "leads" 
+         WHERE "mobileNo" = $1 
+            OR REGEXP_REPLACE("mobileNo", '\\D', '', 'g') = $2 
+            OR (LENGTH($3) >= 10 AND RIGHT(REGEXP_REPLACE("mobileNo", '\\D', '', 'g'), 10) = $3)
+         LIMIT 1`,
+        cleanPhone,
+        phoneDigits,
+        coreDigits
+      );
+      if (existingPhoneLeads && existingPhoneLeads.length > 0) {
+        return res.status(400).json({
+          error: `A lead with mobile number ${cleanPhone} already exists (${existingPhoneLeads[0].companyName}). Each lead must have a unique phone number in LMS.`,
+        });
+      }
     }
 
     // Ensure Leader is strictly fetched from stored user data for BDM
@@ -1612,8 +1637,8 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
         "leaderName", "bdmName1", "bdmName2", "closerStatus", "sourcingStatus",
         "meetingStatus", "meetingDate", "clientStatus", "expectedDateOfCloser", "leadStatus", "dealValue",
         "remarks", "quotationFileUrl", "quotationFileName", "quotationFileSize",
-        "createdById", "nextFollowUpDate", "createdAt", "updatedAt"
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, NOW(), NOW())`,
+        "createdById", "nextFollowUpDate", "parentLeadId", "createdAt", "updatedAt"
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, NOW(), NOW())`,
       id,
       companyName.trim().toUpperCase(),
       directorName ? directorName.trim().toUpperCase() : null,
@@ -1635,7 +1660,8 @@ router.post('/', authenticateToken, requireRoles('BDM', 'ADMIN'), upload.single(
       quotationFileName,
       quotationFileSize,
       req.user.id,
-      initialFollowUpDate
+      initialFollowUpDate,
+      cleanParentLeadId
     );
 
     const [created] = await prisma.$queryRawUnsafe(`SELECT * FROM "leads" WHERE "id" = $1`, id);

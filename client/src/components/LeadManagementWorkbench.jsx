@@ -591,6 +591,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     leadStatus: 'OPEN',
     dealValue: '',
     remarks: '',
+    parentLeadId: null,
   };
 
   const [form, setForm] = useState(initialFormState);
@@ -612,6 +613,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
 
   // Real-time check for duplicate phone number in form (matches digits with or without country code)
   const duplicatePhoneLead = useMemo(() => {
+    if (form.parentLeadId) return null;
     const raw = (form.mobileNo || '').trim();
     if (!raw) return null;
     const digits = raw.replace(/\D/g, '');
@@ -624,14 +626,15 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       if (coreDigits.length === 10 && lDigits.slice(-10) === coreDigits) return true;
       return false;
     }) || null;
-  }, [form.mobileNo, leads]);
+  }, [form.mobileNo, form.parentLeadId, leads]);
 
   // Real-time check for duplicate company name in form (match characters only, ignore symbols/spaces)
   const duplicateCompanyLead = useMemo(() => {
+    if (form.parentLeadId) return null;
     const norm = (form.companyName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     if (!norm) return null;
     return leads.find((l) => (l.companyName || '').toLowerCase().replace(/[^a-z0-9]/g, '') === norm) || null;
-  }, [form.companyName, leads]);
+  }, [form.companyName, form.parentLeadId, leads]);
 
   // Duplicate Phone Number Popup State (shows with clear message & cancel/edit option)
   const [duplicatePhonePopup, setDuplicatePhonePopup] = useState(null);
@@ -1247,7 +1250,31 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     if (pendingFollowUpFilter && selectedMonthFilter !== 'PENDING_FOLLOWUPS') {
       list = list.filter((l) => isLeadFollowUpExceeded(l));
     }
-    return list;
+
+    // Group associated child leads directly underneath their parent lead when both are visible
+    const listIds = new Set(list.map((l) => l.id));
+    const childrenByParent = {};
+    const topLevel = [];
+    list.forEach((l) => {
+      if (l.parentLeadId && listIds.has(l.parentLeadId)) {
+        if (!childrenByParent[l.parentLeadId]) childrenByParent[l.parentLeadId] = [];
+        childrenByParent[l.parentLeadId].push(l);
+      } else {
+        topLevel.push(l);
+      }
+    });
+
+    const ordered = [];
+    topLevel.forEach((l) => {
+      ordered.push(l);
+      if (childrenByParent[l.id]) {
+        childrenByParent[l.id]
+          .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0))
+          .forEach((child) => ordered.push(child));
+      }
+    });
+
+    return ordered;
   }, [visibleLeads, leads, isAdmin, selectedLeaderFilter, selectedTeamMemberFilter, selectedMonthFilter, getLeadMonthBadge, pendingFollowUpFilter, getLeadOverdueInfo, overdueBdmFilter, overdueSortOrder]);
 
   // All overdue leads across available leads
@@ -1768,14 +1795,14 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         return;
       }
     }
-    if (duplicateCompanyLead) {
+    if (!form.parentLeadId && duplicateCompanyLead) {
       toast.warning(
         `A lead with company name "${duplicateCompanyLead.companyName}" already exists in LMS. Company Name must be strictly unique.`,
         'Duplicate Company Name'
       );
       return;
     }
-    if (duplicatePhoneLead) {
+    if (!form.parentLeadId && duplicatePhoneLead) {
       showDuplicatePhonePopup(
         `This mobile number is already registered in LMS for "${duplicatePhoneLead.companyName}".`
       );
@@ -1817,6 +1844,9 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       formData.append('leadStatus', form.leadStatus);
       formData.append('dealValue', form.dealValue);
       formData.append('remarks', form.remarks.trim());
+      if (form.parentLeadId) {
+        formData.append('parentLeadId', form.parentLeadId);
+      }
       if (quotationFile) {
         formData.append('quotation', quotationFile);
       }
@@ -2809,6 +2839,31 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
           </div>
 
           <form onSubmit={handleCreateLead} className="p-5 space-y-4">
+            {form.parentLeadId && (
+              <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2 text-indigo-900 font-semibold">
+                  <Plus className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span>
+                    Adding New Requirement for Existing Client: <strong>{form.companyName}</strong>
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForm({
+                      ...initialFormState,
+                      leaderName: fetchedLeaderName || initialFormState.leaderName,
+                      bdmName1: loggedInBdmName || initialFormState.bdmName1,
+                    });
+                    setIsFormOpen(false);
+                  }}
+                  className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 bg-white border border-indigo-200 px-2.5 py-1 rounded-lg transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
             {/* Row 1: Company Name, Director Name, Mobile, Email */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
@@ -2820,10 +2875,17 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                   <input
                     type="text"
                     required
+                    readOnly={Boolean(form.parentLeadId)}
                     value={form.companyName}
                     onChange={(e) => setForm({ ...form, companyName: e.target.value })}
                     placeholder="e.g. Acme Innovations Pvt Ltd"
-                    className={`w-full h-10 bg-slate-50 border rounded-xl pl-9 pr-3 text-xs text-slate-900 focus:bg-white focus:outline-none transition-colors ${duplicateCompanyLead ? 'border-rose-400 focus:border-rose-500 bg-rose-50/30' : 'border-slate-300 focus:border-slate-800'}`}
+                    className={`w-full h-10 border rounded-xl pl-9 pr-3 text-xs text-slate-900 focus:outline-none transition-colors ${
+                      form.parentLeadId
+                        ? 'bg-slate-100 border-slate-300 cursor-not-allowed font-semibold'
+                        : duplicateCompanyLead
+                          ? 'bg-rose-50/30 border-rose-400 focus:border-rose-500 focus:bg-white'
+                          : 'bg-slate-50 border-slate-300 focus:border-slate-800 focus:bg-white'
+                    }`}
                   />
                 </div>
                 {duplicateCompanyLead && (
@@ -2842,10 +2904,13 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                   <UserCheck className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="text"
+                    readOnly={Boolean(form.parentLeadId)}
                     value={form.directorName}
                     onChange={(e) => setForm({ ...form, directorName: e.target.value })}
                     placeholder="e.g. Rajesh Kumar Sharma"
-                    className="w-full h-10 bg-slate-50 border border-slate-300 rounded-xl pl-9 pr-3 text-xs text-slate-900 focus:bg-white focus:border-slate-800 focus:outline-none transition-colors"
+                    className={`w-full h-10 border border-slate-300 rounded-xl pl-9 pr-3 text-xs text-slate-900 focus:outline-none transition-colors ${
+                      form.parentLeadId ? 'bg-slate-100 cursor-not-allowed font-semibold' : 'bg-slate-50 focus:bg-white focus:border-slate-800'
+                    }`}
                   />
                 </div>
               </div>
@@ -2854,12 +2919,19 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                 <label className="text-xs font-semibold text-slate-700 block mb-1.5">
                   Mobile No <span className="text-rose-500">*</span>
                 </label>
-                <CountryCodePhoneInput
-                  value={form.mobileNo}
-                  onChange={(val) => setForm({ ...form, mobileNo: val })}
-                  required
-                  className="w-full h-10 bg-slate-50 border border-slate-300 rounded-xl focus-within:bg-white focus-within:border-slate-800 transition-colors shadow-2xs"
-                />
+                {form.parentLeadId ? (
+                  <div className="w-full h-10 bg-slate-100 border border-slate-300 rounded-xl px-3 text-xs text-slate-900 font-mono font-semibold flex items-center gap-2 cursor-not-allowed">
+                    <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span>{form.mobileNo}</span>
+                  </div>
+                ) : (
+                  <CountryCodePhoneInput
+                    value={form.mobileNo}
+                    onChange={(val) => setForm({ ...form, mobileNo: val })}
+                    required
+                    className="w-full h-10 bg-slate-50 border border-slate-300 rounded-xl focus-within:bg-white focus-within:border-slate-800 transition-colors shadow-2xs"
+                  />
+                )}
               </div>
 
               <div>
@@ -2870,10 +2942,13 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                   <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="email"
+                    readOnly={Boolean(form.parentLeadId)}
                     value={form.emailId}
                     onChange={(e) => setForm({ ...form, emailId: e.target.value })}
                     placeholder="contact@acme.com"
-                    className="w-full h-10 bg-slate-50 border border-slate-300 rounded-xl pl-9 pr-3 text-xs text-slate-900 focus:bg-white focus:border-slate-800 focus:outline-none transition-colors"
+                    className={`w-full h-10 border border-slate-300 rounded-xl pl-9 pr-3 text-xs text-slate-900 focus:outline-none transition-colors ${
+                      form.parentLeadId ? 'bg-slate-100 cursor-not-allowed font-semibold' : 'bg-slate-50 focus:bg-white focus:border-slate-800'
+                    }`}
                   />
                 </div>
               </div>
@@ -3726,7 +3801,17 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                   </td>
                 </tr>
               ) : (
-                displayedLeads.map((lead) => {
+                (() => {
+                  const childCountMap = {};
+                  const childOrderMap = {};
+                  displayedLeads.forEach((item) => {
+                    if (item.parentLeadId) {
+                      childCountMap[item.parentLeadId] = (childCountMap[item.parentLeadId] || 0) + 1;
+                      childOrderMap[item.id] = childCountMap[item.parentLeadId];
+                    }
+                  });
+
+                  return displayedLeads.map((lead, rowIdx) => {
                   const isExpanded = expandedLeadIds.has(lead.id);
                   const isPdf = lead.quotationFileName?.toLowerCase().endsWith('.pdf');
                   const currentClientStatus = normalizeClientStatus(lead.clientStatus);
@@ -3734,33 +3819,80 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                   const isOverdue = isLeadFollowUpExceeded(lead);
                   const edcBadge = getEdcBadge(lead.expectedDateOfCloser, lead.leadStatus);
                   const leadFollowUps = getFollowUpsList(lead);
+                  const isChildLead = Boolean(lead.parentLeadId);
+                  const linkedChildrenCount = childCountMap[lead.id] || 0;
+                  const isParentWithChildren = linkedChildrenCount > 0;
+                  const childOrder = childOrderMap[lead.id] || 1;
+                  const nextLead = displayedLeads[rowIdx + 1];
+                  const isLastChildInGroup =
+                    isChildLead && (!nextLead || nextLead.parentLeadId !== lead.parentLeadId);
 
                   return (
                     <React.Fragment key={lead.id}>
                       {/* MAIN COMPACT ROW */}
                       <tr
                         id={`lead-row-${lead.id}`}
-                        className={`hover:bg-slate-50/80 transition-colors ${isExpanded ? 'bg-indigo-50/30' : ''
-                          } ${highlightLeadId === lead.id ? 'ring-2 ring-indigo-500 bg-indigo-50/60' : ''}`}
+                        className={`transition-colors ${
+                          isChildLead
+                            ? `bg-indigo-50/45 hover:bg-indigo-50/75 border-l-4 border-l-indigo-600 ${
+                                isLastChildInGroup ? 'border-b-2 border-b-indigo-200' : 'border-b border-b-indigo-100'
+                              }`
+                            : isParentWithChildren
+                              ? 'bg-indigo-50/15 hover:bg-indigo-50/35 border-l-4 border-l-indigo-600 border-b border-b-indigo-200/80'
+                              : 'hover:bg-slate-50/80'
+                        } ${isExpanded ? 'bg-indigo-50/50' : ''} ${highlightLeadId === lead.id ? 'ring-2 ring-indigo-500 bg-indigo-50/60' : ''}`}
                       >
                         {/* Company Name with Expand/Collapse Trigger */}
-                        <td className="py-2.5 px-2.5 align-middle">
+                        <td className={`py-2.5 pr-2.5 align-middle relative ${isChildLead ? 'pl-5' : 'px-2.5'}`}>
                           <div className="flex items-start gap-1.5 min-w-0">
+                            {isChildLead && (
+                              <div
+                                className="relative flex items-center shrink-0 mr-0.5"
+                                title={`Linked requirement #${childOrder} for ${lead.companyName}`}
+                              >
+                                <span className="w-3.5 h-5 border-l-2 border-b-2 border-indigo-400 rounded-bl-md inline-block -mt-2" />
+                              </div>
+                            )}
                             <button
                               type="button"
                               onClick={() => toggleLeadExpand(lead.id)}
                               className={`mt-0.5 w-5 h-5 flex items-center justify-center rounded transition-all shrink-0 cursor-pointer ${isExpanded
                                 ? 'bg-slate-900 text-white rotate-90'
-                                : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-900'
+                                : isChildLead
+                                  ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
+                                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-900'
                                 }`}
                               title={isExpanded ? 'Click to hide details' : 'Click to view more information'}
                             >
                               <ChevronRight className="w-3 h-3 transition-transform duration-150" />
                             </button>
                             <div className="min-w-0 flex-1">
-                              <span className="font-bold text-slate-900 text-xs leading-tight block truncate" title={lead.companyName}>
-                                {lead.companyName}
-                              </span>
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span
+                                  className={`text-xs leading-tight block truncate ${
+                                    isChildLead ? 'font-semibold text-indigo-950' : 'font-bold text-slate-900'
+                                  }`}
+                                  title={lead.companyName}
+                                >
+                                  {lead.companyName}
+                                </span>
+                                {isParentWithChildren && (
+                                  <span
+                                    className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-600 text-white whitespace-nowrap shrink-0 shadow-2xs"
+                                    title={`${linkedChildrenCount} linked additional requirement(s)`}
+                                  >
+                                    🔗 {linkedChildrenCount} Linked
+                                  </span>
+                                )}
+                                {isChildLead && (
+                                  <span
+                                    className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-300 whitespace-nowrap shrink-0"
+                                    title={`Linked requirement #${childOrder} for existing client`}
+                                  >
+                                    Linked #{childOrder}
+                                  </span>
+                                )}
+                              </div>
                               <div className="flex items-center gap-1 mt-0.5 min-w-0">
                                 {lead.directorName && (
                                   <span className="text-[11px] text-slate-500 block truncate" title={lead.directorName}>
@@ -3996,21 +4128,50 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                                     </span>
                                   )}
                                 </div>
-                                <div className="text-[11px] text-slate-500 flex items-center gap-1.5 font-medium">
-                                  <Calendar className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                                  <span className="font-bold text-slate-700">Logged Date:</span>
-                                  <span>
-                                    {lead.createdAt
-                                      ? new Date(lead.createdAt).toLocaleString('en-IN', {
-                                        day: '2-digit',
-                                        month: 'short',
-                                        year: 'numeric',
-                                        hour: '2-digit',
-                                        minute: '2-digit',
-                                        hour12: true,
-                                      })
-                                      : 'N/A'}
-                                  </span>
+                                <div className="flex items-center gap-3 flex-wrap">
+                                  <div className="text-[11px] text-slate-500 flex items-center gap-1.5 font-medium">
+                                    <Calendar className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                    <span className="font-bold text-slate-700">Logged Date:</span>
+                                    <span>
+                                      {lead.createdAt
+                                        ? new Date(lead.createdAt).toLocaleString('en-IN', {
+                                          day: '2-digit',
+                                          month: 'short',
+                                          year: 'numeric',
+                                          hour: '2-digit',
+                                          minute: '2-digit',
+                                          hour12: true,
+                                        })
+                                        : 'N/A'}
+                                    </span>
+                                  </div>
+                                  {!isAdmin && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setForm({
+                                          ...initialFormState,
+                                          parentLeadId: lead.id,
+                                          companyName: lead.companyName || '',
+                                          directorName: lead.directorName || '',
+                                          mobileNo: lead.mobileNo || '',
+                                          emailId: lead.emailId || '',
+                                          leaderName: fetchedLeaderName || lead.leaderName || initialFormState.leaderName,
+                                          bdmName1: loggedInBdmName || lead.bdmName1 || '',
+                                          closerStatus: isLeader ? 'Self Closer' : LMS_CLOSER_STATUSES[0],
+                                        });
+                                        setQuotationFile(null);
+                                        setFileError(null);
+                                        if (quotationInputRef.current) quotationInputRef.current.value = '';
+                                        setIsFormOpen(true);
+                                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                                      }}
+                                      className="text-[11px] font-bold text-white bg-slate-900 hover:bg-slate-800 px-2.5 py-1 rounded-lg transition shadow-2xs flex items-center gap-1 cursor-pointer"
+                                      title="Log another service requirement for this same client"
+                                    >
+                                      <Plus className="w-3 h-3" /> Add New
+                                    </button>
+                                  )}
                                 </div>
                               </div>
 
@@ -4227,7 +4388,8 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
                       )}
                     </React.Fragment>
                   );
-                })
+                });
+                })()
               )}
             </tbody>
           </table>

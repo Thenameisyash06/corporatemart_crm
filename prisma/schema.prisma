@@ -406,9 +406,9 @@ model AuditLog {
 // -----------------------------------------------------------------------------
 model Lead {
   id                   String    @id @default(uuid())
-  companyName          String    @unique
+  companyName          String
   directorName         String?
-  mobileNo             String    @unique
+  mobileNo             String
   emailId              String?
   leaderName           String
   bdmName1             String
@@ -429,6 +429,7 @@ model Lead {
   followUps            Json?     @default("[]")
   nextFollowUpDate     DateTime?
   reassignmentHistory  Json?     @default("[]")
+  parentLeadId         String?
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
