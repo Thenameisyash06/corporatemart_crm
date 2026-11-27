@@ -1,4 +1,14 @@
 /**
+ * Strip country code / non-digit characters and return only the 10-digit phone number for CSV export.
+ */
+function formatPhone10Digits(phone) {
+  if (!phone) return 'N/A';
+  const digits = String(phone).replace(/\D/g, '');
+  if (!digits) return 'N/A';
+  return digits.length >= 10 ? digits.slice(-10) : digits;
+}
+
+/**
  * Utility to export tabular data to CSV with UTF-8 BOM for Microsoft Excel compatibility.
  */
 export function downloadCsv(filename, headers, rows) {
@@ -70,7 +80,7 @@ export function exportDealsToCsv(deals, filename = 'CorporateMart_Deals_Report.c
     dealCode: d.dealCode || 'N/A',
     companyName: d.client?.companyName || 'N/A',
     clientName: d.client?.clientName || 'N/A',
-    phone: d.client?.phone || 'N/A',
+    phone: formatPhone10Digits(d.client?.phone),
     email: d.client?.email || 'N/A',
     bdm: d.bdm?.fullName || 'N/A',
     coBdms: (d.coBdms || []).map((cb) => cb.fullName).join(', ') || 'None',
@@ -113,7 +123,7 @@ export function exportClientsToCsv(clients, filename = 'CorporateMart_Clients_Di
     companyName: c.companyName || 'N/A',
     clientName: c.clientName || 'N/A',
     email: c.email || 'N/A',
-    phone: c.phone || 'N/A',
+    phone: formatPhone10Digits(c.phone),
     city: c.city || 'N/A',
     state: c.state || 'N/A',
     gstin: c.gstin || (c.gstStatus ? 'Yes (Not provided)' : 'Non-GST'),
@@ -164,7 +174,7 @@ export function exportBdmPerformanceToCsv(bdms, filename = 'CorporateMart_BDM_Pe
       fullName: b.fullName,
       leaderName: displayLeader,
       email: b.email,
-      phone: b.phone || 'N/A',
+      phone: formatPhone10Digits(b.phone),
       salesTarget: Math.round(Number(b.salesTarget || 0)).toLocaleString('en-IN'),
       totalRevenue: Math.round(Number(b.totalRevenue || 0)).toLocaleString('en-IN'),
       totalCollected: Math.round(Number(b.totalCollected || 0)).toLocaleString('en-IN'),
@@ -200,7 +210,7 @@ export function exportDepartmentMembersToCsv(departmentsData, filename = 'Corpor
       department: 'Accounts Desk',
       fullName: m.fullName,
       email: m.email,
-      phone: m.phone || 'N/A',
+      phone: formatPhone10Digits(m.phone),
       assignedCount: `${m.assignedDealsCount || 0} deals`,
       completedCount: `${m.dealsVerifiedCount || 0} deals, ${m.paymentsVerifiedCount || 0} payments`,
       additionalMetrics: `₹${Number(m.totalVerifiedAmount || 0).toLocaleString('en-IN')} verified`,
@@ -213,7 +223,7 @@ export function exportDepartmentMembersToCsv(departmentsData, filename = 'Corpor
       department: 'Legal Scrutiny',
       fullName: m.fullName,
       email: m.email,
-      phone: m.phone || 'N/A',
+      phone: formatPhone10Digits(m.phone),
       assignedCount: `${m.assignedDealsCount || 0} deals`,
       completedCount: `${m.dealsVerifiedCount || 0} deals scrutinized`,
       additionalMetrics: 'Agreements & Docs Scrutiny',
@@ -226,7 +236,7 @@ export function exportDepartmentMembersToCsv(departmentsData, filename = 'Corpor
       department: 'Operations Processing',
       fullName: m.fullName,
       email: m.email,
-      phone: m.phone || 'N/A',
+      phone: formatPhone10Digits(m.phone),
       assignedCount: `${m.totalServices || 0} services`,
       completedCount: `${m.completedServices || 0} completed`,
       additionalMetrics: `${m.completionRate}% completion rate (₹${Number(m.totalFee || 0).toLocaleString('en-IN')})`,
@@ -239,7 +249,7 @@ export function exportDepartmentMembersToCsv(departmentsData, filename = 'Corpor
       department: 'RM & Renewals',
       fullName: m.fullName,
       email: m.email,
-      phone: m.phone || 'N/A',
+      phone: formatPhone10Digits(m.phone),
       assignedCount: `${m.renewalsCount || 0} renewals`,
       completedCount: 'Active relationships',
       additionalMetrics: `₹${Number(m.totalRenewalFee || 0).toLocaleString('en-IN')} renewals pipeline`,
@@ -361,7 +371,7 @@ export function exportLeadsToCsv(leads, filename = 'CorporateMart_LMS_Leads.csv'
   const rows = leads.map((l) => ({
     companyName: l.companyName || 'N/A',
     directorName: l.directorName || 'N/A',
-    mobileNo: l.mobileNo || 'N/A',
+    mobileNo: formatPhone10Digits(l.mobileNo),
     emailId: l.emailId || 'N/A',
     leaderName: l.leaderName || 'N/A',
     bdmName1: l.bdmName1 || 'N/A',

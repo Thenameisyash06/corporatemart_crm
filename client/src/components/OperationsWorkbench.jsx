@@ -676,7 +676,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
     return EXPERTISE_SECTORS[3]; // Default to Incorporation
   }, [currentUser, isManager]);
 
-  // Helper: Detect whether a service is assigned to the current manager/specialist
+  // Helper: Detect whether a service is assigned to the current logged-in user (manager or specialist)
   const isServiceAssignedToManager = useCallback(
     (svc) => {
       if (!svc) return false;
@@ -687,11 +687,11 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
         (svc.assignedOpsUserId && (opsTeam || []).some((m) => m.id === svc.assignedOpsUserId && (
           (currentUser?.email && m.email === currentUser.email) ||
           (currentUser?.fullName && m.fullName === currentUser.fullName) ||
-          m.email === 'ops@corporatemart.com'
+          (isManager && m.email === 'ops@corporatemart.com')
         )))
       );
     },
-    [currentUser, opsTeam]
+    [currentUser, opsTeam, isManager]
   );
 
   // Specialist's / Manager's personal assigned services
@@ -1189,15 +1189,15 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
       });
 
       // 3. Automatically dispatch deliverable certificate email to client
+      const targetDeal = (deals || []).find((d) => d.id === dealId) || activeDeal;
       try {
-        const targetDeal = (deals || []).find((d) => d.id === dealId) || activeDeal;
         const clientEmail = targetDeal?.client?.email;
         if (clientEmail) {
           const currentServiceName = svc?.serviceName || 'Service';
           await api.post(`/deals/${dealId}/send-email-update`, {
             event: 'OPERATIONS_FINAL_DELIVERABLE',
             serviceName: currentServiceName,
-            subject: `Final Deliverable Certificate(s): ${currentServiceName} - Deal #${targetDeal?.dealCode || dealId} | Corporate Mart`,
+            subject: `${currentServiceName} deliverables`,
             message: `We are pleased to inform you that your filing for "${currentServiceName}" has been completed, and the official deliverable certificate(s) have been generated. Please find the official deliverable document(s) attached to this email.`,
             stepCompleted: `Completed: ${currentServiceName}`,
             attachCertificates: true,
@@ -1209,13 +1209,42 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
         console.warn('Auto deliverable email send error:', emailErr);
       }
 
+      // 4. Automatically mark deal stage as Completed (Stage 07) and Delivered (Stage 08) when all services are completed
+      let dealAutoDelivered = false;
+      try {
+        const remainingIncomplete = (targetDeal?.services || []).filter(
+          (s) => s.id !== serviceId && s.status !== 'COMPLETED'
+        );
+        if (remainingIncomplete.length === 0) {
+          if (!targetDeal?.stage || targetDeal.stage === 'STAGE_06_OPERATIONS_PROCESSING') {
+            await api.post(`/deals/${dealId}/service-complete`, {
+              outcomeNotes: 'All filings completed and deliverables submitted.',
+              skipEmail: true,
+            });
+          }
+          if (Number(targetDeal?.pendingAmount || 0) <= 0) {
+            await api.post(`/deals/${dealId}/final-delivery`, {
+              deliveryProof: 'Deliverables automatically dispatched via email upon milestone completion.',
+              skipEmail: true,
+            });
+            dealAutoDelivered = true;
+          }
+        }
+      } catch (stageErr) {
+        console.warn('Auto stage transition notice:', stageErr.response?.data?.error || stageErr.message);
+      }
+
       toast.success(
-        `Successfully submitted ${filesToUpload.length} deliverable certificate(s) and completed service! Moved to Complete section.`,
-        'Service Completed'
+        dealAutoDelivered
+          ? `Deliverable(s) submitted, delivered to client, and deal marked Completed & Delivered!`
+          : `Successfully submitted ${filesToUpload.length} deliverable certificate(s) and completed service!`,
+        dealAutoDelivered ? 'Completed & Delivered' : 'Service Completed'
       );
       setFeedback({
         type: 'success',
-        message: `Successfully uploaded ${filesToUpload.length} deliverable certificate(s) and marked service as COMPLETED! Moved to Complete section.`,
+        message: dealAutoDelivered
+          ? `Uploaded ${filesToUpload.length} deliverable certificate(s), emailed client, and marked deal as Completed & Delivered!`
+          : `Successfully uploaded ${filesToUpload.length} deliverable certificate(s) and marked service as COMPLETED!`,
       });
 
       // Reset to 1 default empty deliverable slot
@@ -3075,8 +3104,26 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
               ) : (
                 managerPersonalDeals.map((d) => {
                   const isSelected = selectedDeal?.id === d.id;
-                  const isReadyDelivery = d.stage === 'STAGE_07_SERVICE_COMPLETED';
                   const myDealServices = (d.services || []).filter(isServiceAssignedToManager);
+                  const allServicesCompleted = (d.services || []).length > 0 && (d.services || []).every((s) => s.status === 'COMPLETED');
+                  const allMyServicesCompleted = myDealServices.length > 0 && myDealServices.every((s) => s.status === 'COMPLETED');
+                  const isDeliveredStage = ['STAGE_08_FINAL_DOCS_DELIVERED', 'STAGE_09_RM_HANDOVER', 'STAGE_10_CLOSED'].includes(d.stage);
+                  const isCompletedAndDelivered = isDeliveredStage || (allServicesCompleted && Number(d.pendingAmount || 0) <= 0);
+                  const isCompletedPendingDelivery = !isCompletedAndDelivered && (d.stage === 'STAGE_07_SERVICE_COMPLETED' || allServicesCompleted);
+
+                  const cardStatusLabel = isCompletedAndDelivered
+                    ? 'Completed & Delivered'
+                    : isCompletedPendingDelivery
+                      ? 'Completed (Pending Balance)'
+                      : allMyServicesCompleted
+                        ? 'My Task Completed'
+                        : 'Filing Active';
+
+                  const cardStatusClass = isCompletedAndDelivered
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold'
+                    : isCompletedPendingDelivery || allMyServicesCompleted
+                      ? 'bg-amber-50 text-amber-700 border-amber-200 font-semibold'
+                      : 'bg-sky-50 text-sky-700 border-sky-200 font-semibold';
 
                   return (
                     <div
@@ -3096,13 +3143,8 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                             ⭐ My Task ({myDealServices.length})
                           </span>
                         </div>
-                        <span
-                          className={`text-xs font-medium px-2 py-0.5 rounded border ${isReadyDelivery
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold'
-                              : 'bg-sky-50 text-sky-700 border-sky-200 font-semibold'
-                            }`}
-                        >
-                          {isReadyDelivery ? 'Ready to Deliver' : 'Filing Active'}
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded border ${cardStatusClass}`}>
+                          {cardStatusLabel}
                         </span>
                       </div>
 
@@ -3387,176 +3429,28 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
                   />
                 </div>
 
-                {/* DELIVERABLE CERTIFICATE UPLOAD & STAGE ACTIONS */}
-                <div className="bg-white border border-slate-200 rounded-xl p-4.5 space-y-3.5 shadow-xs">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                      <FileCheck className="w-4 h-4 text-emerald-600" /> Deliverable Certificate & Completion Gate
-                    </h4>
+                {/* Part-payment lock warning & Stage 08 dispatch when balance is cleared */}
+                {isPartPaymentPending && (
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-start gap-2.5">
+                    <Lock className="w-4 h-4 text-amber-700 mt-0.5 flex-shrink-0" />
+                    <span className="leading-relaxed">
+                      <strong>Part-Payment Hold:</strong> Client has ₹{Number(activeDossierDeal.pendingAmount).toLocaleString('en-IN')} pending balance. Service completion is permitted, but final certificate dispatch (Stage 08) requires balance verification by Accounts Desk.
+                    </span>
                   </div>
+                )}
 
-                  <div className="p-3.5 bg-slate-50/70 border border-slate-200 rounded-lg space-y-3">
-                    {/* List of Attached Deliverable Certificates */}
-                    {(() => {
-                      const dossierDeliverables = (activeDossierDeal.documents || []).filter(
-                        (d) =>
-                          d.documentType === 'FINAL_DELIVERABLE_CERTIFICATE' ||
-                          d.documentType === 'DELIVERABLE_CERTIFICATE'
-                      );
-                      if (dossierDeliverables.length === 0) {
-                        return (
-                          <div className="p-3 bg-white border border-dashed border-slate-200 rounded-lg text-center text-xs text-slate-400">
-                            No deliverable certificates submitted by operations team yet.
-                          </div>
-                        );
-                      }
-
-                      return (
-                        <div className="space-y-2">
-                          <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
-                            Submitted Deliverable Certificates ({dossierDeliverables.length})
-                          </span>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {dossierDeliverables.map((doc) => (
-                              <div
-                                key={doc.id}
-                                className="p-2.5 bg-white border border-emerald-200 rounded-lg flex items-center justify-between gap-2 shadow-2xs"
-                              >
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <FileCheck className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                                  <div className="min-w-0">
-                                    <p className="text-xs font-bold text-slate-900 truncate" title={doc.title}>
-                                      {doc.title}
-                                    </p>
-                                    <span className="text-[10px] text-emerald-700 font-semibold flex items-center gap-1">
-                                      <Check className="w-3 h-3 text-emerald-600" /> Deliverable on Record
-                                    </span>
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => handlePreviewDocument(doc)}
-                                  className="px-2 py-1 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded text-[11px] font-semibold flex items-center gap-1 cursor-pointer flex-shrink-0"
-                                >
-                                  <Eye className="w-3 h-3" /> Preview
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    {hasDeliverable && (
-                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pt-2 border-t border-slate-200">
-                        <div className="text-xs text-emerald-800 font-semibold flex items-center gap-1.5">
-                          <Check className="w-4 h-4 text-emerald-600" />
-                          <span>Final Certificate on file in Object Storage.</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleEmailCertificatesToClient(activeDossierDeal)}
-                          disabled={actionLoading || isEmailingCerts}
-                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 transition shadow-xs disabled:opacity-50"
-                          title={`Email service certificate(s) to ${activeDossierDeal.client?.email || 'client'}`}
-                        >
-                          <Send className="w-3.5 h-3.5" />
-                          <span>{isEmailingCerts ? 'Sending...' : 'Email Certificate to Client'}</span>
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Direct Upload Deliverable Certificate to Dossier */}
-                    <div className="pt-2 border-t border-slate-200">
-                      <span className="text-[11px] font-bold text-slate-700 block mb-1">
-                        Attach Deal Deliverable Certificate (PDF/DOC):
-                      </span>
-                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                        <input
-                          id="deliverable-file-input"
-                          type="file"
-                          accept="application/pdf,image/*,.doc,.docx"
-                          onChange={(e) => setDeliverableFile(e.target.files?.[0] || null)}
-                          className="flex-1 text-xs text-slate-700 file:mr-2.5 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-slate-900 file:text-white hover:file:bg-slate-800 cursor-pointer border border-slate-200 rounded-lg p-1 bg-white"
-                        />
-                        <button
-                          type="button"
-                          disabled={!deliverableFile || isUploadingDoc}
-                          onClick={() => handleDirectDeliverableUpload(activeDossierDeal.id)}
-                          className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          <UploadCloud className="w-3.5 h-3.5" />
-                          <span>{isUploadingDoc ? 'Uploading...' : 'Upload Certificate'}</span>
-                        </button>
-                      </div>
-                      {deliverableFile && (
-                        <p className="text-[11px] text-emerald-700 font-medium mt-1">
-                          Selected: {deliverableFile.name} ({(deliverableFile.size / 1024).toFixed(0)} KB)
-                        </p>
-                      )}
-                    </div>
+                {activeDossierDeal.stage === 'STAGE_07_SERVICE_COMPLETED' && (
+                  <div className="flex justify-end pt-2 border-t border-slate-100">
+                    <button
+                      onClick={handleDeliverToClient}
+                      disabled={actionLoading || isPartPaymentPending}
+                      className="w-full sm:w-auto px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold shadow-xs flex items-center justify-center gap-2 transition disabled:opacity-40"
+                    >
+                      <Send className="w-4 h-4" />
+                      <span>Deliver Certificate to Client (Stage 08 Dispatch)</span>
+                    </button>
                   </div>
-
-                  {/* Part-payment lock warning */}
-                  {isPartPaymentPending && (
-                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-start gap-2.5">
-                      <Lock className="w-4 h-4 text-amber-700 mt-0.5 flex-shrink-0" />
-                      <span className="leading-relaxed">
-                        <strong>Part-Payment Hold:</strong> Client has ₹{Number(activeDossierDeal.pendingAmount).toLocaleString('en-IN')} pending balance. Service completion is permitted, but final certificate dispatch (Stage 08) requires balance verification by Accounts Desk.
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Stage Action Buttons */}
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2.5 border-t border-slate-100">
-                    {activeDossierDeal.stage === 'STAGE_06_OPERATIONS_PROCESSING' && (
-                      <div className="w-full flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                        {(() => {
-                          const incompleteCount = (activeDossierDeal.services || []).filter((s) => s.status !== 'COMPLETED').length;
-                          const totalServices = (activeDossierDeal.services || []).length;
-                          const allDone = totalServices > 0 && incompleteCount === 0;
-
-                          return (
-                            <>
-                              <div className="text-xs text-slate-500">
-                                {allDone ? (
-                                  <span className="text-emerald-700 font-semibold flex items-center gap-1.5">
-                                    <Check className="w-4 h-4 text-emerald-600" /> All {totalServices} services completed. Ready to close deal stage.
-                                  </span>
-                                ) : (
-                                  <span className="text-amber-700 font-medium">
-                                    ⏳ Filing Active: {totalServices - incompleteCount}/{totalServices} services completed ({incompleteCount} pending).
-                                  </span>
-                                )}
-                              </div>
-
-                              <button
-                                onClick={handleCompleteService}
-                                disabled={actionLoading || !allDone || (!deliverableFile && !hasDeliverable)}
-                                className="w-full sm:w-auto px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold shadow-xs flex items-center justify-center gap-2 transition disabled:opacity-50"
-                                title={!allDone ? `Cannot complete: ${incompleteCount} service(s) still in progress` : ''}
-                              >
-                                <FileCheck className="w-4 h-4" />
-                                <span>Mark Service Completed (Stage 07 Gate)</span>
-                              </button>
-                            </>
-                          );
-                        })()}
-                      </div>
-                    )}
-
-                    {activeDossierDeal.stage === 'STAGE_07_SERVICE_COMPLETED' && (
-                      <button
-                        onClick={handleDeliverToClient}
-                        disabled={actionLoading || isPartPaymentPending}
-                        className="w-full sm:w-auto px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold shadow-xs flex items-center justify-center gap-2 transition disabled:opacity-40"
-                      >
-                        <Send className="w-4 h-4" />
-                        <span>Deliver Certificate to Client (Stage 08 Dispatch)</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
+                )}
               </div>
             ) : (
               <div className="flex-1 flex items-center justify-center p-8 text-center text-slate-400 text-xs">

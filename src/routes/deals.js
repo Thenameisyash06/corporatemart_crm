@@ -116,7 +116,7 @@ async function resolveOpsUserId(input) {
   return null;
 }
 
-async function recordAuditLog({ dealId, userId, action, fromStage, toStage, remarks }) {
+async function recordAuditLog({ dealId, userId, action, fromStage, toStage, remarks, skipNotification = false }) {
   try {
     await prisma.auditLog.create({
       data: {
@@ -142,7 +142,7 @@ async function recordAuditLog({ dealId, userId, action, fromStage, toStage, rema
       'BALANCE_PAYMENT_VERIFIED',
     ];
 
-    if (dealId && NOTIFIABLE_ACTIONS.includes(action)) {
+    if (!skipNotification && dealId && NOTIFIABLE_ACTIONS.includes(action)) {
       notifyCustomerStageChange({
         dealId,
         event: action,
@@ -233,7 +233,7 @@ router.get('/', authenticateToken, async (req, res) => {
       });
     } else if (roleFilter === 'OPERATIONS') {
       conditions.push({
-        stage: { in: ['STAGE_06_OPERATIONS_PROCESSING', 'STAGE_07_SERVICE_COMPLETED'] },
+        stage: { in: ['STAGE_06_OPERATIONS_PROCESSING', 'STAGE_07_SERVICE_COMPLETED', 'STAGE_08_FINAL_DOCS_DELIVERED'] },
       });
     } else if (roleFilter === 'RM') {
       // RM has full visibility across all deals from BDM form creation through operations to closure
@@ -1883,7 +1883,7 @@ router.patch('/:id/deal-amount', authenticateToken, requireRoles('BDM', 'ADMIN',
 
 router.post('/:id/service-complete', authenticateToken, requireRoles('OPERATIONS', 'ADMIN'), async (req, res) => {
   try {
-    const { outcomeNotes } = req.body;
+    const { outcomeNotes, skipEmail } = req.body;
 
     const deal = await prisma.deal.findUnique({
       where: { id: req.params.id },
@@ -1924,6 +1924,7 @@ router.post('/:id/service-complete', authenticateToken, requireRoles('OPERATIONS
       fromStage: deal.stage,
       toStage: 'STAGE_07_SERVICE_COMPLETED',
       remarks: `Operations executive ${req.user.fullName} confirmed service outcome and verified final deliverables. ${outcomeNotes || ''}`,
+      skipNotification: Boolean(skipEmail),
     });
 
     return res.json({ message: 'Service successfully marked as completed.', deal: updated });
@@ -1938,7 +1939,7 @@ router.post('/:id/service-complete', authenticateToken, requireRoles('OPERATIONS
 // -----------------------------------------------------------------------------
 router.post('/:id/final-delivery', authenticateToken, requireRoles('OPERATIONS', 'ADMIN'), async (req, res) => {
   try {
-    const { deliveryProof } = req.body;
+    const { deliveryProof, skipEmail } = req.body;
 
     const deal = await prisma.deal.findUnique({
       where: { id: req.params.id },
@@ -1971,6 +1972,7 @@ router.post('/:id/final-delivery', authenticateToken, requireRoles('OPERATIONS',
       fromStage: deal.stage,
       toStage: 'STAGE_08_FINAL_DOCS_DELIVERED',
       remarks: `Deliverables dispatched to client. Proof: ${deliveryProof || 'N/A'}. Handover pending with RM.`,
+      skipNotification: Boolean(skipEmail),
     });
 
     return res.json({ message: 'Deliverables marked as delivered to client. Ready for RM Handover.', deal: updated });
