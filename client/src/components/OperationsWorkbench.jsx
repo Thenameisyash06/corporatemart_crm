@@ -1017,7 +1017,7 @@ export default function OperationsWorkbench({ currentUser, onRefreshParent, onOp
       await api.post(`/deals/${target.id}/send-email-update`, {
         event: 'OPERATIONS_FINAL_DELIVERABLE',
         serviceName: svcNames,
-        subject: `Final Deliverable Certificate(s): ${svcNames} - Deal #${target.dealCode} | Corporate Mart`,
+        subject: `${svcNames} deliverables`,
         message: `We are pleased to deliver your official service certificate(s) and completion documents for ${target.client?.companyName || 'your company'}. Please find the official files attached to this notification for your compliance and regulatory records.`,
         stepCompleted: `Completed: ${svcNames}`,
         attachCertificates: true,

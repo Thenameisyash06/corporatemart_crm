@@ -426,7 +426,7 @@ async function notifyCustomerStageChange({
       // 7. SERVICE COMPLETED -> STAGE_07_SERVICE_COMPLETED
       case 'SERVICE_COMPLETED': {
         const primaryServiceName = serviceName || (services.length > 0 ? services.join(', ') : 'Service');
-        subject = `Final Deliverable Certificate(s): ${primaryServiceName} - Deal #${dealCode} | Corporate Mart`;
+        subject = `${primaryServiceName} deliverables`;
         stepCompleted = `Completed: ${primaryServiceName}`;
         stepStarted = null;
         description = notes || `All filings and operational processing for "${primaryServiceName}" have been successfully completed by our Operations department. Your official deliverable certificate(s) are attached to this email.`;
@@ -437,7 +437,7 @@ async function notifyCustomerStageChange({
       // 8. FINAL DOCS DELIVERED -> STAGE_08_FINAL_DOCS_DELIVERED
       case 'FINAL_DOCS_DELIVERED': {
         const primaryServiceName = serviceName || (services.length > 0 ? services.join(', ') : 'Service');
-        subject = `Final Deliverable Certificate(s): ${primaryServiceName} - Deal #${dealCode} | Corporate Mart`;
+        subject = `${primaryServiceName} deliverables`;
         stepCompleted = `Completed: ${primaryServiceName}`;
         stepStarted = null;
         description = notes || `Your official certificates and final deliverables for "${primaryServiceName}" have been released and delivered. Your dossier is now moving to our dedicated Relationship Management team for post-service handover.`;
@@ -448,7 +448,7 @@ async function notifyCustomerStageChange({
       // 8b. OPERATIONS FINAL DELIVERABLE
       case 'OPERATIONS_FINAL_DELIVERABLE': {
         const primaryServiceName = serviceName || (services.length > 0 ? services.join(', ') : 'Service');
-        subject = `Final Deliverable Certificate(s): ${primaryServiceName} - Deal #${dealCode} | Corporate Mart`;
+        subject = `${primaryServiceName} deliverables`;
         stepCompleted = `Completed: ${primaryServiceName}`;
         stepStarted = null;
         description = notes || `We are pleased to inform you that your filing for "${primaryServiceName}" has been completed, and the official deliverable certificate(s) have been generated. Please find the official deliverable document(s) attached to this email.`;
