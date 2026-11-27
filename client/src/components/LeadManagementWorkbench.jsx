@@ -415,6 +415,16 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    const toLocalDateStr = (val) => {
+      if (!val) return null;
+      if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val.trim())) {
+        return val.trim();
+      }
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return null;
+      return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    };
+
     const candidateDates = [];
     const fus = getFollowUpsList(lead);
     if (fus && fus.length > 0) {
@@ -425,61 +435,38 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       });
       const latest = sorted[0];
       if (latest && latest.date && (latest.status || '').toLowerCase() !== 'closed' && (latest.status || '').toLowerCase() !== 'lost') {
-        const dStr = latest.date.includes('T') ? latest.date.split('T')[0] : latest.date;
+        const dStr = toLocalDateStr(latest.date);
         if (dStr) candidateDates.push(dStr);
       }
     }
     if (lead.nextFollowUpDate) {
-      try {
-        const nfu = new Date(lead.nextFollowUpDate);
-        if (!isNaN(nfu.getTime())) {
-          candidateDates.push(nfu.toISOString().split('T')[0]);
-        }
-      } catch {}
+      const nfuStr = toLocalDateStr(lead.nextFollowUpDate);
+      if (nfuStr) candidateDates.push(nfuStr);
     }
     if (lead.meetingDate) {
-      try {
-        const md = new Date(lead.meetingDate);
-        if (!isNaN(md.getTime())) {
-          candidateDates.push(md.toISOString().split('T')[0]);
-        }
-      } catch {}
+      const mdStr = toLocalDateStr(lead.meetingDate);
+      if (mdStr) candidateDates.push(mdStr);
     }
 
     if (candidateDates.length === 0) return { isOverdue: false, daysOverdue: 0, targetDateStr: null };
 
-    // Calculate diff for each candidate date against today
-    let mostOverdue = null;
-    let maxOverdueDays = 0;
-    let earliestUpcoming = null;
+    // Use the LATEST scheduled action date (so scheduling a future follow-up clears past meeting/follow-up dates)
+    const latestDateStr = [...candidateDates].sort().pop();
+    const parts = latestDateStr.split('-');
+    if (parts.length < 3) return { isOverdue: false, daysOverdue: 0, targetDateStr: null };
+    const [y, m, d] = parts.map(Number);
+    if (!y || !m || !d) return { isOverdue: false, daysOverdue: 0, targetDateStr: null };
 
-    for (const dStr of candidateDates) {
-      const parts = dStr.split('-');
-      if (parts.length < 3) continue;
-      const [y, m, d] = parts.map(Number);
-      if (!y || !m || !d) continue;
-      const targetDate = new Date(y, m - 1, d);
-      targetDate.setHours(0, 0, 0, 0);
+    const targetDate = new Date(y, m - 1, d);
+    targetDate.setHours(0, 0, 0, 0);
 
-      const diffTime = today.getTime() - targetDate.getTime();
-      if (diffTime > 0) {
-        const days = Math.max(1, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
-        if (days > maxOverdueDays) {
-          maxOverdueDays = days;
-          mostOverdue = dStr;
-        }
-      } else {
-        if (!earliestUpcoming || targetDate.getTime() < earliestUpcoming.time) {
-          earliestUpcoming = { str: dStr, time: targetDate.getTime() };
-        }
-      }
+    const diffTime = today.getTime() - targetDate.getTime();
+    if (diffTime > 0) {
+      const days = Math.max(1, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
+      return { isOverdue: true, daysOverdue: days, targetDateStr: latestDateStr };
     }
 
-    if (maxOverdueDays > 0 && mostOverdue) {
-      return { isOverdue: true, daysOverdue: maxOverdueDays, targetDateStr: mostOverdue };
-    }
-
-    return { isOverdue: false, daysOverdue: 0, targetDateStr: earliestUpcoming ? earliestUpcoming.str : candidateDates[0] };
+    return { isOverdue: false, daysOverdue: 0, targetDateStr: latestDateStr };
   }, []);
 
   const isLeadFollowUpExceeded = useCallback((lead) => {
@@ -667,6 +654,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
 
   // Filters State
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedLoggedDate, setSelectedLoggedDate] = useState('');
   const [selectedLeaderFilter, setSelectedLeaderFilter] = useState('ALL');
   const [selectedBdmFilter, setSelectedBdmFilter] = useState('ALL');
   const [selectedCloserFilter, setSelectedCloserFilter] = useState('ALL');
@@ -795,6 +783,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       const activeMonth = targetMonthFilter || selectedMonthFilter || 'THIS_MONTH';
       params.monthFilter = activeMonth;
       if (searchQuery.trim()) params.search = searchQuery.trim();
+      if (selectedLoggedDate) params.loggedDate = selectedLoggedDate;
 
       const res = await api.get('/leads', { params });
       setLeads(res.data.leads || []);
@@ -842,6 +831,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     selectedStageFilter,
     selectedTeamMemberFilter,
     selectedMonthFilter,
+    selectedLoggedDate,
   ]);
 
   // Listen for global app refresh button click
@@ -1218,7 +1208,14 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         (l) => (l.bdmName1 || '').toLowerCase().trim() === selectedTeamMemberFilter.toLowerCase().trim()
       );
     }
-    if (selectedMonthFilter === 'PENDING_FOLLOWUPS') {
+    if (selectedLoggedDate) {
+      list = list.filter((l) => {
+        if (!l.createdAt) return false;
+        const d = new Date(l.createdAt);
+        if (isNaN(d.getTime())) return false;
+        return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) === selectedLoggedDate;
+      });
+    } else if (selectedMonthFilter === 'PENDING_FOLLOWUPS') {
       list = (isAdmin ? (leads && leads.length > 0 ? leads : visibleLeads) : visibleLeads).filter(
         (l) => getLeadOverdueInfo(l).isOverdue
       );
@@ -1275,7 +1272,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
     });
 
     return ordered;
-  }, [visibleLeads, leads, isAdmin, selectedLeaderFilter, selectedTeamMemberFilter, selectedMonthFilter, getLeadMonthBadge, pendingFollowUpFilter, getLeadOverdueInfo, overdueBdmFilter, overdueSortOrder]);
+  }, [visibleLeads, leads, isAdmin, selectedLeaderFilter, selectedTeamMemberFilter, selectedMonthFilter, selectedLoggedDate, getLeadMonthBadge, pendingFollowUpFilter, getLeadOverdueInfo, overdueBdmFilter, overdueSortOrder]);
 
   // All overdue leads across available leads
   const allOverdueLeads = useMemo(() => {
@@ -2052,6 +2049,7 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       if (selectedTeamMemberFilter && selectedTeamMemberFilter !== 'ALL') params.teamMember = selectedTeamMemberFilter;
       params.monthFilter = selectedMonthFilter || 'THIS_MONTH';
       if (searchQuery.trim()) params.search = searchQuery.trim();
+      if (selectedLoggedDate) params.loggedDate = selectedLoggedDate;
 
       let exportList = [];
       try {
@@ -3307,16 +3305,63 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
       {/* 4. FILTER CONTROLS BAR */}
       <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/90 shadow-xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
         <div className="flex flex-1 flex-wrap items-center gap-2 w-full">
-          {/* Search Box */}
-          <form onSubmit={handleSearchSubmit} className="relative flex-1 min-w-[220px]">
+          {/* Search Box with Integrated Logged-Date Calendar Filter */}
+          <form onSubmit={handleSearchSubmit} className="relative flex-1 min-w-[240px]">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               placeholder="Search company, director, phone, email, notes..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full h-9 bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800 transition-colors"
+              className={`w-full h-9 bg-slate-50 border border-slate-200 rounded-lg pl-9 ${selectedLoggedDate ? 'pr-32' : 'pr-10'} text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800 transition-colors`}
             />
+            <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              {selectedLoggedDate ? (
+                <div className="flex items-center bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-md h-6 pl-2 pr-1 gap-1 shadow-2xs">
+                  <div className="relative flex items-center gap-1 cursor-pointer">
+                    <Calendar className="w-3 h-3 text-indigo-600 shrink-0" />
+                    <span className="text-[11px] font-bold whitespace-nowrap">
+                      {new Date(`${selectedLoggedDate}T00:00:00+05:30`).toLocaleDateString('en-IN', {
+                        day: '2-digit',
+                        month: 'short',
+                        timeZone: 'Asia/Kolkata',
+                      })}
+                    </span>
+                    <input
+                      type="date"
+                      value={selectedLoggedDate}
+                      onChange={(e) => setSelectedLoggedDate(e.target.value)}
+                      title="Change logged date filter"
+                      aria-label="Filter by logged date"
+                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedLoggedDate('')}
+                    title="Clear logged date filter"
+                    aria-label="Clear logged date filter"
+                    className="p-0.5 rounded hover:bg-indigo-200/70 text-indigo-600 hover:text-indigo-900 transition-colors cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ) : (
+                <div
+                  title="Filter by logged date"
+                  className="relative flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:text-indigo-600 hover:bg-slate-200/60 transition-colors cursor-pointer"
+                >
+                  <Calendar className="w-4 h-4 pointer-events-none" />
+                  <input
+                    type="date"
+                    value={selectedLoggedDate}
+                    onChange={(e) => setSelectedLoggedDate(e.target.value)}
+                    aria-label="Filter by logged date"
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                  />
+                </div>
+              )}
+            </div>
           </form>
 
           {/* Client Status Filter (Hot / Warm / Lost) */}
@@ -3746,11 +3791,13 @@ export default function LeadManagementWorkbench({ currentUser, onConvertToDeal, 
         <div className="bg-slate-50/60 border-b border-slate-200 px-5 py-2.5 flex items-center justify-between text-xs text-slate-500 flex-wrap gap-2">
           <div className="flex items-center gap-2 flex-wrap">
             <span>
-              {selectedMonthFilter === 'PENDING_FOLLOWUPS'
-                ? `⚠️ Showing Pending Follow-ups (${displayedLeads.length} overdue leads in view${overdueBdmFilter !== 'ALL' ? ` for ${overdueBdmFilter}` : ''})`
-                : selectedMonthFilter === 'NEXT_MONTH'
-                  ? `🚀 Showing Next Month (${monthLabels.nextMonth}) leads (${displayedLeads.length} leads in view${isAdmin ? `, ${pagination.total} total` : ''})`
-                  : `📅 Showing This Month (${monthLabels.thisMonth}) leads (${displayedLeads.length} leads in view${isAdmin ? `, ${pagination.total} total` : ''})`}
+              {selectedLoggedDate
+                ? `📅 Showing leads logged on ${new Date(`${selectedLoggedDate}T00:00:00+05:30`).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })} (${displayedLeads.length} leads in view${isAdmin ? `, ${pagination.total} total` : ''})`
+                : selectedMonthFilter === 'PENDING_FOLLOWUPS'
+                  ? `⚠️ Showing Pending Follow-ups (${displayedLeads.length} overdue leads in view${overdueBdmFilter !== 'ALL' ? ` for ${overdueBdmFilter}` : ''})`
+                  : selectedMonthFilter === 'NEXT_MONTH'
+                    ? `🚀 Showing Next Month (${monthLabels.nextMonth}) leads (${displayedLeads.length} leads in view${isAdmin ? `, ${pagination.total} total` : ''})`
+                    : `📅 Showing This Month (${monthLabels.thisMonth}) leads (${displayedLeads.length} leads in view${isAdmin ? `, ${pagination.total} total` : ''})`}
             </span>
             {selectedTeamMemberFilter !== 'ALL' && (
               <button
